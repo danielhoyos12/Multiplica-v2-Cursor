@@ -27,6 +27,11 @@ export const networkCodeEnum = pgEnum("network_code", [
   "ninos",
 ]);
 
+export const personSourceEnum = pgEnum("person_source", [
+  "internal_form",
+  "public_form",
+]);
+
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -92,19 +97,33 @@ export const persons = pgTable(
     firstName: text("first_name").notNull(),
     lastName: text("last_name").notNull(),
     phone: text("phone"),
+    /** Digits-only normalized phone for strong duplicate detection. */
+    phoneNormalized: text("phone_normalized"),
     email: text("email"),
+    address: text("address"),
     districtId: uuid("district_id").references(() => districts.id, {
       onDelete: "set null",
     }),
+    /** Pastoral prayer request — sensitive; never put full text in audit logs. */
+    prayerRequest: text("prayer_request"),
     notes: text("notes"),
+    source: personSourceEnum("source").notNull().default("internal_form"),
+    isActive: boolean("is_active").notNull().default(true),
+    registeredAt: timestamp("registered_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("persons_phone_idx").on(table.phone),
+    index("persons_phone_normalized_idx").on(table.phoneNormalized),
     index("persons_email_idx").on(table.email),
     index("persons_district_id_idx").on(table.districtId),
     index("persons_name_idx").on(table.lastName, table.firstName),
+    index("persons_registered_at_idx").on(table.registeredAt),
+    index("persons_source_idx").on(table.source),
+    index("persons_is_active_idx").on(table.isActive),
   ],
 );
 
@@ -267,5 +286,36 @@ export const auditLogs = pgTable(
     index("audit_logs_entity_idx").on(table.entityType, table.entityId),
     index("audit_logs_created_at_idx").on(table.createdAt),
     index("audit_logs_action_idx").on(table.action),
+  ],
+);
+
+/**
+ * Public GANAR intake telemetry / rate-limit support.
+ * No prayer text. person_id may be null when submission was rejected/rate-limited.
+ */
+export const personIntakeEvents = pgTable(
+  "person_intake_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").references(() => persons.id, {
+      onDelete: "set null",
+    }),
+    ministryId: uuid("ministry_id").references(() => ministries.id, {
+      onDelete: "set null",
+    }),
+    networkId: uuid("network_id").references(() => networks.id, {
+      onDelete: "set null",
+    }),
+    source: personSourceEnum("source").notNull(),
+    outcome: text("outcome").notNull(),
+    ipHash: text("ip_hash"),
+    userAgentHash: text("user_agent_hash"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("person_intake_events_created_at_idx").on(table.createdAt),
+    index("person_intake_events_ip_hash_idx").on(table.ipHash),
+    index("person_intake_events_person_id_idx").on(table.personId),
   ],
 );

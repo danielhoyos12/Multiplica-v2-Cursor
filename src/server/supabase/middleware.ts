@@ -38,8 +38,13 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const isAuthRoute = pathname.startsWith("/login");
+  const isPublicGanarForm = pathname.startsWith("/ganar/registro");
   const isProtected =
-    pathname.startsWith("/dashboard") || pathname.startsWith("/app");
+    !isPublicGanarForm &&
+    (pathname.startsWith("/dashboard") ||
+      pathname.startsWith("/app") ||
+      pathname.startsWith("/admin") ||
+      pathname.startsWith("/ganar"));
 
   if (!user && isProtected) {
     const redirectUrl = request.nextUrl.clone();

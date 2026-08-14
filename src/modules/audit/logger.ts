@@ -2,7 +2,7 @@ import { getDb } from "@/db/client";
 import { auditLogs } from "@/db/schema";
 
 const SENSITIVE_KEY_PATTERN =
-  /(password|token|secret|authorization|api[_-]?key|service[_-]?role)/i;
+  /^(password|token|secret|authorization|api[_-]?key|service[_-]?role|prayer[_-]?request|peticion(_de_oracion)?)$/i;
 
 export function sanitizeAuditPayload(
   value: Record<string, unknown> | null | undefined,

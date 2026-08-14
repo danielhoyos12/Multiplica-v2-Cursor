@@ -13,9 +13,9 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Foundation organizacional"
-        description="Fase 1: Ministerios Generales, Redes, usuarios y autorización. Los workflows pastorales siguen fuera de alcance."
-        actions={<StatusBadge label="Fase 1" tone="brand" />}
+        title="MULTIPLICA"
+        description="Fase 2: GANAR como Persona Maestra. Organización y autorización de Fase 1 permanecen activas."
+        actions={<StatusBadge label="Fase 2" tone="brand" />}
       />
 
       <div className="grid gap-3 text-sm text-[var(--muted)] sm:grid-cols-2">
@@ -30,8 +30,8 @@ export default async function DashboardPage() {
       </div>
 
       <EmptyState
-        title="Administración disponible"
-        description="Usa Ministerios, Redes y Usuarios en el menú. Mi estructura y Ganar se habilitarán en fases posteriores."
+        title="GANAR disponible"
+        description="Registra y busca personas desde el módulo GANAR. Células, escuelas y Escalera del Éxito siguen fuera de alcance."
       />
     </div>
   );
