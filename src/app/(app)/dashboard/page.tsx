@@ -1,63 +1,37 @@
-import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { DataTable } from "@/components/ui/data-table";
-import { NETWORK_SEEDS } from "@/db/seeds/data";
+import { requireAppActor } from "@/server/actor";
 
 export const metadata = {
   title: "Dashboard",
 };
 
-export default function DashboardPage() {
-  const networkRows = NETWORK_SEEDS.map((network) => ({
-    id: network.code,
-    name: network.name,
-    status: network.isActive ? "Activa" : "Desactivada",
-    configurable: network.isConfigurable ? "Sí" : "No",
-  }));
+export default async function DashboardPage() {
+  const { auth } = await requireAppActor();
 
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Foundation"
-        description="Base técnica de MULTIPLICA lista para Organización, identidad y seguridad. Los workflows pastorales aún no están habilitados."
-        actions={<StatusBadge label="Fase 0" tone="brand" />}
+        title="Foundation organizacional"
+        description="Fase 1: Ministerios Generales, Redes, usuarios y autorización. Los workflows pastorales siguen fuera de alcance."
+        actions={<StatusBadge label="Fase 1" tone="brand" />}
       />
 
-      <section className="space-y-3">
-        <h2 className="font-[family-name:var(--font-display)] text-2xl text-[var(--ink)]">
-          Catálogo de Redes (seed)
-        </h2>
-        <p className="text-sm text-[var(--muted)]">
-          Vista de referencia del seed. No inventa los 12 Ministerios Generales.
+      <div className="grid gap-3 text-sm text-[var(--muted)] sm:grid-cols-2">
+        <p>
+          Roles:{" "}
+          <span className="text-[var(--ink)]">{auth.roleCodes.join(", ") || "sin rol"}</span>
         </p>
-        <DataTable
-          rows={networkRows}
-          getRowId={(row) => row.id}
-          columns={[
-            { key: "name", header: "Red", cell: (row) => row.name },
-            {
-              key: "status",
-              header: "Estado",
-              cell: (row) => (
-                <StatusBadge
-                  label={row.status}
-                  tone={row.status === "Activa" ? "success" : "warning"}
-                />
-              ),
-            },
-            {
-              key: "configurable",
-              header: "Configurable",
-              cell: (row) => row.configurable,
-            },
-          ]}
-        />
-      </section>
+        <p>
+          Ministerios en scope:{" "}
+          <span className="text-[var(--ink)]">{auth.ministryIds.length}</span>
+        </p>
+      </div>
 
       <EmptyState
-        title="Mi estructura llegará en una fase posterior"
-        description="La pantalla primaria del líder se construirá cuando exista el árbol de liderazgo, activaciones y células."
+        title="Administración disponible"
+        description="Usa Ministerios, Redes y Usuarios en el menú. Mi estructura y Ganar se habilitarán en fases posteriores."
       />
     </div>
   );

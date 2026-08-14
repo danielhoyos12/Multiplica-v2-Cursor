@@ -4,6 +4,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { getSessionUser } from "@/server/auth";
 import { signOut } from "@/server/actions/auth";
 import { hasSupabasePublicConfig } from "@/lib/env";
+import { ensureAppUserProfile } from "@/modules/organization";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,10 @@ export default async function AuthenticatedLayout({
   const user = await getSessionUser();
   if (!user) {
     redirect("/login");
+  }
+
+  if (user.email) {
+    await ensureAppUserProfile({ id: user.id, email: user.email });
   }
 
   return (

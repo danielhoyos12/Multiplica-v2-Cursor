@@ -1,5 +1,5 @@
-# organization
+# Organization module (Phase 1)
 
-Placeholder module for MULTIPLICA Phase 0.
+Ministerios Generales, Redes, perfiles de usuario y asignación de Líder General.
 
-Pastoral workflows for this domain are intentionally not implemented yet.
+Pastoral workflows (Ganar, células, árbol, escuela) remain out of scope.

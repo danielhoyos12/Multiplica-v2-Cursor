@@ -13,6 +13,9 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Inicio", enabled: true },
+  { href: "/admin/ministries", label: "Ministerios", enabled: true },
+  { href: "/admin/networks", label: "Redes", enabled: true },
+  { href: "/admin/users", label: "Usuarios", enabled: true },
   { href: "#", label: "Mi estructura", enabled: false },
   { href: "#", label: "Ganar", enabled: false },
   { href: "#", label: "Células", enabled: false },
@@ -26,7 +29,10 @@ export function AppSidebar() {
   return (
     <nav aria-label="Principal" className="flex flex-col gap-1">
       {NAV_ITEMS.map((item) => {
-        const active = item.enabled && pathname.startsWith(item.href);
+        const active =
+          item.enabled &&
+          (pathname === item.href ||
+            (item.href !== "/dashboard" && pathname.startsWith(item.href)));
 
         if (!item.enabled) {
           return (

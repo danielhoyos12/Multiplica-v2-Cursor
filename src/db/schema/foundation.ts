@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   boolean,
   index,
   integer,
@@ -50,16 +51,22 @@ export const ministries = pgTable(
   "ministries",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    /** Human-readable code (not a pastoral hierarchy code). */
+    /** Human-readable code (e.g. LP1). Never used as PK. */
     code: text("code").notNull(),
     name: text("name").notNull(),
     isActive: boolean("is_active").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
+    /** Assigned Líder General (user profile). Optional until appointed. */
+    responsibleUserId: uuid("responsible_user_id").references(
+      (): AnyPgColumn => users.id,
+      { onDelete: "set null" },
+    ),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("ministries_code_uidx").on(table.code),
     index("ministries_is_active_idx").on(table.isActive),
+    index("ministries_responsible_user_id_idx").on(table.responsibleUserId),
   ],
 );
 
