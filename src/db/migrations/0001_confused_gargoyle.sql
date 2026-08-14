@@ -1,0 +1,3 @@
+ALTER TABLE "ministries" ADD COLUMN "responsible_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "ministries" ADD CONSTRAINT "ministries_responsible_user_id_users_id_fk" FOREIGN KEY ("responsible_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "ministries_responsible_user_id_idx" ON "ministries" USING btree ("responsible_user_id");

@@ -114,43 +114,4 @@ export const ROLE_SEEDS = [
   },
 ] as const;
 
-export const PERMISSION_SEEDS = [
-  {
-    code: "platform.configure",
-    name: "Configurar plataforma",
-    description: "Gestionar catálogos base y roles de sistema.",
-  },
-  {
-    code: "ministry.manage",
-    name: "Gestionar ministerios",
-    description: "Crear/editar Ministerios Generales.",
-  },
-  {
-    code: "persons.read",
-    name: "Leer personas",
-    description: "Ver personas dentro del scope autorizado.",
-  },
-  {
-    code: "persons.write",
-    name: "Escribir personas",
-    description: "Crear/actualizar personas dentro del scope autorizado.",
-  },
-  {
-    code: "audit.read",
-    name: "Leer auditoría",
-    description: "Consultar audit logs autorizados.",
-  },
-] as const;
-
-export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
-  superadmin: [
-    "platform.configure",
-    "ministry.manage",
-    "persons.read",
-    "persons.write",
-    "audit.read",
-  ],
-  leader_general: ["persons.read", "persons.write", "audit.read"],
-  leader: ["persons.read", "persons.write"],
-  staff: ["persons.read", "persons.write"],
-};
+export { PERMISSION_SEEDS, ROLE_PERMISSION_MAP } from "./permissions";
