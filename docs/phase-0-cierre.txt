@@ -1,0 +1,352 @@
+================================================================================
+REPORTE FINAL DE CIERRE — FASE 0 MULTIPLICA
+================================================================================
+
+PR:      https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/1
+Branch:  cursor/phase-0-foundation-a3cc
+Commit:  43e646b — feat: bootstrap MULTIPLICA Phase 0 foundation
+Alcance: 75 archivos · +14389 / -2
+Fecha:   2026-08-14
+
+Alcance de este reporte: verificación de Fase 0 únicamente.
+NO se avanzó a Fase 1.
+NO se implementaron workflows pastorales.
+
+================================================================================
+1. ARQUITECTURA
+================================================================================
+
+Monolito modular alineado al stack aprobado v0.2:
+
+  Web app ........ Next.js 16.3.1 (App Router) + TypeScript + React 19
+  UI ............. Tailwind CSS v4 + design tokens MULTIPLICA
+  Backend ........ Server Components / Actions / route handlers + src/modules/*
+  Database ....... PostgreSQL (Supabase) + Drizzle ORM
+  Authn .......... Supabase Auth (email/password)
+  Authz .......... Domain policies (canView/canMutate) + RLS deny-by-default
+  Deploy target .. Vercel (web) + Supabase (DB/Auth)
+
+Estructura relevante:
+  src/app/           rutas (login, dashboard, health, auth callback)
+  src/components/    UI base + shell autenticado
+  src/modules/       authorization, audit + placeholders pastorales
+  src/db/            schema, migrations, seeds, rls
+  src/server/        auth + clientes Supabase (browser/server/admin)
+  src/lib/           env, errors, utilidades
+  docs/              architecture.md, domain-invariants.md
+
+Sin microservicios, Redis, colas, Elasticsearch ni LMS.
+Sin implementación de Ganar / Consolidar / Discipular / Enviar / células / árbol.
+
+================================================================================
+2. DEPENDENCIAS PRINCIPALES
+================================================================================
+
+Runtime:
+  next@16.3.1
+  react@19.2.8 / react-dom@19.2.8
+  @supabase/supabase-js
+  @supabase/ssr
+  drizzle-orm
+  postgres
+  zod
+  clsx
+
+Dev:
+  drizzle-kit
+  typescript
+  eslint / eslint-config-next / eslint-config-prettier
+  prettier / prettier-plugin-tailwindcss
+  vitest
+  tsx
+  tailwindcss / @tailwindcss/postcss
+  dotenv
+
+Scripts: dev, build, start, lint, typecheck, test, format,
+         db:generate, db:migrate, db:seed, db:push, db:studio
+
+================================================================================
+3. MIGRACIONES
+================================================================================
+
+  src/db/migrations/0000_absent_white_tiger.sql
+    Schema foundation generado por Drizzle.
+
+  src/db/migrations/meta/0000_snapshot.json
+  src/db/migrations/meta/_journal.json
+
+  src/db/rls/001_foundation_rls.sql
+    RLS post-schema (aplicar vía Supabase SQL editor o scripts/apply-rls.sh)
+
+Tablas:
+  districts
+  ministries
+  networks
+  persons
+  users
+  roles
+  permissions
+  role_permissions
+  user_role_assignments
+  person_organization_history
+  audit_logs
+
+Enums:
+  assignment_scope (global | ministry | network | tree)
+  network_code (hombres | mujeres | jovenes | ninos)
+
+Estado de aplicación contra Supabase real:
+  db:migrate .......... NO EJECUTADO (sin DATABASE_URL en el agente)
+  aplicar RLS ......... NO EJECUTADO
+
+================================================================================
+4. SUPABASE / AUTH / RLS
+================================================================================
+
+Clientes separados:
+  Browser ..... src/server/supabase/client.ts  (anon key only)
+  Server ...... src/server/supabase/server.ts  (cookies + anon)
+  Admin ....... src/server/supabase/admin.ts   (service role, server-only)
+  Middleware .. refresh de sesión + protección /dashboard
+
+Auth UI:
+  /login .............. email/password
+  /auth/callback ...... exchange code
+  /dashboard .......... shell autenticado
+  sign-out ............ server action
+
+RLS (diseño en PR):
+  ENABLE + FORCE en las 11 tablas foundation.
+
+  Policies creadas:
+    districts_select_authenticated
+    networks_select_authenticated
+    ministries_select_authenticated
+    roles_select_authenticated
+    permissions_select_authenticated
+    role_permissions_select_authenticated
+    users_select_own
+    users_update_own
+    user_role_assignments_select_own
+
+  Sin policies de cliente en:
+    persons
+    person_organization_history
+    audit_logs
+  => deny by default para rol authenticated
+
+Casos RLS runtime (permitido / denegado):
+  NO VERIFICADOS en DB real (sin secretos).
+
+================================================================================
+5. VARIABLES DE ENTORNO (.env.example)
+================================================================================
+
+  NEXT_PUBLIC_SUPABASE_URL .............. público (requerido)
+  NEXT_PUBLIC_SUPABASE_ANON_KEY ......... público (requerido)
+  SUPABASE_SERVICE_ROLE_KEY ............. solo servidor (requerido)
+  DATABASE_URL .......................... solo servidor (requerido)
+  NEXT_PUBLIC_APP_URL ................... opcional
+  DATABASE_URL_DIRECT ................... opcional (comentado)
+
+Build CI/agente:
+  MULTIPLICA_ALLOW_PLACEHOLDER_ENV=1  (permite build sin secretos)
+
+Estado en la VM del Cloud Agent al momento del cierre:
+  NEXT_PUBLIC_SUPABASE_URL .............. MISSING
+  NEXT_PUBLIC_SUPABASE_ANON_KEY ......... MISSING
+  SUPABASE_SERVICE_ROLE_KEY ............. MISSING
+  DATABASE_URL .......................... MISSING
+  environment-info ...................... environment: null (sin entorno linked)
+
+Se solicitó inyección de secretos al entorno del agente. Sin ellos no hay
+verificación live de migrate / seed / Auth / RLS.
+
+================================================================================
+6. SEEDS
+================================================================================
+
+Código idempotente: src/db/seeds/data.ts + src/db/seeds/run.ts
+Comando: npm run db:seed
+
+Incluye:
+  Redes:
+    Hombres (activa)
+    Mujeres (activa)
+    Jóvenes (activa)
+    Niños (inactiva + configurable)
+
+  Distritos:
+    Lima Metropolitana (Lima + Callao), ~50 nombres
+
+  RBAC:
+    roles: superadmin, leader_general, leader, staff
+    permissions base + role_permissions
+
+NO inventa / NO seedea los 12 Ministerios Generales
+(configuración Superadmin / Fase 1).
+
+Estado: NO ejecutado contra DB real (sin DATABASE_URL).
+
+================================================================================
+7. PRUEBAS EJECUTADAS Y RESULTADOS
+================================================================================
+
+Quality gates (re-ejecutados en el cierre):
+
+  npm run lint ......... PASS (exit 0)
+  npm run typecheck .... PASS (exit 0)
+  npm test ............. PASS — 10/10 tests
+  npm run build ........ PASS (exit 0)
+
+  npm run dev .......... arranca; /login => HTTP 200
+  GET /api/health ...... status "degraded" (sin secretos Supabase)
+
+Live (bloqueados por falta de secretos):
+
+  npm run db:migrate .................... NO EJECUTADO
+  aplicar RLS ........................... NO EJECUTADO
+  npm run db:seed ....................... NO EJECUTADO
+  Login real (Supabase Auth) ............ NO EJECUTADO
+  RLS caso permitido + denegado ......... NO EJECUTADO
+
+Tests unitarios cubiertos (Vitest):
+  - superadmin permissions
+  - deny upward/lateral visibility by default
+  - mutate permission checks
+  - network compatibility (Hombres/Mujeres/Jóvenes/Niños)
+  - audit payload secret redaction
+  - domain error codes
+  - seed catalog shape (4 networks, districts, roles)
+  - env helper presence checks
+
+================================================================================
+8. ARCHIVOS DEL PR (75)
+================================================================================
+
+Config / tooling:
+  package.json, package-lock.json, tsconfig.json, next.config.ts
+  eslint.config.mjs, vitest.config.ts, drizzle.config.ts
+  .env.example, .gitignore, .prettierrc.json, postcss.config.mjs
+  README.md, scripts/apply-rls.sh
+
+Docs:
+  docs/architecture.md
+  docs/domain-invariants.md
+
+App / UI:
+  src/app/** (layout, login, dashboard, health, auth callback, globals.css)
+  src/components/** (auth, layout shell, UI base)
+  public/*
+
+DB:
+  src/db/schema/foundation.ts, index.ts
+  src/db/migrations/0000_absent_white_tiger.sql + meta/*
+  src/db/rls/001_foundation_rls.sql
+  src/db/seeds/data.ts, run.ts
+  src/db/client.ts, index.ts
+
+Dominio / server:
+  src/modules/authorization/**, audit/**
+  src/modules/*/README.md (placeholders)
+  src/server/auth.ts, actions/auth.ts, supabase/*
+  src/lib/env.ts, errors.ts, cn.ts
+  src/middleware.ts
+  src/types/domain.ts
+
+================================================================================
+9. ERRORES / WARNINGS
+================================================================================
+
+  Build warning (no bloqueante):
+    Next.js 16 — convención "middleware" deprecada a favor de "proxy".
+
+  Health endpoint:
+    status "degraded" mientras no existan secretos.
+
+  npm audit (durante install original):
+    4 moderate en dependencias transitivas; no remediadas en el PR.
+
+  Lint final del commit / re-ejecución de cierre:
+    limpio (0 errors).
+
+================================================================================
+10. SERVICE ROLE — EXPOSICIÓN AL CLIENTE
+================================================================================
+
+Verificación estática + escaneo del build:
+
+  Cliente browser usa solo anon key .................... SÍ
+  Ningún "use client" importa admin.ts ................. SÍ
+  SUPABASE_SERVICE_ROLE_KEY no es NEXT_PUBLIC_ ......... SÍ
+  Valor del secret (JWT) en .next/static ............... AUSENTE
+  Nombre de la variable en un chunk client ............. PRESENTE (ver nota)
+
+Conclusión:
+  La CLAVE service_role NO se expone al cliente.
+  Login solo usa createBrowserClient + anon key.
+
+Nota de higiene (no es fuga del secret):
+  src/lib/env.ts comparte schemas público/servidor; el nombre
+  SUPABASE_SERVICE_ROLE_KEY aparece en un chunk client por bundling
+  del módulo compartido. Conviene separar env público/servidor en un
+  endurecimiento posterior.
+
+================================================================================
+11. DEUDA TÉCNICA
+================================================================================
+
+  1. Secretos Supabase no inyectados en el Cloud Agent => sin e2e Auth/DB.
+  2. RLS fuera del journal Drizzle (archivo separado + script).
+  3. canView/canMutate sin árbol (stub: self + superadmin).
+  4. Migración middleware -> proxy (Next 16).
+  5. FK formal users.id -> auth.users no modelada en Drizzle (documentada).
+  6. Placeholders de módulos pastorales sin lógica.
+  7. Ministerios Generales pendientes de Fase 1 / Superadmin.
+  8. Separar src/lib/env.ts público vs servidor (higiene de bundle).
+
+================================================================================
+12. CUMPLIMIENTO DE CRITERIOS DE ACEPTACIÓN (FASE 0)
+================================================================================
+
+  App inicia localmente .............................. CUMPLE
+  Build / lint / typecheck / tests ................... CUMPLE
+  Arquitectura y docs creadas ........................ CUMPLE
+  Seeds reproducibles en código ...................... CUMPLE
+  RLS documentado; sensibles deny-by-default ......... CUMPLE (diseño)
+  Service role no expuesta al cliente ................ CUMPLE (estático+build)
+  Sin workflows pastorales fuera de alcance .......... CUMPLE
+
+  Login/Auth real contra Supabase .................... NO VERIFICADO
+  Conexión Postgres / migrate aplicado ............... NO VERIFICADO
+  Seeds ejecutados en DB real ........................ NO VERIFICADO
+  RLS permitido + denegado en runtime ................ NO VERIFICADO
+
+================================================================================
+13. VEREDICTO
+================================================================================
+
+  Cierre de CÓDIGO Fase 0:           LISTO (PR #1 / commit 43e646b)
+  Cierre de VERIFICACIÓN live:       INCOMPLETO (faltan secretos en el agente)
+
+Cuando existan en el entorno del agente:
+  NEXT_PUBLIC_SUPABASE_URL
+  NEXT_PUBLIC_SUPABASE_ANON_KEY
+  SUPABASE_SERVICE_ROLE_KEY
+  DATABASE_URL
+  (opcional) MULTIPLICA_TEST_EMAIL / MULTIPLICA_TEST_PASSWORD
+
+completar únicamente:
+  1) db:migrate
+  2) aplicar RLS
+  3) db:seed
+  4) login real
+  5) RLS allow/deny
+  6) re-reporte
+
+DETENIDO.
+NO se inicia Fase 1.
+
+================================================================================
+FIN DEL REPORTE
+================================================================================
