@@ -5,7 +5,7 @@ import {
 } from "@/modules/ganar";
 
 export const metadata = {
-  title: "Registro GANAR · MULTIPLICA",
+  title: "Registro GANAR",
   description: "Formulario público para registrar personas ganadas.",
 };
 
