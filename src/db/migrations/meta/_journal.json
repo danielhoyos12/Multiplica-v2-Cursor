@@ -29,6 +29,20 @@
       "when": 1786753178894,
       "tag": "0003_lethal_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786753940308,
+      "tag": "0004_odd_ronan",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786753947846,
+      "tag": "0005_high_deathbird",
+      "breakpoints": true
     }
   ]
 }

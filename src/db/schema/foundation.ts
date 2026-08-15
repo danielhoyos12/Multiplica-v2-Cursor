@@ -139,13 +139,18 @@ export const users = pgTable(
       onDelete: "set null",
     }),
     email: text("email").notNull(),
+    /** System-generated unique username (never the UUID). */
+    username: text("username"),
     displayName: text("display_name"),
     isActive: boolean("is_active").notNull().default(true),
+    /** Force password change after temporary credential provisioning. */
+    mustChangePassword: boolean("must_change_password").notNull().default(false),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("users_email_uidx").on(table.email),
     uniqueIndex("users_person_id_uidx").on(table.personId),
+    uniqueIndex("users_username_uidx").on(table.username),
     index("users_is_active_idx").on(table.isActive),
   ],
 );

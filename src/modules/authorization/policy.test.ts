@@ -22,6 +22,7 @@ import { ROLE_PERMISSION_MAP } from "@/db/seeds/permissions";
 function actor(partial?: Partial<AuthContext>): AuthContext {
   return {
     userId: "user-1",
+    personId: null,
     roleCodes: [],
     permissionCodes: [],
     ministryIds: [],

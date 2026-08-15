@@ -181,7 +181,7 @@ export async function createCell(actorUserId: string, raw: CreateCellInput) {
   if (input.type === "twelve" && !isSuperadmin(actor)) {
     throw new DomainError(
       DomainErrorCode.NOT_AUTHORIZED,
-      "La creación de Célula de 12 está restringida a Superadmin hasta la activación de líderes (Fase 4).",
+      "La Célula de 12 se crea por conversión pastoral (g12.convert_twelve), no por alta directa.",
     );
   }
 
@@ -366,17 +366,13 @@ export async function closeCell(actorUserId: string, cellId: string) {
   return after;
 }
 
-/** Phase 4 placeholder — conversion not implemented yet. */
-export async function convertEvangelisticToTwelve(
-  _actorUserId: string,
-  _cellId: string,
-): Promise<never> {
-  void _actorUserId;
-  void _cellId;
-  throw new DomainError(
-    DomainErrorCode.CELL_CONVERSION_PREREQUISITES_NOT_IMPLEMENTED,
-    "La conversión a Célula de 12 requiere activación de líderes (Fase 4).",
-  );
+/** Phase 4: real conversion lives in leadership module. */
+export async function convertEvangelisticToTwelve(actorUserId: string, cellId: string) {
+  const { convertEvangelisticCellToTwelve } = await import("@/modules/leadership/service");
+  return convertEvangelisticCellToTwelve(actorUserId, {
+    cellId,
+    ordinaryMemberPersonIds: [],
+  });
 }
 
 export type CellListFilters = {
@@ -735,18 +731,41 @@ export async function addMemberToCell(
     );
   }
 
-  const [existingActive] = await db
-    .select()
+  const membershipRole = cell.type === "twelve" ? "twelve_team" : "member";
+
+  if (cell.type === "twelve") {
+    // Ordinary people cannot join a Célula de 12
+    const { countsAsTwelveLeader } = await import("@/modules/leadership/service");
+    const ok = await countsAsTwelveLeader(personId);
+    if (!ok) {
+      throw new DomainError(
+        DomainErrorCode.TWELVE_MEMBER_NOT_ACTIVE_LEADER,
+        "La Célula de 12 solo admite líderes activos.",
+      );
+    }
+  }
+
+  // Dual membership allowed: one ordinary (member) + one twelve_team.
+  const conflicting = await db
+    .select({
+      id: cellMemberships.id,
+      cellId: cellMemberships.cellId,
+      role: cellMemberships.role,
+    })
     .from(cellMemberships)
     .where(
-      and(eq(cellMemberships.personId, personId), eq(cellMemberships.status, "active")),
+      and(
+        eq(cellMemberships.personId, personId),
+        eq(cellMemberships.status, "active"),
+        eq(cellMemberships.role, membershipRole),
+      ),
     )
     .limit(1);
-  if (existingActive) {
+  if (conflicting[0]) {
     throw new DomainError(
       DomainErrorCode.MEMBERSHIP_ALREADY_ACTIVE,
-      "La persona ya tiene una membresía de célula activa.",
-      { membershipId: existingActive.id, cellId: existingActive.cellId },
+      "La persona ya tiene una membresía activa de este tipo.",
+      { membershipId: conflicting[0].id, cellId: conflicting[0].cellId },
     );
   }
 
@@ -756,6 +775,7 @@ export async function addMemberToCell(
       cellId,
       personId,
       status: "active",
+      role: membershipRole,
     })
     .returning();
 

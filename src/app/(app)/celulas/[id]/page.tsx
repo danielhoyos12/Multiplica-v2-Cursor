@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { CellMembersPanel } from "@/components/cells/members-panel";
+import { ConvertTwelvePanel } from "@/components/leadership/convert-twelve-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
@@ -12,7 +13,8 @@ import {
   getCellDetail,
   listCellsForActor,
 } from "@/modules/cells";
-import { closeCellAction, convertCellAction } from "@/modules/cells/actions";
+import { closeCellAction } from "@/modules/cells/actions";
+import { countsAsTwelveLeader, getTwelveProgress } from "@/modules/leadership";
 import { requireAppActor } from "@/server/actor";
 
 export const metadata = { title: "Detalle de célula" };
@@ -53,7 +55,23 @@ export default async function CellDetailPage({ params }: { params: Params }) {
   const canManage = hasPermission(auth, "cells.manage_members");
   const canUpdate = hasPermission(auth, "cells.update");
   const canAttendance = hasPermission(auth, "cells.attendance");
+  const canConvert = hasPermission(auth, "g12.convert_twelve");
   const today = new Date().toISOString().slice(0, 10);
+
+  let progress = { current: 0, max: 12, ready: false, label: "0 / 12 líderes" };
+  if (detail.cell.responsiblePersonId) {
+    progress = await getTwelveProgress(detail.cell.responsiblePersonId);
+  }
+
+  const membersForConvert = await Promise.all(
+    detail.members
+      .filter((m) => m.status === "active")
+      .map(async (m) => ({
+        personId: m.personId,
+        fullName: m.fullName,
+        isActiveLeader: await countsAsTwelveLeader(m.personId),
+      })),
+  );
 
   return (
     <div className="space-y-8">
@@ -83,6 +101,12 @@ export default async function CellDetailPage({ params }: { params: Params }) {
           label={cellStatusLabel(detail.cell.status)}
           tone={detail.cell.status === "active" ? "success" : "warning"}
         />
+        {detail.cell.type === "evangelistic" ? (
+          <StatusBadge
+            label={progress.ready ? "READY_FOR_TWELVE_CONVERSION" : progress.label}
+            tone={progress.ready ? "success" : "warning"}
+          />
+        ) : null}
       </div>
 
       <section className="grid gap-4 sm:grid-cols-2">
@@ -135,6 +159,15 @@ export default async function CellDetailPage({ params }: { params: Params }) {
         canManage={canManage}
       />
 
+      {canConvert && detail.cell.type === "evangelistic" && detail.cell.status === "active" ? (
+        <ConvertTwelvePanel
+          cellId={id}
+          members={membersForConvert}
+          readyForTwelve={progress.ready}
+          progressLabel={progress.label}
+        />
+      ) : null}
+
       {canUpdate && detail.cell.status !== "closed" ? (
         <form
           action={async () => {
@@ -151,27 +184,6 @@ export default async function CellDetailPage({ params }: { params: Params }) {
           <p className="mt-2 text-xs text-[var(--muted)]">
             Bloqueado si hay miembros activos. Requiere resolución explícita.
           </p>
-        </form>
-      ) : null}
-
-      {detail.cell.type === "evangelistic" ? (
-        <form
-          action={async () => {
-            "use server";
-            await convertCellAction(id);
-          }}
-          className="rounded-[var(--radius)] border border-dashed border-[var(--border)] bg-[var(--surface-soft)] p-4"
-        >
-          <p className="text-sm font-medium">Conversión a Célula de 12</p>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Preparado para Fase 4 (activación de líderes). No disponible todavía.
-          </p>
-          <button
-            type="submit"
-            className="mt-3 rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          >
-            Intentar conversión (esperado: no implementado)
-          </button>
         </form>
       ) : null}
     </div>

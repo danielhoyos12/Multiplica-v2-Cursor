@@ -14,8 +14,8 @@ export default async function DashboardPage() {
     <div className="space-y-8">
       <PageHeader
         title="MULTIPLICA"
-        description="Fase 3: Células operativas. GANAR permanece como Persona Maestra. El árbol G12 llega después."
-        actions={<StatusBadge label="Fase 3" tone="brand" />}
+        description="Fase 4: activación de líderes, credenciales, árbol G12 y navegación generacional."
+        actions={<StatusBadge label="Fase 4" tone="brand" />}
       />
 
       <div className="grid gap-3 text-sm text-[var(--muted)] sm:grid-cols-2">
@@ -30,8 +30,8 @@ export default async function DashboardPage() {
       </div>
 
       <EmptyState
-        title="Células disponibles"
-        description="Gestiona células, miembros desde GANAR y asistencia semanal. Activación de líderes y árbol G12 siguen fuera de alcance."
+        title="Mi estructura G12"
+        description="Un líder activo requiere célula propia. Navega tu subárbol desde Mi estructura. Elegible ≠ activado."
       />
     </div>
   );
