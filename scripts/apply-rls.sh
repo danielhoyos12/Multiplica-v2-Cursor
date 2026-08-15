@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Applies foundation + Phase 1 + Phase 2 RLS using DATABASE_URL (psql required).
+# Applies foundation + Phase 1–3 RLS using DATABASE_URL (psql required).
 # Usage: ./scripts/apply-rls.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,10 +16,12 @@ if ! command -v psql >/dev/null 2>&1; then
   echo "  - src/db/rls/001_foundation_rls.sql"
   echo "  - src/db/rls/002_phase1_ministry_rls.sql"
   echo "  - src/db/rls/003_phase2_ganar_rls.sql"
+  echo "  - src/db/rls/004_phase3_cells_rls.sql"
   exit 1
 fi
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/001_foundation_rls.sql"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/002_phase1_ministry_rls.sql"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/003_phase2_ganar_rls.sql"
-echo "RLS applied (foundation + phase 1 + phase 2)."
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/004_phase3_cells_rls.sql"
+echo "RLS applied (foundation + phase 1 + phase 2 + phase 3)."

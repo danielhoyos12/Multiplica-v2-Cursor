@@ -178,7 +178,12 @@ export default async function GanarPage({ searchParams }: { searchParams: Search
               },
             ]}
           />
-          <Pagination page={result.page} pageSize={result.pageSize} total={result.total} />
+          <Pagination
+            page={result.page}
+            pageSize={result.pageSize}
+            total={result.total}
+            sp={sp}
+          />
         </div>
       )}
     </div>
@@ -196,21 +201,37 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
+function buildGanarQuery(
+  sp: Record<string, string | string[] | undefined>,
+  page: number,
+) {
+  const next = new URLSearchParams();
+  for (const key of ["q", "ministryId", "networkId", "districtId", "from", "to"]) {
+    const value = Array.isArray(sp[key]) ? sp[key][0] : sp[key];
+    if (value) next.set(key, value);
+  }
+  if (page > 1) next.set("page", String(page));
+  const qs = next.toString();
+  return qs ? `?${qs}` : "";
+}
+
 function Pagination({
   page,
   pageSize,
   total,
+  sp,
 }: {
   page: number;
   pageSize: number;
   total: number;
+  sp: Record<string, string | string[] | undefined>;
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   if (pages <= 1) return null;
   return (
     <div className="flex gap-2 text-sm">
       {page > 1 ? (
-        <Link href={`/ganar?page=${page - 1}`} className="underline">
+        <Link href={`/ganar${buildGanarQuery(sp, page - 1)}`} className="underline">
           Anterior
         </Link>
       ) : null}
@@ -218,7 +239,7 @@ function Pagination({
         {page} / {pages}
       </span>
       {page < pages ? (
-        <Link href={`/ganar?page=${page + 1}`} className="underline">
+        <Link href={`/ganar${buildGanarQuery(sp, page + 1)}`} className="underline">
           Siguiente
         </Link>
       ) : null}

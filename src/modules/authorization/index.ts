@@ -2,6 +2,7 @@ export {
   assertCanMutate,
   assertCanView,
   canAccessMinistry,
+  canJoinCellNetwork,
   canManageNetwork,
   canMutate,
   canView,

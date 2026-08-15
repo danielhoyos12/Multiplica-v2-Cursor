@@ -22,6 +22,13 @@
       "when": 1786749532258,
       "tag": "0002_dapper_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786753178894,
+      "tag": "0003_lethal_cloak",
+      "breakpoints": true
     }
   ]
 }
