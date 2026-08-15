@@ -31,6 +31,9 @@ These invariants condition all future development. Application code, RLS, and mi
 24. Subtree moves travel with descendants; rebuild `leadership_closure` transactionally; cycles and 13th direct child are blocked. Closure is current-state, not history — use `leadership_relationship_history`.
 25. Cross-ministry moves require approval; never unilateral lateral moves.
 26. Username / `human_leader_code` / auth identity are stable across transfers; scopes update, identities do not duplicate.
+27. **Dashboards are derived.** No manual counter columns (`total_lideres`, etc.). KPIs come from live queries over operational tables within actor scope.
+28. **Alerts are not domain state.** Derived alerts never auto-mutate leadership, process, cells, or transfers.
+29. Prayer request text never appears on dashboards or CSV exports — aggregate indicators only when authorized.
 ## Modeling notes
 
 - Do **not** use a single `persons.status` field for the whole journey.
