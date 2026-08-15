@@ -72,7 +72,20 @@ export type MutateAction =
   | "reencounter.read"
   | "reencounter.manage"
   | "reencounter.attendance"
-  | "reencounter.complete";
+  | "reencounter.complete"
+  | "send.read"
+  | "send.manage"
+  | "send.complete"
+  | "transfers.read"
+  | "transfers.request"
+  | "transfers.approve"
+  | "transfers.execute"
+  | "organization.transfer_network"
+  | "organization.transfer_ministry"
+  | "leadership.reassign"
+  | "leadership.move_subtree"
+  | "leadership.deactivate_with_structure"
+  | "cells.reassign_structure";
 
 export function isSuperadmin(actor: AuthContext): boolean {
   return actor.roleCodes.includes("superadmin");

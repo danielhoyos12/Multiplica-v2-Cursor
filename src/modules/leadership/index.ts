@@ -1,5 +1,6 @@
 export {
   activateLeader,
+  assertTreeAccess,
   convertEvangelisticCellToTwelve,
   countsAsTwelveLeader,
   deactivateLeader,

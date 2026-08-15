@@ -479,6 +479,8 @@ export async function completeEmLevel(
       metadata: { personId: raw.personId, nextLevel: nextEligible },
     });
   } else {
+    const { ensureSendEligible } = await import("@/modules/send/service");
+    await ensureSendEligible(raw.personId, org.ministryId, org.networkId);
     await writeAuditLog({
       actorUserId,
       action: "ministerial_school.next_stage_eligible",
@@ -488,7 +490,7 @@ export async function completeEmLevel(
         personId: raw.personId,
         nextStage: "enviar",
         NEXT_STAGE_ELIGIBLE: true,
-        implemented: false,
+        implemented: true,
       },
     });
     await db

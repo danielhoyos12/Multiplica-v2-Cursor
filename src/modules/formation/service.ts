@@ -1121,7 +1121,19 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
     nextEligible = true;
   } else if (em3Done) {
     nextCode = "enviar";
-    nextLabel = "Enviar (próxima etapa)";
+    nextLabel = "Enviar";
+    nextEligible = true;
+  }
+
+  const { getPersonSendSummary } = await import("@/modules/send/service");
+  const enviar = await getPersonSendSummary(personId);
+  if (enviar.status === "completed") {
+    nextCode = "enviar";
+    nextLabel = "Enviar completado";
+    nextEligible = false;
+  } else if (enviar.status === "in_progress" || enviar.status === "eligible") {
+    nextCode = "enviar";
+    nextLabel = "Enviar";
     nextEligible = true;
   }
 
@@ -1163,8 +1175,9 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
       code: nextCode,
       label: nextLabel,
       eligible: nextEligible,
-      implemented: nextCode !== "enviar",
+      implemented: true,
     },
+    enviar,
   };
 }
 

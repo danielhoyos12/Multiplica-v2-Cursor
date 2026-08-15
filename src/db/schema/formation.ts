@@ -30,6 +30,7 @@ export const processTypeEnum = pgEnum("process_type", [
   "em1",
   "em2",
   "em3",
+  "enviar", // Phase 8 — culmination; ungido ≠ active
 ]);
 
 export const processStatusEnum = pgEnum("process_status", [
