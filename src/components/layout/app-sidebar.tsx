@@ -16,7 +16,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/admin/ministries", label: "Ministerios", enabled: true },
   { href: "/admin/networks", label: "Redes", enabled: true },
   { href: "/admin/users", label: "Usuarios", enabled: true },
-  { href: "#", label: "Mi estructura", enabled: false },
+  { href: "/liderazgo", label: "Mi estructura", enabled: true },
   { href: "/ganar", label: "Ganar", enabled: true },
   { href: "/celulas", label: "Células", enabled: true },
   { href: "#", label: "Escuela", enabled: false },

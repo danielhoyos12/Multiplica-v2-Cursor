@@ -7,6 +7,7 @@ import {
   roles,
   userRoleAssignments,
   ministries,
+  users,
 } from "@/db/schema";
 
 import type { AuthContext } from "./policy";
@@ -17,6 +18,12 @@ import type { AuthContext } from "./policy";
  */
 export async function loadAuthContext(userId: string): Promise<AuthContext> {
   const db = getDb();
+
+  const [profile] = await db
+    .select({ personId: users.personId })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
 
   const assignments = await db
     .select({
@@ -69,6 +76,7 @@ export async function loadAuthContext(userId: string): Promise<AuthContext> {
 
   return {
     userId,
+    personId: profile?.personId ?? null,
     roleCodes,
     permissionCodes,
     ministryIds: [...ministryIds],

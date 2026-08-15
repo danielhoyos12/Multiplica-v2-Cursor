@@ -36,6 +36,12 @@ export const cellMembershipStatusEnum = pgEnum("cell_membership_status", [
   "transferred",
 ]);
 
+/** Why the person belongs to the cell — twelve_team allows dual membership with own cell responsibility. */
+export const cellMembershipRoleEnum = pgEnum("cell_membership_role", [
+  "member",
+  "twelve_team",
+]);
+
 export const attendanceStatusEnum = pgEnum("attendance_status", [
   "present",
   "absent",
@@ -117,6 +123,7 @@ export const cellMemberships = pgTable(
       .notNull()
       .references(() => persons.id, { onDelete: "restrict" }),
     status: cellMembershipStatusEnum("status").notNull().default("active"),
+    role: cellMembershipRoleEnum("role").notNull().default("member"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
     leftAt: timestamp("left_at", { withTimezone: true }),
     leaveReason: text("leave_reason"),

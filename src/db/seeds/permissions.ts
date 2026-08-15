@@ -65,10 +65,63 @@ export const PERMISSION_SEEDS = [
     description: "Crear sesiones y marcar asistencia semanal.",
   },
   {
+    code: "leaders.read",
+    name: "Leer liderazgo",
+    description: "Ver estados de liderazgo y progreso G12 en el alcance.",
+  },
+  {
+    code: "leaders.mark_eligible",
+    name: "Marcar apto para liderar",
+    description: "Registrar elegibilidad/unción pastoral.",
+  },
+  {
+    code: "leaders.activate",
+    name: "Activar líderes",
+    description: "Activar líderes y abrir su célula.",
+  },
+  {
+    code: "leaders.deactivate",
+    name: "Desactivar líderes",
+    description: "Desactivar líderes con control de estructura.",
+  },
+  {
+    code: "leaders.manage_tree",
+    name: "Gestionar árbol",
+    description: "Administrar relaciones generacionales.",
+  },
+  {
+    code: "leaders.view_descendants",
+    name: "Ver descendientes",
+    description: "Navegar el subárbol pastoral autorizado.",
+  },
+  {
+    code: "g12.convert_twelve",
+    name: "Convertir a Célula de 12",
+    description: "Convertir célula evangelística con 12 líderes activos.",
+  },
+  {
     code: "audit.read",
     name: "Leer auditoría",
     description: "Consultar audit logs autorizados.",
   },
+] as const;
+
+const CELL_PERMS = [
+  "cells.read",
+  "cells.create",
+  "cells.update",
+  "cells.manage_members",
+  "cells.attendance",
+] as const;
+
+const LEADER_PERMS = [
+  "leaders.read",
+  "leaders.mark_eligible",
+  "leaders.activate",
+  "leaders.deactivate",
+  "leaders.manage_tree",
+  "leaders.view_descendants",
+  "g12.convert_twelve",
 ] as const;
 
 export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
@@ -81,11 +134,8 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "users.assign_roles",
     "persons.read",
     "persons.write",
-    "cells.read",
-    "cells.create",
-    "cells.update",
-    "cells.manage_members",
-    "cells.attendance",
+    ...CELL_PERMS,
+    ...LEADER_PERMS,
     "audit.read",
   ],
   leader_general: [
@@ -94,11 +144,8 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "users.read",
     "persons.read",
     "persons.write",
-    "cells.read",
-    "cells.create",
-    "cells.update",
-    "cells.manage_members",
-    "cells.attendance",
+    ...CELL_PERMS,
+    ...LEADER_PERMS,
     "audit.read",
   ],
   leader: [
@@ -109,6 +156,11 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "cells.update",
     "cells.manage_members",
     "cells.attendance",
+    "leaders.read",
+    "leaders.mark_eligible",
+    "leaders.activate",
+    "leaders.view_descendants",
+    "g12.convert_twelve",
   ],
   staff: [
     "persons.read",
@@ -117,5 +169,6 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "ministry.read",
     "cells.read",
     "cells.attendance",
+    "leaders.read",
   ],
 };

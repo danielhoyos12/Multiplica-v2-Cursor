@@ -27,6 +27,7 @@ import { NETWORK_SEEDS } from "@/db/seeds/data";
 function actor(partial?: Partial<AuthContext>): AuthContext {
   return {
     userId: "user-1",
+    personId: null,
     roleCodes: [],
     permissionCodes: [],
     ministryIds: [],

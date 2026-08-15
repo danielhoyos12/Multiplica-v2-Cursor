@@ -1,9 +1,12 @@
+import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { EditPersonForm } from "@/components/ganar/edit-person-form";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getDb } from "@/db/client";
+import { personLeadership } from "@/db/schema";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { hasPermission, isSuperadmin } from "@/modules/authorization";
 import {
@@ -42,8 +45,15 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
   const catalogs = await listCatalogsForGanar(session.id);
   const maps = await getMinistryNetworkMaps();
   const canWrite = hasPermission(auth, "persons.write");
-  const canSeePrayer =
-    isSuperadmin(auth) || hasPermission(auth, "persons.read");
+  const canSeePrayer = isSuperadmin(auth) || hasPermission(auth, "persons.read");
+  const canMarkEligible = hasPermission(auth, "leaders.mark_eligible");
+  const canActivate = hasPermission(auth, "leaders.activate");
+
+  const [leadership] = await getDb()
+    .select()
+    .from(personLeadership)
+    .where(eq(personLeadership.personId, id))
+    .limit(1);
 
   const currentMinistry = detail.current?.ministryId
     ? maps.ministryById[detail.current.ministryId]
@@ -56,7 +66,7 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
     <div className="space-y-10">
       <PageHeader
         title={detail.person.fullName}
-        description="Detalle de Persona Maestra. La Escalera del Éxito se habilitará en fases posteriores."
+        description="Detalle de Persona Maestra. Liderazgo pastoral es independiente del rol RBAC."
         actions={
           <Link href="/ganar" className="text-sm font-medium underline">
             Volver
@@ -83,10 +93,7 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
                   ? "Formulario público"
                   : "Formulario interno",
               ],
-              [
-                "Estado",
-                detail.person.isActive ? "Activa" : "Inactiva",
-              ],
+              ["Estado", detail.person.isActive ? "Activa" : "Inactiva"],
             ]}
           />
         </div>
@@ -115,6 +122,53 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
                   : "Sin petición registrada."}
               </p>
             </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-medium text-[var(--ink)]">Liderazgo pastoral</h2>
+          <StatusBadge
+            label={leadership?.status ?? "none"}
+            tone={
+              leadership?.status === "active"
+                ? "success"
+                : leadership?.status === "eligible"
+                  ? "warning"
+                  : "brand"
+            }
+          />
+        </div>
+        <p className="text-sm text-[var(--muted)]">
+          Elegible/ungido no cuenta para los 12. Activo requiere célula propia abierta.
+        </p>
+        <Dl
+          items={[
+            ["Código líder", leadership?.humanLeaderCode ?? "—"],
+            [
+              "Activado",
+              leadership?.activatedAt
+                ? new Date(leadership.activatedAt).toLocaleString("es-PE")
+                : "—",
+            ],
+          ]}
+        />
+        <div className="flex flex-wrap gap-2 pt-2">
+          {(canMarkEligible || canActivate) && leadership?.status !== "active" ? (
+            <Link
+              href={`/liderazgo/activar/${id}`}
+              className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm font-medium text-white"
+            >
+              {leadership?.status === "eligible"
+                ? "Activar como líder"
+                : "Marcar apto / Activar"}
+            </Link>
+          ) : null}
+          {leadership?.status === "active" ? (
+            <Link href={`/liderazgo/${id}`} className="text-sm font-medium underline">
+              Ver estructura
+            </Link>
           ) : null}
         </div>
       </section>

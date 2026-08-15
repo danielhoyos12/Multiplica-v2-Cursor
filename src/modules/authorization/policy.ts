@@ -4,6 +4,7 @@ export type NetworkCode = "hombres" | "mujeres" | "jovenes" | "ninos";
 
 export type AuthContext = {
   userId: string;
+  personId: string | null;
   roleCodes: string[];
   permissionCodes: string[];
   ministryIds: string[];
@@ -11,9 +12,18 @@ export type AuthContext = {
 };
 
 export type ResourceRef = {
-  type: "ministry" | "network" | "user" | "person" | "cell" | "audit" | "platform";
+  type:
+    | "ministry"
+    | "network"
+    | "user"
+    | "person"
+    | "cell"
+    | "leader"
+    | "audit"
+    | "platform";
   id?: string;
   ministryId?: string;
+  personId?: string;
 };
 
 export type MutateAction =
@@ -30,7 +40,14 @@ export type MutateAction =
   | "cells.create"
   | "cells.update"
   | "cells.manage_members"
-  | "cells.attendance";
+  | "cells.attendance"
+  | "leaders.read"
+  | "leaders.mark_eligible"
+  | "leaders.activate"
+  | "leaders.deactivate"
+  | "leaders.manage_tree"
+  | "leaders.view_descendants"
+  | "g12.convert_twelve";
 
 export function isSuperadmin(actor: AuthContext): boolean {
   return actor.roleCodes.includes("superadmin");
@@ -54,13 +71,10 @@ export function canAccessMinistry(actor: AuthContext, ministryId: string): boole
   return actor.ministryIds.includes(ministryId);
 }
 
-/**
- * Central view policy. Tree descent arrives in Phase 4.
- */
 export function canView(
   actor: AuthContext,
   target: ResourceRef | string,
-  options?: { actorPersonId?: string | null },
+  options?: { actorPersonId?: string | null; isDescendant?: boolean },
 ): boolean {
   if (isSuperadmin(actor)) {
     return true;
@@ -70,7 +84,7 @@ export function canView(
     if (options?.actorPersonId && options.actorPersonId === target) {
       return true;
     }
-    return false;
+    return Boolean(options?.isDescendant);
   }
 
   switch (target.type) {
@@ -103,6 +117,9 @@ export function canView(
       if (options?.actorPersonId && target.id && options.actorPersonId === target.id) {
         return true;
       }
+      if (options?.isDescendant && hasPermission(actor, "leaders.view_descendants")) {
+        return true;
+      }
       if (target.ministryId) {
         return canAccessMinistry(actor, target.ministryId);
       }
@@ -114,6 +131,22 @@ export function canView(
       if (target.ministryId) {
         return canAccessMinistry(actor, target.ministryId);
       }
+      return false;
+    case "leader":
+      if (!hasPermission(actor, "leaders.read") && !hasPermission(actor, "leaders.view_descendants")) {
+        return false;
+      }
+      if (target.personId && actor.personId && target.personId === actor.personId) {
+        return true;
+      }
+      if (options?.isDescendant && hasPermission(actor, "leaders.view_descendants")) {
+        return true;
+      }
+      // Leader General (or ministry-scoped LG) may view whole ministry tree.
+      if (target.ministryId && isLeaderGeneral(actor) && canAccessMinistry(actor, target.ministryId)) {
+        return true;
+      }
+      // Regular leaders: ministry id alone is NOT enough (sibling deny).
       return false;
     case "audit":
       return hasPermission(actor, "audit.read");
@@ -158,7 +191,7 @@ export function canMutate(
 export function assertCanView(
   actor: AuthContext,
   target: ResourceRef | string,
-  options?: { actorPersonId?: string | null },
+  options?: { actorPersonId?: string | null; isDescendant?: boolean },
 ): void {
   if (!canView(actor, target, options)) {
     throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "No autorizado para ver el recurso.", {
@@ -181,13 +214,6 @@ export function assertCanMutate(
   }
 }
 
-/**
- * Network compatibility (invariant 16).
- * Hombres → Hombres + Jóvenes
- * Mujeres → Mujeres + Jóvenes
- * Jóvenes → solo Jóvenes
- * Niños → reserved for a future phase (never manages others while inactive)
- */
 export function canManageNetwork(
   managerNetwork: NetworkCode,
   targetNetwork: NetworkCode,
@@ -204,13 +230,6 @@ export function canManageNetwork(
   return false;
 }
 
-/**
- * Member network compatibility for cell membership (Phase 3).
- * Uses the person's current organizational Red — never inferred gender.
- * - Hombres/Mujeres cells: member must currently belong to that same Red.
- * - Jóvenes: member must currently belong to Jóvenes (mixed within that Red).
- * - Niños: blocked while inactive elsewhere.
- */
 export function canJoinCellNetwork(
   personNetwork: NetworkCode,
   cellNetwork: NetworkCode,
