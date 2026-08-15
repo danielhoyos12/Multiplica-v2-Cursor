@@ -25,8 +25,10 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/escuela-ministerial", label: "Escuela Min.", enabled: true },
   { href: "/enviar", label: "Enviar", enabled: true },
   { href: "/transferencias", label: "Transferencias", enabled: true },
+  { href: "/reportes", label: "Reportes", enabled: true },
+  { href: "/admin/system-health", label: "System health", enabled: true },
   { href: "/udv", label: "UDV (legacy)", enabled: true },
-  { href: "#", label: "Reportes", enabled: false },
+  { href: "#", label: "Más reportes", enabled: false },
 ];
 
 export function AppSidebar() {

@@ -284,6 +284,38 @@ export const PERMISSION_SEEDS = [
     name: "Reasignar estructura de células",
     description: "Resolver células y membresías en transferencias.",
   },
+  {
+    code: "dashboard.read",
+    name: "Leer dashboards",
+    description: "Ver dashboards pastorales derivados dentro del scope.",
+  },
+  {
+    code: "reports.read",
+    name: "Leer reportes",
+    description: "Consultar reportes operativos scoped.",
+  },
+  {
+    code: "reports.export",
+    name: "Exportar reportes",
+    description: "Exportar CSV de reportes autorizados.",
+  },
+  {
+    code: "analytics.global",
+    name: "Analítica global",
+    description: "Visión consolidada multi-ministerio (Superadmin).",
+  },
+  {
+    code: "alerts.read",
+    name: "Leer alertas",
+    description: "Ver alertas pastorales derivadas.",
+  },
+] as const;
+
+const REPORTING_PERMS = [
+  "dashboard.read",
+  "reports.read",
+  "reports.export",
+  "alerts.read",
 ] as const;
 
 const CELL_PERMS = [
@@ -358,6 +390,8 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     ...LEADER_PERMS,
     ...PROCESS_PERMS,
     ...TRANSFER_PERMS,
+    ...REPORTING_PERMS,
+    "analytics.global",
     "school.catalog.manage",
     "destination.override_requirement",
     "audit.read",
@@ -372,6 +406,7 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     ...LEADER_PERMS,
     ...PROCESS_PERMS,
     ...TRANSFER_PERMS,
+    ...REPORTING_PERMS,
     "destination.override_requirement",
     "audit.read",
   ],
@@ -415,6 +450,7 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "organization.transfer_network",
     "leadership.reassign",
     "cells.reassign_structure",
+    ...REPORTING_PERMS,
   ],
   staff: [
     "persons.read",
@@ -433,5 +469,8 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "ministerial_school.attendance",
     "reencounter.read",
     "reencounter.attendance",
+    "dashboard.read",
+    "reports.read",
+    "alerts.read",
   ],
 };

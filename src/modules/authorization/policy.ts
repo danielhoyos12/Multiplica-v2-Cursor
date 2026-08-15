@@ -85,7 +85,12 @@ export type MutateAction =
   | "leadership.reassign"
   | "leadership.move_subtree"
   | "leadership.deactivate_with_structure"
-  | "cells.reassign_structure";
+  | "cells.reassign_structure"
+  | "dashboard.read"
+  | "reports.read"
+  | "reports.export"
+  | "analytics.global"
+  | "alerts.read";
 
 export function isSuperadmin(actor: AuthContext): boolean {
   return actor.roleCodes.includes("superadmin");
