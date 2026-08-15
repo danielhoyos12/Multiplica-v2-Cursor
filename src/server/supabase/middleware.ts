@@ -44,7 +44,8 @@ export async function updateSession(request: NextRequest) {
     (pathname.startsWith("/dashboard") ||
       pathname.startsWith("/app") ||
       pathname.startsWith("/admin") ||
-      pathname.startsWith("/ganar"));
+      pathname.startsWith("/ganar") ||
+      pathname.startsWith("/celulas"));
 
   if (!user && isProtected) {
     const redirectUrl = request.nextUrl.clone();

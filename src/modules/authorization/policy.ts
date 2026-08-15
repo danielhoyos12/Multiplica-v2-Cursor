@@ -11,7 +11,7 @@ export type AuthContext = {
 };
 
 export type ResourceRef = {
-  type: "ministry" | "network" | "user" | "person" | "audit" | "platform";
+  type: "ministry" | "network" | "user" | "person" | "cell" | "audit" | "platform";
   id?: string;
   ministryId?: string;
 };
@@ -25,7 +25,12 @@ export type MutateAction =
   | "users.read"
   | "users.assign_roles"
   | "platform.configure"
-  | "audit.read";
+  | "audit.read"
+  | "cells.read"
+  | "cells.create"
+  | "cells.update"
+  | "cells.manage_members"
+  | "cells.attendance";
 
 export function isSuperadmin(actor: AuthContext): boolean {
   return actor.roleCodes.includes("superadmin");
@@ -50,7 +55,7 @@ export function canAccessMinistry(actor: AuthContext, ministryId: string): boole
 }
 
 /**
- * Central view policy. Tree descent arrives in later phases.
+ * Central view policy. Tree descent arrives in Phase 4.
  */
 export function canView(
   actor: AuthContext,
@@ -61,7 +66,6 @@ export function canView(
     return true;
   }
 
-  // Back-compat: string argument treated as person id
   if (typeof target === "string") {
     if (options?.actorPersonId && options.actorPersonId === target) {
       return true;
@@ -77,7 +81,6 @@ export function canView(
         return false;
       }
       if (!target.id) {
-        // List endpoint: permission checked here; rows filtered by ministryIds in service.
         return (
           hasPermission(actor, "ministry.read") || hasPermission(actor, "ministry.manage")
         );
@@ -99,6 +102,14 @@ export function canView(
       }
       if (options?.actorPersonId && target.id && options.actorPersonId === target.id) {
         return true;
+      }
+      if (target.ministryId) {
+        return canAccessMinistry(actor, target.ministryId);
+      }
+      return false;
+    case "cell":
+      if (!hasPermission(actor, "cells.read")) {
+        return false;
       }
       if (target.ministryId) {
         return canAccessMinistry(actor, target.ministryId);
@@ -126,8 +137,6 @@ export function canMutate(
 
   if (targetResource.type === "ministry" && targetResource.id) {
     if (action === "ministry.manage") {
-      // Creating/editing ministries is global platform power (superadmin via permission).
-      // leader_general must not mutate another ministry even if somehow granted manage.
       return canAccessMinistry(actor, targetResource.id) || isSuperadmin(actor);
     }
     if (action === "ministry.read") {
@@ -193,6 +202,26 @@ export function canManageNetwork(
     return targetNetwork === "jovenes";
   }
   return false;
+}
+
+/**
+ * Member network compatibility for cell membership (Phase 3).
+ * Uses the person's current organizational Red — never inferred gender.
+ * - Hombres/Mujeres cells: member must currently belong to that same Red.
+ * - Jóvenes: member must currently belong to Jóvenes (mixed within that Red).
+ * - Niños: blocked while inactive elsewhere.
+ */
+export function canJoinCellNetwork(
+  personNetwork: NetworkCode,
+  cellNetwork: NetworkCode,
+): boolean {
+  if (cellNetwork === "ninos" || personNetwork === "ninos") {
+    return false;
+  }
+  if (cellNetwork === "jovenes") {
+    return personNetwork === "jovenes";
+  }
+  return personNetwork === cellNetwork;
 }
 
 export function managedNetworksFor(managerNetwork: NetworkCode): NetworkCode[] {
