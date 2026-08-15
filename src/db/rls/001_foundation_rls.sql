@@ -31,41 +31,50 @@ ALTER TABLE person_organization_history FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY;
 
 -- Catalogs: authenticated users can read active rows
+DROP POLICY IF EXISTS districts_select_authenticated ON districts;
 CREATE POLICY districts_select_authenticated
   ON districts FOR SELECT TO authenticated
   USING (is_active = true);
 
+DROP POLICY IF EXISTS networks_select_authenticated ON networks;
 CREATE POLICY networks_select_authenticated
   ON networks FOR SELECT TO authenticated
   USING (is_active = true OR is_configurable = true);
 
+DROP POLICY IF EXISTS ministries_select_authenticated ON ministries;
 CREATE POLICY ministries_select_authenticated
   ON ministries FOR SELECT TO authenticated
   USING (is_active = true);
 
+DROP POLICY IF EXISTS roles_select_authenticated ON roles;
 CREATE POLICY roles_select_authenticated
   ON roles FOR SELECT TO authenticated
   USING (true);
 
+DROP POLICY IF EXISTS permissions_select_authenticated ON permissions;
 CREATE POLICY permissions_select_authenticated
   ON permissions FOR SELECT TO authenticated
   USING (true);
 
+DROP POLICY IF EXISTS role_permissions_select_authenticated ON role_permissions;
 CREATE POLICY role_permissions_select_authenticated
   ON role_permissions FOR SELECT TO authenticated
   USING (true);
 
 -- Users: can read/update own profile only (Phase 0). Broader access via service role.
+DROP POLICY IF EXISTS users_select_own ON users;
 CREATE POLICY users_select_own
   ON users FOR SELECT TO authenticated
   USING (id = auth.uid());
 
+DROP POLICY IF EXISTS users_update_own ON users;
 CREATE POLICY users_update_own
   ON users FOR UPDATE TO authenticated
   USING (id = auth.uid())
   WITH CHECK (id = auth.uid());
 
 -- Assignments: user can read own role assignments
+DROP POLICY IF EXISTS user_role_assignments_select_own ON user_role_assignments;
 CREATE POLICY user_role_assignments_select_own
   ON user_role_assignments FOR SELECT TO authenticated
   USING (user_id = auth.uid());

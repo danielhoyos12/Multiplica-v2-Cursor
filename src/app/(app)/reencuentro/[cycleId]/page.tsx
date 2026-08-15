@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { EnrollmentPersonForm } from "@/components/formation/enrollment-person-form";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
@@ -55,29 +56,14 @@ export default async function ReencuentroEventPage({ params }: { params: Params 
       />
 
       {canManage && board.cycle.status === "active" ? (
-        <form
-          action={async (formData) => {
+        <EnrollmentPersonForm
+          label="Persona apta — EM completada (buscar por nombre/teléfono)"
+          buttonLabel="Inscribir"
+          onEnroll={async (personId) => {
             "use server";
-            await enrollReencuentroAction({
-              personId: String(formData.get("personId") ?? ""),
-              cycleId,
-            });
+            return enrollReencuentroAction({ personId, cycleId });
           }}
-          className="flex flex-wrap gap-2 rounded-[var(--radius)] border border-dashed border-[var(--border)] p-4 text-sm"
-        >
-          <input
-            name="personId"
-            required
-            placeholder="UUID persona apta (EM completada)"
-            className="min-w-[16rem] flex-1 rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
-          />
-          <button
-            type="submit"
-            className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-white"
-          >
-            Inscribir
-          </button>
-        </form>
+        />
       ) : null}
 
       <section className="space-y-3">

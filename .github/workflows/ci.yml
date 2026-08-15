@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          MULTIPLICA_ALLOW_PLACEHOLDER_ENV: "1"
+      - name: npm audit (report only)
+        run: npm audit --audit-level=high || true
+
+  # Live DB verifies require secrets — manual / protected environment
+  # live-verify:
+  #   if: github.event_name == 'workflow_dispatch'
+  #   ...

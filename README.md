@@ -1,37 +1,64 @@
-# Multiplica
+# MULTIPLICA
 
-Sistema de gestión integral de la Visión G12.
+Sistema de gestión integral de la Visión G12 — secuencia pastoral:
 
-## Fase actual
+**GANAR → CONSOLIDAR (Pre / Encuentro / Post) → DISCIPULAR (CD1→CD2→Re-Encuentro→CD3→EM1–EM3) → ENVIAR**
 
-**Fase 0 — Bootstrap / Foundation** (completa en código). Los módulos pastorales (Ganar, células, árbol, escuela, etc.) aún no están implementados.
+Versión: **1.0.0-rc.1** (release candidate — no producción automática).
 
 ## Stack
 
-Next.js · TypeScript · App Router · Tailwind · PostgreSQL/Supabase · Supabase Auth · Drizzle ORM
+| | |
+| --- | --- |
+| App | Next.js 16 (App Router) + React 19 + TypeScript |
+| UI | Tailwind CSS v4 |
+| DB | PostgreSQL (Supabase) + Drizzle ORM |
+| Auth | Supabase Auth + RLS + domain authz |
+| Deploy target | Vercel + Supabase (staging/prod separados) |
 
-## Quick start
+## Requirements
+
+- Node.js **≥ 20** (see `.nvmrc`)
+- npm
+- Proyecto Supabase (URL, anon key, service role, `DATABASE_URL`)
+
+## Quick start (local)
 
 ```bash
 cp .env.example .env.local
-npm install
+# fill secrets — never commit .env.local
+npm ci
 npm run db:migrate
-# Apply src/db/rls/001_foundation_rls.sql in Supabase SQL editor
+DATABASE_URL=… ./scripts/apply-rls.sh
 npm run db:seed
 npm run dev
 ```
-
-See [docs/architecture.md](docs/architecture.md) and [docs/domain-invariants.md](docs/domain-invariants.md).
 
 ## Scripts
 
 | Script | Purpose |
 | --- | --- |
-| `npm run dev` | Development server |
-| `npm run build` | Production build |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | TypeScript |
-| `npm test` | Vitest |
-| `npm run db:generate` | Generate Drizzle migrations |
-| `npm run db:migrate` | Apply migrations |
-| `npm run db:seed` | Seed networks, districts, RBAC |
+| `npm run dev` | Dev server |
+| `npm run build` / `start` | Production build |
+| `npm run lint` / `typecheck` / `test` | Quality |
+| `npm run test:e2e` | Playwright (needs running app; `PLAYWRIGHT_SKIP=1` to skip) |
+| `npm run db:migrate` / `db:seed` | Schema + catalogs |
+| `npm run verify:invariants` | Data integrity (dev/staging only) |
+| `npm run verify:phase10` | Release security/health checks |
+| `npm run verify:release` | Orchestrated quality + verifies |
+
+## Docs
+
+- [Architecture](docs/architecture.md)
+- [Domain invariants](docs/domain-invariants.md)
+- [Security](docs/security.md) · [RLS matrix](docs/security-rls-matrix.md)
+- [Operations](docs/operations-runbook.md)
+- [Backup/restore](docs/backup-restore.md) · [Rollback](docs/deployment-rollback.md)
+- [UAT](docs/uat-checklist.md) · [Go-live](docs/go-live-checklist.md)
+- [Release readiness](docs/release-readiness.md)
+- [Phase 10 cierre](docs/phase-10-cierre.md)
+- [CHANGELOG](CHANGELOG.md)
+
+## Environments
+
+`LOCAL` · `STAGING` · `PRODUCTION` — separate Supabase projects and env vars. Never use `multiplica-dev` as production. Fixture/verify scripts refuse production targets.

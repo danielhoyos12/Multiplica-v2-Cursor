@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { PersonSearchField } from "@/components/persons/person-search-field";
 import { ErrorState } from "@/components/ui/error-state";
 import { createCellAction } from "@/modules/cells/actions";
 
@@ -107,15 +108,11 @@ export function CreateCellForm({
           ...districts.map((d) => ({ value: d.id, label: d.name })),
         ]}
       />
-      <Field
-        label="ID responsable (persona, opcional)"
+      <PersonSearchField
         name="responsiblePersonId"
-        placeholder="UUID de Persona Maestra"
+        label="Responsable (opcional)"
+        helpText="Busca por nombre o teléfono. Debe ser Persona Maestra del mismo Ministerio."
       />
-      <p className="text-xs text-[var(--muted)]">
-        El responsable debe ser una Persona Maestra del mismo Ministerio. La activación
-        formal de líderes llega en Fase 4.
-      </p>
       {error ? <ErrorState title="No se pudo crear" message={error} /> : null}
       <button
         type="submit"

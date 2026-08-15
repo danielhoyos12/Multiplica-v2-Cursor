@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { PersonSearchField } from "@/components/persons/person-search-field";
 import { ErrorState } from "@/components/ui/error-state";
 import { activateLeaderAction } from "@/modules/leadership/actions";
 
@@ -145,14 +146,12 @@ export function ActivateLeaderForm({
           className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
         />
       </label>
-      <label className="block space-y-1 text-sm">
-        <span>Líder directo (person UUID)</span>
-        <input
-          name="directLeaderPersonId"
-          defaultValue={defaultDirectLeaderPersonId ?? ""}
-          className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
-        />
-      </label>
+      <PersonSearchField
+        name="directLeaderPersonId"
+        label="Líder directo"
+        defaultPersonId={defaultDirectLeaderPersonId}
+        helpText="Busca por nombre o teléfono. Déjalo vacío solo si activas raíz ministerial."
+      />
       {allowRoot ? (
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" name="isMinistryRoot" className="size-4" />

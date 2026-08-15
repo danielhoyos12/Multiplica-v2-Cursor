@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { EnrollmentPersonForm } from "@/components/formation/enrollment-person-form";
 import { UdvAttendanceBoard } from "@/components/formation/udv-attendance-board";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -54,29 +55,14 @@ export default async function UdvCyclePage({ params }: { params: Params }) {
       />
 
       {canManage && board.cycle.status === "active" ? (
-        <form
-          action={async (formData) => {
+        <EnrollmentPersonForm
+          label="Persona apta — Consolidar completado (buscar por nombre/teléfono)"
+          buttonLabel="Inscribir"
+          onEnroll={async (personId) => {
             "use server";
-            await enrollUdvAction({
-              personId: String(formData.get("personId") ?? ""),
-              cycleId,
-            });
+            return enrollUdvAction({ personId, cycleId });
           }}
-          className="flex flex-wrap gap-2 rounded-[var(--radius)] border border-dashed border-[var(--border)] p-4 text-sm"
-        >
-          <input
-            name="personId"
-            required
-            placeholder="UUID persona apta (Consolidar completado)"
-            className="min-w-[16rem] flex-1 rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
-          />
-          <button
-            type="submit"
-            className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-white"
-          >
-            Inscribir
-          </button>
-        </form>
+        />
       ) : null}
 
       <UdvAttendanceBoard

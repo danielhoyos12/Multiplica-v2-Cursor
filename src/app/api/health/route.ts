@@ -1,33 +1,19 @@
 import { NextResponse } from "next/server";
 
-import { createClient as createServerSupabase } from "@/server/supabase/server";
-import { hasDatabaseUrl, hasSupabasePublicConfig } from "@/lib/env";
+import { hasSupabasePublicConfig } from "@/lib/env";
 
+/**
+ * Liveness probe — no secrets, no schema dump.
+ * Deep readiness (DB) is /api/ready.
+ */
 export async function GET() {
-  const checks = {
-    supabasePublicConfig: hasSupabasePublicConfig(),
-    databaseUrl: hasDatabaseUrl(),
-    authSessionReadable: false as boolean,
-  };
-
-  if (checks.supabasePublicConfig) {
-    try {
-      const supabase = await createServerSupabase();
-      await supabase.auth.getSession();
-      checks.authSessionReadable = true;
-    } catch {
-      checks.authSessionReadable = false;
-    }
-  }
-
-  const ok = checks.supabasePublicConfig;
-
+  const ok = hasSupabasePublicConfig();
   return NextResponse.json(
     {
       status: ok ? "ok" : "degraded",
       service: "multiplica",
-      phase: "0-foundation",
-      checks,
+      version: process.env.npm_package_version ?? "1.0.0-rc.1",
+      timestamp: new Date().toISOString(),
     },
     { status: ok ? 200 : 503 },
   );

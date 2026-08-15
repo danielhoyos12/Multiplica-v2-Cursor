@@ -1,11 +1,13 @@
 /**
  * Data integrity verification against multiplica-dev.
- * Read-only — never auto-repairs.
+ * Read-only — never auto-repairs. Refuses production targets.
  */
+import { assertNotProductionTarget, redactDatabaseUrl } from "../src/lib/prod-guard";
 import { runIntegrityChecks } from "../src/modules/reporting/integrity";
 
 async function main() {
-  console.log("Running integrity checks…");
+  assertNotProductionTarget();
+  console.log(`Running integrity checks… target=${redactDatabaseUrl(process.env.DATABASE_URL)}`);
   const report = await runIntegrityChecks();
   console.log(`checkedAt=${report.checkedAt}`);
   console.log(`healthy=${report.healthy}`);

@@ -1,15 +1,17 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { createClient } from "@/server/supabase/client";
 import { ErrorState } from "@/components/ui/error-state";
+import { safeInternalPath } from "@/lib/safe-redirect";
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || "/dashboard";
+  const nextPath = safeInternalPath(searchParams.get("next"), "/dashboard");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -87,6 +89,11 @@ export function LoginForm() {
       >
         {loading ? "Ingresando…" : "Ingresar"}
       </button>
+      <p className="text-center text-sm">
+        <Link href="/recuperar" className="underline">
+          ¿Olvidaste tu contraseña?
+        </Link>
+      </p>
     </form>
   );
 }

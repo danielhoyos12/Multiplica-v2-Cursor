@@ -140,6 +140,13 @@ export function PublicGanarForm({
 
       {error ? <ErrorState title="Revisa los datos" message={error} /> : null}
 
+      <p className="text-xs leading-relaxed text-[var(--muted)]">
+        Al enviar, aceptas que tus datos de contacto se usen para el seguimiento
+        pastoral de la iglesia. La petición de oración es confidencial y solo la
+        ven personas autorizadas. Este aviso es informativo; la política formal se
+        define antes de producción.
+      </p>
+
       <button
         type="submit"
         disabled={pending || ministries.length === 0 || networks.length === 0}
