@@ -219,6 +219,71 @@ export const PERMISSION_SEEDS = [
     name: "Completar Re-Encuentro",
     description: "Completar formalmente Re-Encuentro.",
   },
+  {
+    code: "send.read",
+    name: "Leer Enviar",
+    description: "Ver aptos y progreso de Enviar.",
+  },
+  {
+    code: "send.manage",
+    name: "Gestionar Enviar",
+    description: "Iniciar y administrar proceso Enviar.",
+  },
+  {
+    code: "send.complete",
+    name: "Completar Enviar",
+    description: "Marcar Enviar completado (no activa liderazgo).",
+  },
+  {
+    code: "transfers.read",
+    name: "Leer transferencias",
+    description: "Ver solicitudes pastorales de transferencia.",
+  },
+  {
+    code: "transfers.request",
+    name: "Solicitar transferencias",
+    description: "Crear solicitudes de transferencia pastoral.",
+  },
+  {
+    code: "transfers.approve",
+    name: "Aprobar transferencias",
+    description: "Aprobar o rechazar transferencias pastorales.",
+  },
+  {
+    code: "transfers.execute",
+    name: "Ejecutar transferencias",
+    description: "Ejecutar transferencias aprobadas de forma atómica.",
+  },
+  {
+    code: "organization.transfer_network",
+    name: "Transferir Red",
+    description: "Cambiar Red organizacional de una persona.",
+  },
+  {
+    code: "organization.transfer_ministry",
+    name: "Transferir Ministerio",
+    description: "Cambiar Ministerio General de una persona.",
+  },
+  {
+    code: "leadership.reassign",
+    name: "Reasignar liderazgo",
+    description: "Reasignar líder directo y estructuras.",
+  },
+  {
+    code: "leadership.move_subtree",
+    name: "Mover subárbol",
+    description: "Mover líder con descendientes y reconstruir closure.",
+  },
+  {
+    code: "leadership.deactivate_with_structure",
+    name: "Desactivar con estructura",
+    description: "Desactivar líder resolviendo plan de reasignación.",
+  },
+  {
+    code: "cells.reassign_structure",
+    name: "Reasignar estructura de células",
+    description: "Resolver células y membresías en transferencias.",
+  },
 ] as const;
 
 const CELL_PERMS = [
@@ -261,6 +326,22 @@ const PROCESS_PERMS = [
   "reencounter.manage",
   "reencounter.attendance",
   "reencounter.complete",
+  "send.read",
+  "send.manage",
+  "send.complete",
+] as const;
+
+const TRANSFER_PERMS = [
+  "transfers.read",
+  "transfers.request",
+  "transfers.approve",
+  "transfers.execute",
+  "organization.transfer_network",
+  "organization.transfer_ministry",
+  "leadership.reassign",
+  "leadership.move_subtree",
+  "leadership.deactivate_with_structure",
+  "cells.reassign_structure",
 ] as const;
 
 export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
@@ -276,6 +357,7 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     ...CELL_PERMS,
     ...LEADER_PERMS,
     ...PROCESS_PERMS,
+    ...TRANSFER_PERMS,
     "school.catalog.manage",
     "destination.override_requirement",
     "audit.read",
@@ -289,6 +371,7 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     ...CELL_PERMS,
     ...LEADER_PERMS,
     ...PROCESS_PERMS,
+    ...TRANSFER_PERMS,
     "destination.override_requirement",
     "audit.read",
   ],
@@ -324,6 +407,14 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "reencounter.manage",
     "reencounter.attendance",
     "reencounter.complete",
+    "send.read",
+    "send.manage",
+    "send.complete",
+    "transfers.read",
+    "transfers.request",
+    "organization.transfer_network",
+    "leadership.reassign",
+    "cells.reassign_structure",
   ],
   staff: [
     "persons.read",

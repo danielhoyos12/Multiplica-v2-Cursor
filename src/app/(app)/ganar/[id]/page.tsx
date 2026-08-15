@@ -357,13 +357,23 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
             </ul>
           </li>
 
-          <li className="flex justify-between gap-2">
-            <span className="font-medium">ENVIAR</span>
-            <span className="text-[var(--muted)]">
-              {ladder?.next.code === "enviar" && ladder.next.eligible
-                ? "Apto (no implementado)"
-                : "—"}
-            </span>
+          <li className="space-y-1">
+            <div className="flex justify-between gap-2">
+              <span className="font-medium">ENVIAR</span>
+              <StatusBadge
+                label={ladder?.enviar?.label ?? "Pendiente"}
+                tone={ladder?.enviar?.status === "completed" ? "success" : "warning"}
+              />
+            </div>
+            <p className="ml-3 text-xs text-[var(--muted)]">
+              Liderazgo:{" "}
+              {ladder?.enviar?.leadershipActive
+                ? "Activo"
+                : ladder?.enviar?.leadershipEligible
+                  ? "Ungido / eligible"
+                  : ladder?.enviar?.leadershipStatus ?? "none"}{" "}
+              (separado de Enviar)
+            </p>
           </li>
 
           <li className="flex justify-between gap-2 text-[var(--muted)]">
@@ -375,6 +385,11 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
           </li>
         </ul>
         <div className="flex flex-wrap gap-2 pt-2">
+          {ladder?.enviar?.status === "eligible" || ladder?.next.code === "enviar" ? (
+            <Link href="/enviar" className="text-sm font-medium underline">
+              Ir a Enviar
+            </Link>
+          ) : null}
           {canProcess &&
           detail.current?.ministryId &&
           ladder?.consolidar.status !== "completed" &&

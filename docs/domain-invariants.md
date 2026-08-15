@@ -5,9 +5,10 @@ These invariants condition all future development. Application code, RLS, and mi
 1. **Una persona = un registro maestro.** Ganar is the identity entry point and source of truth.
 2. Other processes reference `person_id`; they do not duplicate persons.
 3. The official pastoral ladder is:
-   **Ganar → Consolidar (Pre-Encuentro → Encuentro → Post-Encuentro) → Discipular (CD1 → CD2 → Re-Encuentro → CD3 → EM1 → EM2 → EM3) → Enviar (eligible only until Phase 8).**
+   **Ganar → Consolidar (Pre-Encuentro → Encuentro → Post-Encuentro) → Discipular (CD1 → CD2 → Re-Encuentro → CD3 → EM1 → EM2 → EM3) → Enviar.**
    UDV is **not** a gate between Post-Encuentro and CD1. Re-Encuentro sits between CD2 and CD3 (not after Escuela Ministerial).
-4. **Ungido ≠ líder activado.**
+   Ordinary entry to Enviar requires **EM3 completed**. Completing Enviar does **not** auto-activate leadership or create cells.
+4. **Ungido ≠ líder activado.** Ungimiento reuses `person_leadership.status = eligible`. Activation remains Phase 4 (`active` + cell + credentials when required).
 5. An active leader requires a valid activation **and** their own cell.
 6. Only an active leader with a cell counts within the 12.
 7. An evangelistic cell may have any number of attendees.
@@ -20,12 +21,16 @@ These invariants condition all future development. Application code, RLS, and mi
 14. States `cursando`, `apto`, `completado` and KPIs are **derived** from data; they are not manual counters.
 15. Visibility is downward: a leader sees their node and authorized descendants; never superiors or lateral branches by default.
 16. Hombres may manage Hombres and Jóvenes; Mujeres, Mujeres and Jóvenes; Jóvenes, only Jóvenes.
-17. Changing Red or Ministerio does not create a new person and does not erase history.
-18. People under a leader are never lost because of exit, transfer, or reassignment.
+17. Changing Red or Ministerio does not create a new person and does not erase history. Close the current `person_organization_history` row (`effective_to`) and open a new one.
+18. People under a leader are never lost because of exit, transfer, or reassignment (**no-orphan**). Deactivation with structure requires an explicit plan (`leader_deactivation`).
 19. Critical actions must be audited.
 20. Critical restrictions are enforced in backend and database when reasonable.
 21. Completing any formation stage does **not** auto-activate leadership, create cells, or create credentials.
 22. `eligible ≠ enrolled` — aptitude never auto-enrolls.
+23. Pastoral transfers use `pastoral_transfer_requests` (draft → pending → approved → executed). Executed transfers are idempotent; concurrent execute is guarded; failures rollback.
+24. Subtree moves travel with descendants; rebuild `leadership_closure` transactionally; cycles and 13th direct child are blocked. Closure is current-state, not history — use `leadership_relationship_history`.
+25. Cross-ministry moves require approval; never unilateral lateral moves.
+26. Username / `human_leader_code` / auth identity are stable across transfers; scopes update, identities do not duplicate.
 ## Modeling notes
 
 - Do **not** use a single `persons.status` field for the whole journey.

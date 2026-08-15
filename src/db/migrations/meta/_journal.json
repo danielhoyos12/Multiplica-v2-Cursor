@@ -71,6 +71,13 @@
       "when": 1786758000000,
       "tag": "0009_phase7_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786759000000,
+      "tag": "0010_phase8_send_transfers",
+      "breakpoints": true
     }
   ]
 }

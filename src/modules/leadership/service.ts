@@ -701,8 +701,13 @@ export async function deactivateLeader(actorUserId: string, personId: string) {
   if (directCount > 0 || Number(cellsCount) > 0) {
     throw new DomainError(
       DomainErrorCode.LEADER_HAS_ACTIVE_STRUCTURE,
-      "No se puede desactivar: hay células o líderes directos. Requiere plan de reasignación (fase posterior).",
-      { directCount, cellsCount: Number(cellsCount) },
+      "No se puede desactivar: hay células o líderes directos. Use un plan de desactivación en /transferencias (leader_deactivation).",
+      {
+        directCount,
+        cellsCount: Number(cellsCount),
+        requiresDeactivationPlan: true,
+        transferType: "leader_deactivation",
+      },
     );
   }
 
