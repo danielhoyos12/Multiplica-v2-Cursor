@@ -17,7 +17,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/admin/networks", label: "Redes", enabled: true },
   { href: "/admin/users", label: "Usuarios", enabled: true },
   { href: "#", label: "Mi estructura", enabled: false },
-  { href: "#", label: "Ganar", enabled: false },
+  { href: "/ganar", label: "Ganar", enabled: true },
   { href: "#", label: "Células", enabled: false },
   { href: "#", label: "Escuela", enabled: false },
   { href: "#", label: "Reportes", enabled: false },
