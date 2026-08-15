@@ -7,6 +7,25 @@ import { ErrorState } from "@/components/ui/error-state";
 import { createClient } from "@/server/supabase/client";
 import { clearMustChangePasswordAction } from "@/modules/leadership/password-actions";
 
+function passwordPolicyError(password: string): string | null {
+  if (password.length < 10) {
+    return "La contraseña debe tener al menos 10 caracteres.";
+  }
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    return "Incluye al menos una letra y un número.";
+  }
+  const lower = password.toLowerCase();
+  if (
+    lower.includes("multiplica") ||
+    lower.includes("temporal") ||
+    lower === "password" ||
+    lower === "1234567890"
+  ) {
+    return "Elige una contraseña distinta a valores temporales obvios.";
+  }
+  return null;
+}
+
 export function ChangePasswordForm() {
   const router = useRouter();
   const [password, setPassword] = useState("");
@@ -17,8 +36,9 @@ export function ChangePasswordForm() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    if (password.length < 10) {
-      setError("La contraseña debe tener al menos 10 caracteres.");
+    const policy = passwordPolicyError(password);
+    if (policy) {
+      setError(policy);
       return;
     }
     if (password !== confirm) {
@@ -30,7 +50,7 @@ export function ChangePasswordForm() {
       const supabase = createClient();
       const { error: updateError } = await supabase.auth.updateUser({ password });
       if (updateError) {
-        setError(updateError.message);
+        setError("No se pudo actualizar la contraseña. Intenta de nuevo o contacta soporte.");
         setLoading(false);
         return;
       }
@@ -51,8 +71,8 @@ export function ChangePasswordForm() {
   return (
     <form onSubmit={onSubmit} className="mx-auto max-w-md space-y-4">
       <p className="text-sm text-[var(--muted)]">
-        Debes establecer una contraseña nueva antes de continuar. La temporal no se
-        vuelve a mostrar.
+        Debes establecer una contraseña nueva antes de continuar (mín. 10 caracteres,
+        letra y número). La temporal no se vuelve a mostrar.
       </p>
       <label className="block space-y-1 text-sm">
         <span>Nueva contraseña</span>
@@ -60,9 +80,10 @@ export function ChangePasswordForm() {
           type="password"
           required
           minLength={10}
+          autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
+          className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-base"
         />
       </label>
       <label className="block space-y-1 text-sm">
@@ -71,9 +92,10 @@ export function ChangePasswordForm() {
           type="password"
           required
           minLength={10}
+          autoComplete="new-password"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
-          className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
+          className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-base"
         />
       </label>
       {error ? <ErrorState title="Cambio de contraseña" message={error} /> : null}

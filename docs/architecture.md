@@ -1,106 +1,69 @@
-# MULTIPLICA — Architecture (Phase 0)
+# MULTIPLICA — Architecture (current)
+
+## Product sequence
+
+```text
+GANAR
+→ CONSOLIDAR (Pre-Encuentro → Encuentro → Post-Encuentro)
+→ DISCIPULAR (CD1 → CD2 → Re-Encuentro → CD3 → EM1 → EM2 → EM3)
+→ ENVIAR
+```
 
 ## Stack
 
 | Layer | Choice |
 | --- | --- |
-| Web app | Next.js (App Router) + TypeScript |
-| UI | Tailwind CSS v4 + design tokens MULTIPLICA |
-| Backend | Modular monolith (server actions / route handlers / domain modules) |
+| Web | Next.js App Router + TypeScript + Tailwind |
+| Backend | Modular monolith (server actions + domain modules) |
 | Database | PostgreSQL (Supabase) |
-| Auth | Supabase Auth |
-| Authorization | Domain policies + Supabase RLS (deny-by-default) |
-| ORM / migrations | Drizzle ORM + drizzle-kit |
-| Deploy target | Vercel (web) + Supabase (DB/Auth) |
+| Authn | Supabase Auth |
+| Authz | Domain policies + RLS deny-by-default |
+| ORM | Drizzle + versioned SQL migrations `0000`–`0010` |
+| Deploy | Vercel + Supabase (recommended) |
+
+## Modules (implemented)
+
+Persona Maestra · Ministerios/Redes · Células/membresías/asistencia · Liderazgo G12 + closure · Formación · Enviar/ungimiento · Transferencias · Dashboards/reportes/alertas · System health · RLS/authz · Auditoría
 
 ## Folder structure
 
 ```text
-src/
-  app/                  # App Router routes (auth, dashboard, health)
-  components/           # Shared UI + shell
-  modules/              # Domain modules (authorization, audit, placeholders…)
-  db/
-    schema/             # Drizzle schema
-    migrations/         # Versioned SQL migrations
-    seeds/              # Reproducible seeds
-    rls/                # RLS SQL applied after schema migrations
-  lib/                  # env, errors, utilities
-  server/               # server-only auth/supabase helpers & actions
-  types/
-docs/
+src/app/          # routes (auth, public intake, app shell, api)
+src/components/   # UI
+src/modules/      # domain services + actions
+src/db/           # schema, migrations, seeds, rls/
+src/lib/          # env, errors, redirects, prod-guard
+src/server/       # supabase session/admin helpers
+docs/             # architecture, security, ops, phase cierres
+e2e/              # Playwright smoke
 ```
 
-## Server / client strategy
+## Server / client
 
-- **Browser:** `@/server/supabase/client` with anon key only.
-- **Server Components / Actions / Route Handlers:** `@/server/supabase/server` (cookie session).
-- **Privileged ops:** `@/server/supabase/admin` (service role) — server-only, never imported by client components.
-- **SQL access:** `@/db/client` via `DATABASE_URL` (Drizzle). Prefer domain services over direct table access from the UI.
+- Browser: anon key only (`NEXT_PUBLIC_*`).
+- Server Components / Actions: cookie session.
+- Privileged: service role server-only (`@/server/supabase/admin`).
+- SQL: Drizzle via `DATABASE_URL` after domain authorization.
 
-## Authentication model
+## Auth hardening (Phase 10)
 
-1. Users authenticate with Supabase Auth (email/password in Phase 0).
-2. `users` application table maps `id` 1:1 to `auth.users.id` and optionally links `person_id`.
-3. Middleware refreshes the session and protects `/dashboard`.
-4. Login never grants pastoral permissions by itself — roles are assigned explicitly.
+- Protected pastoral prefixes in middleware.
+- `must_change_password` hard gate in app layout.
+- Safe internal redirects; forgot password at `/recuperar`.
+- `/api/health` (liveness) and `/api/ready` (DB readiness).
 
-## RLS strategy
-
-- RLS is **enabled + forced** on all foundation tables (`src/db/rls/001_foundation_rls.sql`).
-- Catalogs (`districts`, `networks`, `ministries`, roles/permissions) allow authenticated `SELECT` where appropriate.
-- `users` / `user_role_assignments`: own-row access only.
-- `persons`, `person_organization_history`, `audit_logs`: **no authenticated policies** in Phase 0 → deny by default; mutations go through server services after domain authorization.
-- Tree-scoped policies arrive with Leadership phases; do not weaken deny-by-default early.
-
-## Drizzle / migrations
+## RLS pipeline
 
 ```bash
-npm run db:generate   # generate SQL from schema
-npm run db:migrate    # apply migrations (requires DATABASE_URL)
-npm run db:seed       # networks, districts, roles/permissions
-```
-
-Apply `src/db/rls/001_foundation_rls.sql` after schema migrations (Supabase SQL editor or migration pipeline).
-
-## Architecture decisions
-
-1. Modular monolith; no microservices in MVP.
-2. Stable UUIDs as primary keys; human codes are not PKs.
-3. Separate identity, organization, authn, authz, audit from day one.
-4. Leadership tree will start as adjacency list + recursive CTE (later phase).
-5. Metrics remain derived; no manual KPI counters.
-6. Sensitive operations are transactional and audited.
-7. Do not invent the 12 Ministerios Generales names in seeds — Superadmin configures them.
-
-## Environment variables
-
-See `.env.example`:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY` (server only)
-- `DATABASE_URL` (server only)
-- `NEXT_PUBLIC_APP_URL`
-
-## Local run
-
-```bash
-cp .env.example .env.local
-# fill Supabase + DATABASE_URL values
-npm install
 npm run db:migrate
-# apply src/db/rls/001_foundation_rls.sql
-npm run db:seed
-npm run dev
+./scripts/apply-rls.sh   # idempotent DROP IF EXISTS + CREATE
+npm run db:seed          # catalogs; production: no Phase fixtures
 ```
 
-Useful checks:
+## Observability
 
-```bash
-npm run lint
-npm run typecheck
-npm test
-npm run build
-curl http://localhost:3000/api/health
-```
+Minimal: structured server errors, audit for business actions, health endpoints. Sentry optional post-go-live (not required for RC).
+
+## Non-goals (out of Phase 10)
+
+New pastoral workflows · microservices · second database · native mobile · auto production deploy · WhatsApp/push/ML/billing.

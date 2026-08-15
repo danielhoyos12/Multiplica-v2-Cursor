@@ -67,6 +67,7 @@ CREATE POLICY user_role_assignments_select_self_or_superadmin
   USING (user_id = auth.uid() OR public.is_superadmin());
 
 -- Audit: superadmin may read via PostgREST; inserts still service-role/server only
+DROP POLICY IF EXISTS audit_logs_select_superadmin ON audit_logs;
 CREATE POLICY audit_logs_select_superadmin
   ON audit_logs FOR SELECT TO authenticated
   USING (public.is_superadmin());

@@ -9,64 +9,64 @@ type NavItem = {
   href: string;
   label: string;
   enabled: boolean;
+  group: string;
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Inicio", enabled: true },
-  { href: "/admin/ministries", label: "Ministerios", enabled: true },
-  { href: "/admin/networks", label: "Redes", enabled: true },
-  { href: "/admin/users", label: "Usuarios", enabled: true },
-  { href: "/liderazgo", label: "Mi estructura", enabled: true },
-  { href: "/ganar", label: "Ganar", enabled: true },
-  { href: "/celulas", label: "Células", enabled: true },
-  { href: "/proceso", label: "Escalera", enabled: true },
-  { href: "/destino", label: "Destino", enabled: true },
-  { href: "/reencuentro", label: "Re-Encuentro", enabled: true },
-  { href: "/escuela-ministerial", label: "Escuela Min.", enabled: true },
-  { href: "/enviar", label: "Enviar", enabled: true },
-  { href: "/transferencias", label: "Transferencias", enabled: true },
-  { href: "/reportes", label: "Reportes", enabled: true },
-  { href: "/admin/system-health", label: "System health", enabled: true },
-  { href: "/udv", label: "UDV (legacy)", enabled: true },
-  { href: "#", label: "Más reportes", enabled: false },
+  { href: "/dashboard", label: "Inicio", enabled: true, group: "Principal" },
+  { href: "/ganar", label: "Personas / Ganar", enabled: true, group: "Principal" },
+  { href: "/celulas", label: "Células", enabled: true, group: "Principal" },
+  { href: "/liderazgo", label: "Liderazgo", enabled: true, group: "Principal" },
+  { href: "/proceso", label: "Proceso / Escalera", enabled: true, group: "Proceso" },
+  { href: "/destino", label: "Destino", enabled: true, group: "Proceso" },
+  { href: "/reencuentro", label: "Re-Encuentro", enabled: true, group: "Proceso" },
+  { href: "/escuela-ministerial", label: "Escuela Min.", enabled: true, group: "Proceso" },
+  { href: "/enviar", label: "Enviar", enabled: true, group: "Proceso" },
+  { href: "/transferencias", label: "Transferencias", enabled: true, group: "Operación" },
+  { href: "/reportes", label: "Reportes", enabled: true, group: "Operación" },
+  { href: "/admin/ministries", label: "Ministerios", enabled: true, group: "Admin" },
+  { href: "/admin/networks", label: "Redes", enabled: true, group: "Admin" },
+  { href: "/admin/users", label: "Usuarios", enabled: true, group: "Admin" },
+  { href: "/admin/system-health", label: "System health", enabled: true, group: "Admin" },
+  { href: "/udv", label: "UDV (legacy)", enabled: true, group: "Legacy" },
 ];
+
+const GROUPS = ["Principal", "Proceso", "Operación", "Admin", "Legacy"] as const;
 
 export function AppSidebar() {
   const pathname = usePathname();
 
   return (
     <nav aria-label="Principal" className="flex flex-col gap-1">
-      {NAV_ITEMS.map((item) => {
-        const active =
-          item.enabled &&
-          (pathname === item.href ||
-            (item.href !== "/dashboard" && pathname.startsWith(item.href)));
-
-        if (!item.enabled) {
-          return (
-            <span
-              key={item.label}
-              className="cursor-not-allowed rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--muted)] opacity-55"
-              title="Módulo pendiente de fase posterior"
-            >
-              {item.label}
-            </span>
-          );
-        }
-
+      {GROUPS.map((group) => {
+        const items = NAV_ITEMS.filter((item) => item.group === group);
+        if (items.length === 0) return null;
         return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              "rounded-[var(--radius-sm)] px-3 py-2 text-sm transition-colors",
-              active
-                ? "bg-[var(--brand-soft)] font-medium text-[var(--brand-ink)]"
-                : "text-[var(--ink)] hover:bg-[var(--surface-soft)]",
-            )}
-          >
-            {item.label}
-          </Link>
+          <div key={group}>
+            <p className="mb-1 mt-3 px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] first:mt-0">
+              {group}
+            </p>
+            {items.map((item) => {
+              const active =
+                item.enabled &&
+                (pathname === item.href ||
+                  (item.href !== "/dashboard" && pathname.startsWith(item.href)));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "block rounded-[var(--radius-sm)] px-3 py-2.5 text-sm transition-colors",
+                    active
+                      ? "bg-[var(--brand-soft)] font-medium text-[var(--brand-ink)]"
+                      : "text-[var(--ink)] hover:bg-[var(--surface-soft)]",
+                  )}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
         );
       })}
     </nav>

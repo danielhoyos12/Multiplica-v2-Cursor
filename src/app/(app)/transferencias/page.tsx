@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { asc, eq } from "drizzle-orm";
 
+import { TransferRequestForm } from "@/components/transfers/transfer-request-form";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getDb } from "@/db/client";
+import { ministries, networks } from "@/db/schema";
 import { hasPermission } from "@/modules/authorization";
 import {
   approveTransferAction,
-  createTransferAction,
   executeTransferAction,
   rejectTransferAction,
 } from "@/modules/transfers/actions";
@@ -22,22 +25,29 @@ export default async function TransferenciasPage({
 }: {
   searchParams: Search;
 }) {
-  const { auth } = await requireAppActor();
+  const { session, auth } = await requireAppActor();
   if (!hasPermission(auth, "transfers.read")) {
     redirect("/dashboard");
   }
 
   const params = await searchParams;
   const status = params.estado || undefined;
-  const rows = await listTransferRequests(
-    (
-      await requireAppActor()
-    ).session.id,
-    { status },
-  );
+  const rows = await listTransferRequests(session.id, { status });
   const canRequest = hasPermission(auth, "transfers.request");
   const canApprove = hasPermission(auth, "transfers.approve");
   const canExecute = hasPermission(auth, "transfers.execute");
+
+  const db = getDb();
+  const ministryRows = await db
+    .select({ id: ministries.id, code: ministries.code, name: ministries.name })
+    .from(ministries)
+    .where(eq(ministries.isActive, true))
+    .orderBy(asc(ministries.code));
+  const networkRows = await db
+    .select({ id: networks.id, name: networks.name })
+    .from(networks)
+    .where(eq(networks.isActive, true))
+    .orderBy(asc(networks.sortOrder));
 
   return (
     <div className="space-y-8">
@@ -73,73 +83,13 @@ export default async function TransferenciasPage({
       </form>
 
       {canRequest ? (
-        <form
-          action={async (formData) => {
-            "use server";
-            await createTransferAction({
-              personId: String(formData.get("personId") ?? ""),
-              transferType: String(formData.get("transferType") ?? "network_change"),
-              destinationNetworkId: String(formData.get("destinationNetworkId") ?? "") || null,
-              destinationMinistryId:
-                String(formData.get("destinationMinistryId") ?? "") || null,
-              proposedDirectLeaderPersonId:
-                String(formData.get("proposedDirectLeaderPersonId") ?? "") || null,
-              reason: String(formData.get("reason") ?? ""),
-              structureMode: "not_applicable",
-              submit: true,
-            });
-          }}
-          className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4"
-        >
-          <h2 className="font-medium">Nueva solicitud</h2>
-          <p className="text-xs text-[var(--muted)]">
-            Wizard simplificado. Para desactivación con estructura use preview + plan completo vía API/verify.
-          </p>
-          <input
-            name="personId"
-            required
-            placeholder="personId (UUID)"
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          />
-          <select
-            name="transferType"
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          >
-            <option value="network_change">Cambio de Red</option>
-            <option value="ministry_change">Cambio de Ministerio</option>
-            <option value="direct_leader_change">Cambio de líder directo</option>
-            <option value="subtree_move">Mover subárbol</option>
-            <option value="cell_membership_transfer">Transferir membresía</option>
-          </select>
-          <input
-            name="destinationNetworkId"
-            placeholder="destinationNetworkId (opcional)"
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          />
-          <input
-            name="destinationMinistryId"
-            placeholder="destinationMinistryId (opcional)"
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          />
-          <input
-            name="proposedDirectLeaderPersonId"
-            placeholder="nuevo líder directo (opcional)"
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          />
-          <textarea
-            name="reason"
-            required
-            minLength={5}
-            placeholder="Motivo pastoral"
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          />
-          <button
-            type="submit"
-            className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm text-white"
-          >
-            Crear solicitud
-          </button>
-        </form>
+        <TransferRequestForm
+          networks={networkRows.map((n) => ({ id: n.id, label: n.name }))}
+          ministries={ministryRows.map((m) => ({
+            id: m.id,
+            label: `${m.code} — ${m.name}`,
+          }))}
+        />
       ) : null}
 
       <ul className="space-y-3">
@@ -153,13 +103,6 @@ export default async function TransferenciasPage({
                 <p className="font-medium">{r.fullName}</p>
                 <p className="text-[var(--muted)]">
                   {r.transferType} · {r.reason}
-                </p>
-                <p className="text-xs text-[var(--muted)]">
-                  ORIGEN ministry {r.sourceMinistryId?.slice(0, 8) ?? "—"} / network{" "}
-                  {r.sourceNetworkId?.slice(0, 8) ?? "—"}
-                  <br />
-                  DESTINO ministry {r.destinationMinistryId?.slice(0, 8) ?? "—"} / network{" "}
-                  {r.destinationNetworkId?.slice(0, 8) ?? "—"}
                 </p>
               </div>
               <StatusBadge label={r.status} tone={r.status === "executed" ? "success" : "warning"} />
@@ -214,7 +157,9 @@ export default async function TransferenciasPage({
           </li>
         ))}
         {rows.length === 0 ? (
-          <p className="text-sm text-[var(--muted)]">Sin solicitudes.</p>
+          <p className="text-sm text-[var(--muted)]">
+            Sin solicitudes. Crea una arriba o espera aprobaciones.
+          </p>
         ) : null}
       </ul>
     </div>

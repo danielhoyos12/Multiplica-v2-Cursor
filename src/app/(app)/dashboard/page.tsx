@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { asc, eq } from "drizzle-orm";
 
 import { FunnelList, KpiCard, SimpleBarChart } from "@/components/reporting/kpi";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getDb } from "@/db/client";
+import { ministries, networks } from "@/db/schema";
 import { hasPermission, isSuperadmin } from "@/modules/authorization";
 import { DomainError } from "@/lib/errors";
+import { userFacingErrorMessage } from "@/lib/user-facing-errors";
 import { getExecutiveDashboard } from "@/modules/reporting";
 import type { PeriodKey } from "@/modules/reporting";
 import { requireAppActor } from "@/server/actor";
@@ -36,6 +40,22 @@ export default async function DashboardPage({
   const params = await searchParams;
   const period = (params.periodo as PeriodKey | undefined) ?? "this_month";
 
+  const db = getDb();
+  const ministryRows = await db
+    .select({ id: ministries.id, code: ministries.code, name: ministries.name })
+    .from(ministries)
+    .where(eq(ministries.isActive, true))
+    .orderBy(asc(ministries.code));
+  const networkRows = await db
+    .select({ id: networks.id, code: networks.code, name: networks.name })
+    .from(networks)
+    .where(eq(networks.isActive, true))
+    .orderBy(asc(networks.sortOrder));
+
+  const visibleMinistries = isSuperadmin(auth)
+    ? ministryRows
+    : ministryRows.filter((m) => auth.ministryIds.includes(m.id));
+
   let dash;
   let loadError: string | null = null;
   try {
@@ -46,12 +66,10 @@ export default async function DashboardPage({
       rootPersonId: params.raiz || null,
     });
   } catch (e) {
-    loadError =
-      e instanceof DomainError
-        ? e.message
-        : e instanceof Error
-          ? e.message
-          : "Error al cargar dashboard";
+    loadError = userFacingErrorMessage(e);
+    if (!(e instanceof DomainError) && !(e instanceof Error)) {
+      loadError = "Error al cargar dashboard";
+    }
     dash = null;
   }
 
@@ -60,11 +78,15 @@ export default async function DashboardPage({
       <PageHeader
         title="Dashboard pastoral"
         description="KPIs derivados en tiempo real. Ungido ≠ activo. Scope por rol."
-        actions={<StatusBadge label="Fase 9" tone="brand" />}
+        actions={<StatusBadge label="Fase 10" tone="brand" />}
       />
 
       <form className="flex flex-wrap gap-2 text-sm" method="get">
+        <label className="sr-only" htmlFor="periodo">
+          Período
+        </label>
         <select
+          id="periodo"
           name="periodo"
           defaultValue={period}
           className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
@@ -75,26 +97,45 @@ export default async function DashboardPage({
           <option value="last_90">Últimos 90 días</option>
           <option value="this_year">Este año</option>
         </select>
-        {isSuperadmin(auth) || auth.ministryIds.length > 1 ? (
-          <input
-            name="ministerio"
-            placeholder="Ministry UUID (opcional)"
-            defaultValue={params.ministerio ?? ""}
-            className="min-w-[12rem] flex-1 rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
-          />
-        ) : null}
-        <input
+        {(isSuperadmin(auth) || visibleMinistries.length > 1) && (
+          <>
+            <label className="sr-only" htmlFor="ministerio">
+              Ministerio
+            </label>
+            <select
+              id="ministerio"
+              name="ministerio"
+              defaultValue={params.ministerio ?? ""}
+              className="min-w-[10rem] rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+            >
+              <option value="">Todos los ministerios</option>
+              {visibleMinistries.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.code} — {m.name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        <label className="sr-only" htmlFor="red">
+          Red
+        </label>
+        <select
+          id="red"
           name="red"
-          placeholder="Network UUID (opcional)"
           defaultValue={params.red ?? ""}
-          className="min-w-[10rem] flex-1 rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
-        />
-        <input
-          name="raiz"
-          placeholder="Líder raíz UUID (drill-down)"
-          defaultValue={params.raiz ?? ""}
-          className="min-w-[12rem] flex-1 rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
-        />
+          className="min-w-[8rem] rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+        >
+          <option value="">Todas las redes</option>
+          {networkRows.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.name}
+            </option>
+          ))}
+        </select>
+        {params.raiz ? (
+          <input type="hidden" name="raiz" value={params.raiz} />
+        ) : null}
         <button
           type="submit"
           className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-white"
