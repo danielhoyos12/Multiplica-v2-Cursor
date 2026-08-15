@@ -19,7 +19,6 @@ import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
 import {
   assertCanMutate,
-  canAccessMinistry,
   hasPermission,
   isLeaderGeneral,
   isSuperadmin,

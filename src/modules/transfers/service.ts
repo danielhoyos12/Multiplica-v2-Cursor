@@ -3,7 +3,7 @@
  * Atomic preview → request → approve → execute with closure rebuild.
  * NEVER loses persons. NEVER creates a third cell. NEVER invents history.
  */
-import { and, count, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb } from "@/db/client";
@@ -31,7 +31,6 @@ import {
   isLeaderGeneral,
   isSuperadmin,
   loadAuthContext,
-  type AuthContext,
   type NetworkCode,
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";

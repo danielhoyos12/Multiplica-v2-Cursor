@@ -172,13 +172,13 @@ Fixtures controlados (sufijo `P8*`). Happy paths: Enviar, Red, Ministerio+estruc
 
 | Gate | Resultado |
 |------|-----------|
-| lint | _(ver CI / corrida local)_ |
-| typecheck | _(ver corrida)_ |
-| tests | _(ver corrida)_ |
-| build | _(ver corrida)_ |
-| verify live | _(ver corrida)_ |
+| lint | **PASS** (0 errors) |
+| typecheck | **PASS** |
+| tests | **PASS** (105) |
+| build | **PASS** (`/enviar`, `/transferencias` incluidos) |
+| verify live | **PASS** (54/54) |
 
-Actualizar esta sección con el resultado final de la corrida del agente.
+Verificación live (`scripts/verify-phase8-send-transfers.ts`): Enviar, ungimiento≠active, Phase 4 activation, Red history, Ministerio+estructura, subtree+closure, ciclo bloqueado, deactivation plan, no-orphan, max-2-cells, idempotencia, execute-not-approved DENY, anon DENY, audit.
 
 ## 31. Warnings
 
