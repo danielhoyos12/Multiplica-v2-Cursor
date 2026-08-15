@@ -34,11 +34,16 @@ export default async function ReencuentroPage() {
     <div className="space-y-8">
       <PageHeader
         title="Re-Encuentro"
-        description="Evento pastoral tras Escuela Ministerial. Completar no activa liderazgo. Siguiente etapa: elegibilidad Enviar (no implementada)."
+        description="Después de CD2 y antes de CD3. Completar no activa liderazgo. Siguiente: Capacitación Destino 3."
         actions={
-          <Link href="/escuela-ministerial" className="text-sm underline">
-            Escuela Ministerial
-          </Link>
+          <div className="flex gap-3">
+            <Link href="/destino" className="text-sm underline">
+              Destino
+            </Link>
+            <Link href="/escuela-ministerial" className="text-sm underline">
+              Escuela Ministerial
+            </Link>
+          </div>
         }
       />
 

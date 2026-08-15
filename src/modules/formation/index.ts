@@ -62,6 +62,42 @@ export {
 } from "./ministerial";
 
 export {
+  assertEmLevelEligible,
+  completeEmLevel,
+  createEmLevelCycle,
+  EmLevelRules,
+  enrollEmLevel,
+  ensureEmLevelEligible,
+  getEmLevelCycleBoard,
+  getEmLevelsDashboardCounts,
+  getPersonEmLevelsSummary,
+  isEmLevelEligible,
+  listEmLevelCycles,
+  markEmLevelAcademic,
+} from "./em-levels";
+
+export {
+  assertStageEligible,
+  completeConsolidarStage,
+  ConsolidarRules,
+  createConsolidarCycle,
+  enrollConsolidarStage,
+  getConsolidarCycleBoard,
+  getConsolidarDashboardCounts,
+  getPersonConsolidarSummary,
+  listConsolidarCycles,
+  syncConsolidarAggregate,
+} from "./consolidar-stages";
+
+export {
+  countCatalogExpectation,
+  ensureOfficialCatalog,
+  LEGACY_PROCESS_NOTES,
+  OFFICIAL_SEQUENCE,
+  OfficialEligibility,
+} from "./official-catalog";
+
+export {
   completeReencuentro,
   createReencuentroEvent,
   enrollReencuentro,

@@ -41,29 +41,35 @@ export default async function ProcesoPage({
     <div className="space-y-8">
       <PageHeader
         title="Escalera del Éxito"
-        description="GANAR → Consolidar → UDV → Destino → Escuela Ministerial → Re-Encuentro."
+        description="GANAR → Consolidar (Pre → Encuentro → Post) → Discipular (CD1 → CD2 → Re-Encuentro → CD3 → EM1–3) → Enviar apto."
         actions={
           <div className="flex gap-3">
-            <Link href="/escuela-ministerial" className="text-sm font-medium underline">
-              Escuela Min.
+            <Link href="/destino" className="text-sm font-medium underline">
+              Destino
             </Link>
             <Link href="/reencuentro" className="text-sm font-medium underline">
               Re-Encuentro
             </Link>
-            <Link href="/destino" className="text-sm font-medium underline">
-              Destino
+            <Link href="/escuela-ministerial" className="text-sm font-medium underline">
+              Escuela Min.
             </Link>
           </div>
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Kpi label="Consolidar pendiente" value={counts.consolidarPending} />
-        <Kpi label="Consolidar en curso" value={counts.consolidarInProgress} />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi label="Pre-Encuentro" value={counts.preEncuentro} />
+        <Kpi label="Encuentro" value={counts.encuentro} />
+        <Kpi label="Post-Encuentro" value={counts.postEncuentro} />
         <Kpi label="Consolidar completado" value={counts.consolidarCompleted} />
-        <Kpi label="UDV aptos" value={counts.udvEligible} />
-        <Kpi label="UDV en curso" value={counts.udvInProgress} />
-        <Kpi label="UDV completada" value={counts.udvCompleted} />
+        <Kpi label="CD1" value={counts.cd1} />
+        <Kpi label="CD2" value={counts.cd2} />
+        <Kpi label="Re-Encuentro" value={counts.reencuentro} />
+        <Kpi label="CD3" value={counts.cd3} />
+        <Kpi label="EM1" value={counts.em1} />
+        <Kpi label="EM2" value={counts.em2} />
+        <Kpi label="EM3" value={counts.em3} />
+        <Kpi label="Aptos CD1" value={counts.aptosCd1} />
       </div>
 
       <form className="flex flex-wrap gap-2 text-sm">

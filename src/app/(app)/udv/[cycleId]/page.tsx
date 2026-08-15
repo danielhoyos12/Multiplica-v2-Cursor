@@ -110,8 +110,8 @@ export default async function UdvCyclePage({ params }: { params: Params }) {
         <section className="space-y-2">
           <h2 className="font-medium">Completar UDV (explícito)</h2>
           <p className="text-sm text-[var(--muted)]">
-            Completar NO activa liderazgo ni abre célula. Habilita elegibilidad Destino Nivel 1
-            (sin inscripción automática).
+            Completar NO activa liderazgo ni abre célula. UDV es catálogo legacy y no habilita CD1
+            (CD1 requiere Consolidar completado: Pre + Encuentro + Post).
           </p>
           <ul className="space-y-2">
             {board.participants

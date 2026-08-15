@@ -735,14 +735,18 @@ export async function completeEm(
     },
   });
 
-  const { ensureReencuentroEligible } = await import("./reencounter");
-  await ensureReencuentroEligible(raw.personId, org.ministryId, org.networkId);
+  // Legacy single-EM path: do NOT unlock Re-Encuentro (official: CD2 → RE → CD3).
+  // Prefer em1|em2|em3 via em-levels.ts. Completing legacy EM only marks next-stage signal.
   await writeAuditLog({
     actorUserId,
     action: "ministerial_school.next_stage_eligible",
     entityType: "person_process_progress",
     entityId: row.id,
-    metadata: { personId: raw.personId, nextStage: "reencuentro" },
+    metadata: {
+      personId: raw.personId,
+      nextStage: "legacy_em_completed_use_em_levels",
+      deprecated: true,
+    },
   });
 
   return { progress: row, nextStageEligible: true, leadershipActivated: false };

@@ -14,16 +14,22 @@ import {
 
 import { ministries, networks, persons, users } from "./foundation";
 
-/** Pastoral process ladder stages implemented in Phase 5 (+ future-ready). */
+/** Pastoral process types. Legacy values retained as DEPRECATED aliases. */
 export const processTypeEnum = pgEnum("process_type", [
   "consolidar",
-  "udv",
-  "destino",
-  "destino_n1",
-  "destino_n2",
-  "destino_n3",
-  "escuela_ministerial",
+  "udv", // DEPRECATED — umbrella/legacy; not a gate before CD1
+  "destino", // DEPRECATED aggregate
+  "destino_n1", // ACTIVE alias for Capacitación Destino 1 (cd1)
+  "destino_n2", // ACTIVE alias for Capacitación Destino 2 (cd2)
+  "destino_n3", // ACTIVE alias for Capacitación Destino 3 (cd3)
+  "escuela_ministerial", // DEPRECATED — use em1|em2|em3
   "reencuentro",
+  "pre_encuentro",
+  "encuentro",
+  "post_encuentro",
+  "em1",
+  "em2",
+  "em3",
 ]);
 
 export const processStatusEnum = pgEnum("process_status", [
@@ -185,6 +191,9 @@ export const trainingModules = pgTable(
       .references(() => trainingPrograms.id, { onDelete: "restrict" }),
     code: text("code").notNull(),
     name: text("name").notNull(),
+    /** doctrina | seminario | clase | evento | dia */
+    componentCode: text("component_code"),
+    componentName: text("component_name"),
     orderIndex: integer("order_index").notNull().default(0),
     isActive: boolean("is_active").notNull().default(true),
     isRequired: boolean("is_required").notNull().default(true),
@@ -193,6 +202,7 @@ export const trainingModules = pgTable(
   (table) => [
     uniqueIndex("training_modules_program_code_uidx").on(table.programId, table.code),
     index("training_modules_program_order_idx").on(table.programId, table.orderIndex),
+    index("training_modules_component_idx").on(table.programId, table.componentCode),
   ],
 );
 
@@ -298,10 +308,19 @@ export const DESTINO_N1_CODE = "destino_n1" as const;
 export const DESTINO_N2_CODE = "destino_n2" as const;
 export const DESTINO_N3_CODE = "destino_n3" as const;
 export const DESTINO_FAMILY = "destino" as const;
-export const EM_PROGRAM_CODE = "escuela_ministerial" as const;
+export const EM_PROGRAM_CODE = "escuela_ministerial" as const; // DEPRECATED single program
 export const EM_FAMILY = "ministerial" as const;
+export const EM1_CODE = "em1" as const;
+export const EM2_CODE = "em2" as const;
+export const EM3_CODE = "em3" as const;
 export const REENCUENTRO_PROGRAM_CODE = "reencuentro" as const;
 export const REENCUENTRO_FAMILY = "reencuentro" as const;
+export const PRE_ENCUENTRO_CODE = "pre_encuentro" as const;
+export const ENCUENTRO_CODE = "encuentro" as const;
+export const POST_ENCUENTRO_CODE = "post_encuentro" as const;
+export const CONSOLIDAR_FAMILY = "consolidar" as const;
+export const DISCIPULAR_FAMILY = "discipular" as const;
+
 
 /** Configurable completion requirements per program/level. */
 export const trainingCompletionRequirements = pgTable(

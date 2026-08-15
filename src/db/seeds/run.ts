@@ -286,9 +286,9 @@ async function seedDestinoCatalog(db: ReturnType<typeof getDb>) {
           requirementType: "active_cell_members",
           numericValue: 12,
           category: "pastoral",
-          label: "12 personas activas en célula evangelística",
+          label: "12 personas activas en célula evangelística (desactivado — no confirmado por nivel)",
           isRequired: true,
-          isActive: true,
+          isActive: false,
         },
       ]);
     }
@@ -394,14 +394,20 @@ async function main() {
   console.log("Seeding roles and permissions...");
   await seedRbac(db);
 
-  console.log("Seeding Universidad de la Vida catalog...");
+  console.log("Seeding Universidad de la Vida catalog (legacy)...");
   await seedUdvCatalog(db);
 
   console.log("Seeding Capacitación Destino catalog...");
   await seedDestinoCatalog(db);
 
-  console.log("Seeding Escuela Ministerial + Re-Encuentro catalogs...");
+  console.log("Seeding Escuela Ministerial + Re-Encuentro catalogs (legacy single EM)...");
   await seedEmAndReencuentroCatalog(db);
+
+  console.log("Seeding official formation catalog (Phase 7 reconciliation)...");
+  const { ensureOfficialCatalog } = await import(
+    "../../modules/formation/official-catalog"
+  );
+  await ensureOfficialCatalog();
 
   console.log(
     "Seeds completed. Ministries Generales are NOT seeded (Superadmin setup).",

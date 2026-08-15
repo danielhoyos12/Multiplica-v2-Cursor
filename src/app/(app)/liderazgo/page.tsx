@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { hasPermission } from "@/modules/authorization";
-import { getEmDashboardCounts, getProcessDashboardCounts, getReencuentroDashboardCounts } from "@/modules/formation";
+import { getEmLevelsDashboardCounts, getProcessDashboardCounts, getReencuentroDashboardCounts } from "@/modules/formation";
 import { getLeaderDashboard } from "@/modules/leadership";
 import { requireAppActor } from "@/server/actor";
 
@@ -54,7 +54,7 @@ export default async function LiderazgoHomePage() {
   let reCounts = null;
   if (hasPermission(auth, "ministerial_school.read") || hasPermission(auth, "process.read")) {
     try {
-      emCounts = await getEmDashboardCounts(session.id);
+      emCounts = await getEmLevelsDashboardCounts(session.id);
     } catch {
       emCounts = null;
     }
@@ -91,12 +91,15 @@ export default async function LiderazgoHomePage() {
       </div>
 
       {processCounts ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Kpi label="Consolidar en curso" value={processCounts.consolidarInProgress} />
-          <Kpi label="Consolidar completado" value={processCounts.consolidarCompleted} />
-          <Kpi label="UDV aptos" value={processCounts.udvEligible} />
-          <Kpi label="UDV en curso" value={processCounts.udvInProgress} />
-          <Kpi label="UDV completada" value={processCounts.udvCompleted} />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Kpi label="Pre-Encuentro" value={processCounts.preEncuentro} />
+          <Kpi label="CD1" value={processCounts.cd1} />
+          <Kpi label="CD2" value={processCounts.cd2} />
+          <Kpi label="Re-Encuentro" value={processCounts.reencuentro} />
+          <Kpi label="CD3" value={processCounts.cd3} />
+          <Kpi label="EM1" value={processCounts.em1} />
+          <Kpi label="EM2" value={processCounts.em2} />
+          <Kpi label="EM3" value={processCounts.em3} />
           <Kpi
             label="Pendientes seguimiento"
             value={processCounts.consolidarPending + processCounts.consolidarInProgress}
@@ -108,9 +111,9 @@ export default async function LiderazgoHomePage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {emCounts ? (
             <>
-              <Kpi label="EM elegibles" value={emCounts.eligible} />
-              <Kpi label="EM en curso" value={emCounts.inProgress} />
-              <Kpi label="EM completados" value={emCounts.completed} />
+              <Kpi label="EM1 en curso/apto" value={emCounts.em1} />
+              <Kpi label="EM2 en curso/apto" value={emCounts.em2} />
+              <Kpi label="EM3 en curso/apto" value={emCounts.em3} />
             </>
           ) : null}
           {reCounts ? (

@@ -1,6 +1,9 @@
 # Fase 7 — Cierre: Escuela Ministerial + Re-Encuentro
 
-**Resultado: PASS**  
+> **SUPERSEDED BY PHASE 7 RECONCILIATION** — see `docs/phase-7-reconciliation-cierre.md`.
+> The sequence documented below (UDV → Destino N1–N3 → EM → Re-Encuentro) was a pastoral deviation corrected before merge of PR #9.
+
+**Resultado histórico (primera pasada):** PASS técnico con secuencia pastoral incorrecta.  
 **Branch:** `cursor/phase-7-em-reencuentro-a3cc`  
 **Base:** `main` (Fases 0–6 mergeadas; tip `077fbba`)  
 **Fecha:** 2026-08-15  

@@ -54,12 +54,6 @@ const LEVEL_PROCESS: Record<DestinoLevel, "destino_n1" | "destino_n2" | "destino
   3: "destino_n3",
 };
 
-function levelNotEligibleCode(level: DestinoLevel) {
-  if (level === 1) return DomainErrorCode.DESTINATION_LEVEL_1_NOT_ELIGIBLE;
-  if (level === 2) return DomainErrorCode.DESTINATION_LEVEL_2_NOT_ELIGIBLE;
-  return DomainErrorCode.DESTINATION_LEVEL_3_NOT_ELIGIBLE;
-}
-
 async function requireActor(userId: string) {
   return loadAuthContext(userId);
 }
@@ -91,21 +85,6 @@ async function getLevelProgress(personId: string, level: DestinoLevel) {
       and(
         eq(personProcessProgress.personId, personId),
         eq(personProcessProgress.processType, LEVEL_PROCESS[level]),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
-
-async function getUdvProgress(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, "udv"),
       ),
     )
     .limit(1);
@@ -281,20 +260,59 @@ export async function ensureDestinoN1Eligible(
 
 export async function assertDestinoEligible(personId: string, level: DestinoLevel) {
   if (level === 1) {
-    const udv = await getUdvProgress(personId);
-    if (!udv || udv.status !== "completed") {
+    // Official: Consolidar completed (Pre+Encuentro+Post). UDV is NOT a gate.
+    const db = getDb();
+    const [consolidar] = await db
+      .select()
+      .from(personProcessProgress)
+      .where(
+        and(
+          eq(personProcessProgress.personId, personId),
+          eq(personProcessProgress.processType, "consolidar"),
+        ),
+      )
+      .limit(1);
+    if (!consolidar || consolidar.status !== "completed") {
       throw new DomainError(
         DomainErrorCode.DESTINATION_LEVEL_1_NOT_ELIGIBLE,
-        "Universidad de la Vida debe estar completada.",
+        "Consolidar (Pre + Encuentro + Post) debe estar completado.",
       );
     }
     return;
   }
-  const prev = await getLevelProgress(personId, (level - 1) as DestinoLevel);
+  if (level === 2) {
+    const prev = await getLevelProgress(personId, 1);
+    if (!prev || prev.status !== "completed") {
+      throw new DomainError(
+        DomainErrorCode.DESTINATION_LEVEL_2_NOT_ELIGIBLE,
+        "Capacitación Destino 1 debe estar formalmente completada.",
+      );
+    }
+    return;
+  }
+  // Level 3: CD2 + Re-Encuentro (NOT after Escuela Ministerial)
+  const prev = await getLevelProgress(personId, 2);
   if (!prev || prev.status !== "completed") {
     throw new DomainError(
-      levelNotEligibleCode(level),
-      `Destino Nivel ${level - 1} debe estar formalmente completado.`,
+      DomainErrorCode.DESTINATION_LEVEL_3_NOT_ELIGIBLE,
+      "Capacitación Destino 2 debe estar formalmente completada.",
+    );
+  }
+  const db = getDb();
+  const [re] = await db
+    .select()
+    .from(personProcessProgress)
+    .where(
+      and(
+        eq(personProcessProgress.personId, personId),
+        eq(personProcessProgress.processType, "reencuentro"),
+      ),
+    )
+    .limit(1);
+  if (!re || re.status !== "completed") {
+    throw new DomainError(
+      DomainErrorCode.DESTINATION_LEVEL_3_NOT_ELIGIBLE,
+      "Re-Encuentro debe estar completado antes de Capacitación Destino 3.",
     );
   }
 }
@@ -962,26 +980,27 @@ export async function completeDestinoLevel(
     },
   });
 
+  // When CD1 completes → next is CD2 eligible (not reencuentro)
+  // When CD2 completes → Re-Encuentro eligible (NOT CD3)
   let nextEligible: number | null = null;
-  if (raw.level < 3) {
-    const next = (raw.level + 1) as DestinoLevel;
-    nextEligible = next;
-    const nextProgress = await getLevelProgress(raw.personId, next);
+  if (raw.level === 1) {
+    nextEligible = 2;
+    const nextProgress = await getLevelProgress(raw.personId, 2);
     if (!nextProgress) {
       await db.insert(personProcessProgress).values({
         personId: raw.personId,
-        processType: LEVEL_PROCESS[next],
+        processType: "destino_n2",
         status: "eligible",
-        stage: `n${next}`,
-        currentStep: `apto_n${next}`,
+        stage: "n2",
+        currentStep: "apto_n2",
         ministryId: org.ministryId,
         networkId: org.networkId,
-        metadata: { eligible_from_level: raw.level },
+        metadata: { eligible_from_level: 1 },
       });
     } else if (nextProgress.status === "pending") {
       await db
         .update(personProcessProgress)
-        .set({ status: "eligible", currentStep: `apto_n${next}`, updatedAt: new Date() })
+        .set({ status: "eligible", currentStep: "apto_n2", updatedAt: new Date() })
         .where(eq(personProcessProgress.id, nextProgress.id));
     }
     await writeAuditLog({
@@ -989,12 +1008,23 @@ export async function completeDestinoLevel(
       action: "destination.next_level_eligible",
       entityType: "person_process_progress",
       entityId: row.id,
-      metadata: { personId: raw.personId, nextLevel: next },
+      metadata: { personId: raw.personId, nextLevel: 2 },
+    });
+  } else if (raw.level === 2) {
+    // CD2 → Re-Encuentro eligible
+    const { ensureReencuentroEligible } = await import("./reencounter");
+    await ensureReencuentroEligible(raw.personId, org.ministryId, org.networkId);
+    await writeAuditLog({
+      actorUserId,
+      action: "destination.next_level_eligible",
+      entityType: "person_process_progress",
+      entityId: row.id,
+      metadata: { personId: raw.personId, nextStage: "reencuentro" },
     });
   } else {
-    // Nivel 3 complete → Escuela Ministerial eligible
-    const { ensureEmEligible } = await import("./ministerial");
-    await ensureEmEligible(raw.personId, org.ministryId, org.networkId);
+    // Nivel 3 / CD3 complete → Escuela Ministerial 1 eligible (NOT Re-Encuentro)
+    const { ensureEmLevelEligible } = await import("./em-levels");
+    await ensureEmLevelEligible(raw.personId, 1, org.ministryId, org.networkId);
     await writeAuditLog({
       actorUserId,
       action: "destination.next_level_eligible",
@@ -1002,7 +1032,7 @@ export async function completeDestinoLevel(
       entityId: row.id,
       metadata: {
         personId: raw.personId,
-        nextStage: "escuela_ministerial",
+        nextStage: "em1",
         implemented: true,
       },
     });
@@ -1019,8 +1049,8 @@ export async function listDestinoEligible(actorUserId: string, level: DestinoLev
   const db = getDb();
 
   if (level === 1) {
-    // UDV completed and N1 not completed
-    const udvDone = await db
+    // Consolidar completed and N1 not completed (UDV is NOT a gate)
+    const consolidarDone = await db
       .select({
         personId: personProcessProgress.personId,
         ministryId: personProcessProgress.ministryId,
@@ -1031,12 +1061,12 @@ export async function listDestinoEligible(actorUserId: string, level: DestinoLev
       .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
       .where(
         and(
-          eq(personProcessProgress.processType, "udv"),
+          eq(personProcessProgress.processType, "consolidar"),
           eq(personProcessProgress.status, "completed"),
         ),
       );
     const result = [];
-    for (const row of udvDone) {
+    for (const row of consolidarDone) {
       if (!isSuperadmin(actor) && !canAccessMinistry(actor, row.ministryId)) continue;
       try {
         await assertProcessAccess(actor, row.personId, row.ministryId);
@@ -1049,6 +1079,54 @@ export async function listDestinoEligible(actorUserId: string, level: DestinoLev
         personId: row.personId,
         fullName: formatFullName(row.firstName, row.lastName),
         levelStatus: n1?.status ?? "eligible",
+      });
+    }
+    return result;
+  }
+
+  if (level === 3) {
+    // CD2 + Re-Encuentro completed
+    const cd2Done = await db
+      .select({
+        personId: personProcessProgress.personId,
+        ministryId: personProcessProgress.ministryId,
+        firstName: persons.firstName,
+        lastName: persons.lastName,
+      })
+      .from(personProcessProgress)
+      .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
+      .where(
+        and(
+          eq(personProcessProgress.processType, "destino_n2"),
+          eq(personProcessProgress.status, "completed"),
+        ),
+      );
+    const result = [];
+    for (const row of cd2Done) {
+      if (!isSuperadmin(actor) && !canAccessMinistry(actor, row.ministryId)) continue;
+      try {
+        await assertProcessAccess(actor, row.personId, row.ministryId);
+      } catch {
+        continue;
+      }
+      const [re] = await db
+        .select()
+        .from(personProcessProgress)
+        .where(
+          and(
+            eq(personProcessProgress.personId, row.personId),
+            eq(personProcessProgress.processType, "reencuentro"),
+            eq(personProcessProgress.status, "completed"),
+          ),
+        )
+        .limit(1);
+      if (!re) continue;
+      const cur = await getLevelProgress(row.personId, 3);
+      if (cur?.status === "completed") continue;
+      result.push({
+        personId: row.personId,
+        fullName: formatFullName(row.firstName, row.lastName),
+        levelStatus: cur?.status ?? "eligible",
       });
     }
     return result;
@@ -1280,11 +1358,16 @@ export async function getPersonDestinoSummary(personId: string) {
 }
 
 export const DestinationRules = {
-  canEnterLevel1(udvStatus: string | null | undefined) {
-    return udvStatus === "completed";
+  /** CD1 requires Consolidar completed — UDV is NOT a gate. */
+  canEnterLevel1(consolidarStatus: string | null | undefined) {
+    return consolidarStatus === "completed";
   },
   canEnterLevel(prevCompleted: boolean) {
     return prevCompleted;
+  },
+  /** CD3 requires CD2 completed AND Re-Encuentro completed. */
+  canEnterLevel3(cd2Completed: boolean, reencuentroCompleted: boolean) {
+    return cd2Completed && reencuentroCompleted;
   },
   eligibilityDoesNotEnroll: true as const,
   completingDoesNotActivateLeader: true as const,
@@ -1293,4 +1376,5 @@ export const DestinationRules = {
     return count >= required;
   },
   twelvePersonsIsNotTwelveLeaders: true as const,
+  udvIsNotGateBeforeCd1: true as const,
 };

@@ -74,21 +74,6 @@ async function getReProgress(personId: string) {
   return row ?? null;
 }
 
-async function getEmProgress(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, "escuela_ministerial"),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
-
 async function appendEvent(params: {
   progressId: string;
   personId: string;
@@ -201,11 +186,22 @@ export async function ensureReencuentroEligible(
 }
 
 export async function assertReencuentroEligible(personId: string) {
-  const em = await getEmProgress(personId);
-  if (!em || em.status !== "completed") {
+  // Official: CD2 completed — NOT Escuela Ministerial
+  const db = getDb();
+  const [cd2] = await db
+    .select()
+    .from(personProcessProgress)
+    .where(
+      and(
+        eq(personProcessProgress.personId, personId),
+        eq(personProcessProgress.processType, "destino_n2"),
+      ),
+    )
+    .limit(1);
+  if (!cd2 || cd2.status !== "completed") {
     throw new DomainError(
       DomainErrorCode.REENCOUNTER_NOT_ELIGIBLE,
-      "Escuela Ministerial debe estar completada.",
+      "Capacitación Destino 2 debe estar completada.",
     );
   }
 }
@@ -596,8 +592,7 @@ export async function completeReencuentro(
       metadata: {
         ...(progress.metadata ?? {}),
         formally_completed: true,
-        eligible_for_send: true,
-        NEXT_STAGE_ELIGIBLE: true,
+        next_stage: "destino_n3",
         leadership_activated: false,
       },
     })
@@ -612,7 +607,7 @@ export async function completeReencuentro(
     toStatus: "completed",
     actorUserId,
     note: raw.note,
-    metadata: { eligible_for_send: true },
+    metadata: { next_stage: "destino_n3" },
   });
   await writeAuditLog({
     actorUserId,
@@ -623,9 +618,39 @@ export async function completeReencuentro(
       personId: raw.personId,
       leadership_activated: false,
       cell_created: false,
-      eligible_for_send: true,
+      next_stage: "destino_n3",
     },
   });
+
+  // Re-Encuentro → CD3 eligible
+  const [cd3] = await db
+    .select()
+    .from(personProcessProgress)
+    .where(
+      and(
+        eq(personProcessProgress.personId, raw.personId),
+        eq(personProcessProgress.processType, "destino_n3"),
+      ),
+    )
+    .limit(1);
+  if (!cd3) {
+    await db.insert(personProcessProgress).values({
+      personId: raw.personId,
+      processType: "destino_n3",
+      status: "eligible",
+      stage: "n3",
+      currentStep: "apto_n3",
+      ministryId: org.ministryId,
+      networkId: org.networkId,
+      metadata: { eligible_from: "reencuentro" },
+    });
+  } else if (cd3.status === "pending") {
+    await db
+      .update(personProcessProgress)
+      .set({ status: "eligible", currentStep: "apto_n3", updatedAt: new Date() })
+      .where(eq(personProcessProgress.id, cd3.id));
+  }
+
   await writeAuditLog({
     actorUserId,
     action: "reencounter.next_stage_eligible",
@@ -633,15 +658,15 @@ export async function completeReencuentro(
     entityId: row.id,
     metadata: {
       personId: raw.personId,
-      nextStage: "enviar",
-      implemented: false,
+      nextStage: "destino_n3",
+      implemented: true,
     },
   });
 
   return {
     progress: row,
     nextStageEligible: true,
-    eligibleForSend: true,
+    eligibleForSend: false,
     leadershipActivated: false,
   };
 }
@@ -652,7 +677,7 @@ export async function listReencuentroEligible(actorUserId: string) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
   const db = getDb();
-  const emDone = await db
+  const cd2Done = await db
     .select({
       personId: personProcessProgress.personId,
       ministryId: personProcessProgress.ministryId,
@@ -663,12 +688,12 @@ export async function listReencuentroEligible(actorUserId: string) {
     .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
     .where(
       and(
-        eq(personProcessProgress.processType, "escuela_ministerial"),
+        eq(personProcessProgress.processType, "destino_n2"),
         eq(personProcessProgress.status, "completed"),
       ),
     );
   const result = [];
-  for (const row of emDone) {
+  for (const row of cd2Done) {
     if (!isSuperadmin(actor) && !canAccessMinistry(actor, row.ministryId)) continue;
     try {
       await assertProcessAccess(actor, row.personId, row.ministryId);
@@ -823,11 +848,15 @@ export async function getPersonReencuentroSummary(personId: string) {
 }
 
 export const ReencuentroRules = {
-  canEnter(emStatus: string | null | undefined) {
-    return emStatus === "completed";
+  /** Official: Re-Encuentro after CD2 completed (NOT after Escuela Ministerial). */
+  canEnter(cd2Status: string | null | undefined) {
+    return cd2Status === "completed";
   },
   eligibilityDoesNotEnroll: true as const,
   completingDoesNotActivateLeader: true as const,
   completingDoesNotCreateCell: true as const,
+  nextStageIsCd3: true as const,
+  notAfterEscuelaMinisterial: true as const,
+  /** @deprecated alias kept for tests that expected eligibility-only next stage */
   nextStageIsEligibilityOnly: true as const,
 };

@@ -5,10 +5,9 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { hasPermission } from "@/modules/authorization";
 import {
-  ensureEmProgram,
-  getEmDashboardCounts,
-  listEmCycles,
-  listEmEligible,
+  ensureOfficialCatalog,
+  getEmLevelsDashboardCounts,
+  listEmLevelCycles,
 } from "@/modules/formation";
 import {
   activateEmCycleAction,
@@ -27,36 +26,35 @@ export default async function EscuelaMinisterialPage() {
     redirect("/dashboard");
   }
 
-  await ensureEmProgram();
-  const counts = await getEmDashboardCounts(session.id);
-  const cycles = await listEmCycles(session.id);
-  const aptos = await listEmEligible(session.id);
+  await ensureOfficialCatalog();
+  const counts = await getEmLevelsDashboardCounts(session.id);
+  const cycles = await listEmLevelCycles(session.id);
   const canManageCycles = hasPermission(auth, "school.cycles.manage");
 
   return (
     <div className="space-y-8">
       <PageHeader
         title="Escuela Ministerial"
-        description="Posterior a Destino N3. Completar no activa liderazgo ni abre célula."
+        description="EM1 → EM2 → EM3 tras CD3. Doctrina + Seminario por nivel. Completar no activa liderazgo ni abre célula."
         actions={
           <div className="flex gap-3">
             <Link href="/destino" className="text-sm underline">
               Destino
             </Link>
-            <Link href="/reencuentro" className="text-sm underline">
-              Re-Encuentro
+            <Link href="/proceso" className="text-sm underline">
+              Escalera
             </Link>
           </div>
         }
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Kpi label="Elegibles" value={counts.eligible} />
-        <Kpi label="En curso / aptos" value={counts.inProgress} />
-        <Kpi label="Académico completado" value={counts.academicCompleted} />
-        <Kpi label="Completados" value={counts.completed} />
-        <Kpi label="Pausados" value={counts.paused} />
-        <Kpi label="Pendiente requisito" value={counts.pendingRequirement} />
+        <Kpi label="EM1 en curso/apto" value={counts.em1} />
+        <Kpi label="EM1 completados" value={counts.em1Completed} />
+        <Kpi label="EM2 en curso/apto" value={counts.em2} />
+        <Kpi label="EM2 completados" value={counts.em2Completed} />
+        <Kpi label="EM3 en curso/apto" value={counts.em3} />
+        <Kpi label="EM3 completados" value={counts.em3Completed} />
       </div>
 
       {canManageCycles ? (
@@ -72,7 +70,11 @@ export default async function EscuelaMinisterialPage() {
           }}
           className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4"
         >
-          <h2 className="font-medium">Crear ciclo EM</h2>
+          <h2 className="font-medium">Crear ciclo EM (legacy single program)</h2>
+          <p className="text-xs text-[var(--muted)]">
+            Preferir ciclos por nivel EM1/EM2/EM3 vía catálogo oficial. Este formulario
+            conserva compatibilidad con el programa legacy.
+          </p>
           <input
             name="name"
             required
@@ -103,7 +105,7 @@ export default async function EscuelaMinisterialPage() {
       ) : null}
 
       <section className="space-y-2">
-        <h2 className="font-medium">Ciclos</h2>
+        <h2 className="font-medium">Ciclos EM1–EM3</h2>
         <ul className="space-y-2">
           {cycles.map((cycle) => (
             <li
@@ -142,24 +144,7 @@ export default async function EscuelaMinisterialPage() {
             </li>
           ))}
           {cycles.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">Sin ciclos.</p>
-          ) : null}
-        </ul>
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="font-medium">Aptos (muestra)</h2>
-        <ul className="space-y-1 text-sm">
-          {aptos.slice(0, 12).map((p) => (
-            <li key={p.personId} className="flex justify-between gap-2">
-              <Link href={`/ganar/${p.personId}`} className="underline">
-                {p.fullName}
-              </Link>
-              <span className="text-[var(--muted)]">{p.status}</span>
-            </li>
-          ))}
-          {aptos.length === 0 ? (
-            <li className="text-[var(--muted)]">Nadie apto en tu alcance.</li>
+            <p className="text-sm text-[var(--muted)]">Sin ciclos EM1–EM3.</p>
           ) : null}
         </ul>
       </section>

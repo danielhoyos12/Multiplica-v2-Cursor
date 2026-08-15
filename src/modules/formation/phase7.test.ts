@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSION_MAP } from "@/db/seeds/permissions";
 import { DomainErrorCode } from "@/lib/errors";
 import { canMutate, type AuthContext } from "@/modules/authorization/policy";
+import { EmLevelRules } from "@/modules/formation/em-levels";
 import { MinisterialRules } from "@/modules/formation/ministerial";
 import { ReencuentroRules } from "@/modules/formation/reencounter";
 import {
@@ -25,38 +26,44 @@ function actor(partial?: Partial<AuthContext>): AuthContext {
   };
 }
 
-describe("MinisterialRules", () => {
-  it("1. Destino N3 completed → EM eligible", () => {
-    expect(MinisterialRules.canEnter("completed")).toBe(true);
+describe("EmLevelRules (official)", () => {
+  it("CD3 completed → EM1 eligible", () => {
+    expect(EmLevelRules.canEnterEm1("completed")).toBe(true);
   });
-  it("2. Destino N3 incomplete → deny", () => {
-    expect(MinisterialRules.canEnter("in_progress")).toBe(false);
-    expect(MinisterialRules.canEnter(null)).toBe(false);
+  it("CD3 incomplete → EM1 deny", () => {
+    expect(EmLevelRules.canEnterEm1("in_progress")).toBe(false);
+    expect(EmLevelRules.canEnterEm1(null)).toBe(false);
   });
-  it("3. eligibility does not enroll", () => {
-    expect(MinisterialRules.eligibilityDoesNotEnroll).toBe(true);
-  });
-  it("9. academic separate from completed", () => {
-    expect(MinisterialRules.academicSeparateFromCompleted).toBe(true);
-  });
-  it("13. completing EM does not activate leader", () => {
-    expect(MinisterialRules.completingDoesNotActivateLeader).toBe(true);
-    expect(MinisterialRules.completingDoesNotCreateCell).toBe(true);
+  it("completing EM does not activate leader", () => {
+    expect(EmLevelRules.completingDoesNotActivateLeader).toBe(true);
   });
 });
 
-describe("ReencuentroRules", () => {
-  it("15. EM completed → Re-Encuentro eligible", () => {
+describe("MinisterialRules (legacy single EM — kept for compat)", () => {
+  it("legacy canEnter still keyed off N3 completed", () => {
+    expect(MinisterialRules.canEnter("completed")).toBe(true);
+  });
+  it("eligibility does not enroll", () => {
+    expect(MinisterialRules.eligibilityDoesNotEnroll).toBe(true);
+  });
+  it("academic separate from completed", () => {
+    expect(MinisterialRules.academicSeparateFromCompleted).toBe(true);
+  });
+});
+
+describe("ReencuentroRules (official: after CD2)", () => {
+  it("CD2 completed → Re-Encuentro eligible", () => {
     expect(ReencuentroRules.canEnter("completed")).toBe(true);
   });
-  it("16. EM incomplete → deny", () => {
+  it("CD2 incomplete → deny", () => {
     expect(ReencuentroRules.canEnter("academic_completed")).toBe(false);
   });
-  it("23. completing does not activate leader", () => {
-    expect(ReencuentroRules.completingDoesNotActivateLeader).toBe(true);
+  it("next stage is CD3 — not after Escuela Ministerial", () => {
+    expect(ReencuentroRules.nextStageIsCd3).toBe(true);
+    expect(ReencuentroRules.notAfterEscuelaMinisterial).toBe(true);
   });
-  it("42. next stage is eligibility only", () => {
-    expect(ReencuentroRules.nextStageIsEligibilityOnly).toBe(true);
+  it("completing does not activate leader", () => {
+    expect(ReencuentroRules.completingDoesNotActivateLeader).toBe(true);
   });
 });
 

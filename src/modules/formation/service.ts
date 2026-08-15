@@ -1054,41 +1054,72 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
   }
 
   const consolidar = await getProgress(personId, "consolidar");
-  const udv = await getProgress(personId, "udv");
+  const udv = await getProgress(personId, "udv"); // legacy only — not a gate
+  const { getPersonConsolidarSummary } = await import("./consolidar-stages");
   const { getPersonDestinoSummary } = await import("./destination");
-  const destinoLevels = await getPersonDestinoSummary(personId);
-  const { getPersonEmSummary } = await import("./ministerial");
+  const { getPersonEmLevelsSummary } = await import("./em-levels");
   const { getPersonReencuentroSummary } = await import("./reencounter");
-  const em = await getPersonEmSummary(personId);
+
+  const consolidarStages = await getPersonConsolidarSummary(personId);
+  const destinoLevels = await getPersonDestinoSummary(personId);
+  const emLevels = await getPersonEmLevelsSummary(personId);
   const reencuentro = await getPersonReencuentroSummary(personId);
 
-  const n3Done = destinoLevels.n3.status === "completed";
-  const n2Done = destinoLevels.n2.status === "completed";
+  const consolidarDone = consolidar?.status === "completed";
   const n1Done = destinoLevels.n1.status === "completed";
-  const udvDone = udv?.status === "completed";
-  const emDone = em.status === "completed";
+  const n2Done = destinoLevels.n2.status === "completed";
+  const n3Done = destinoLevels.n3.status === "completed";
   const reDone = reencuentro.status === "completed";
+  const em1Done = emLevels.em1.status === "completed";
+  const em2Done = emLevels.em2.status === "completed";
+  const em3Done = emLevels.em3.status === "completed";
 
-  let nextCode = "destino_n1";
-  let nextLabel = "Destino Nivel 1";
-  let nextEligible = udvDone && destinoLevels.n1.status !== "completed";
-  if (n1Done && !n2Done) {
+  // Official next-step resolution (no UDV gate; RE between CD2 and CD3)
+  let nextCode = "pre_encuentro";
+  let nextLabel = "Pre-Encuentro";
+  let nextEligible = true;
+
+  if (consolidarStages.pre.status !== "completed") {
+    nextCode = "pre_encuentro";
+    nextLabel = "Pre-Encuentro";
+    nextEligible = true;
+  } else if (consolidarStages.encuentro.status !== "completed") {
+    nextCode = "encuentro";
+    nextLabel = "Encuentro";
+    nextEligible = true;
+  } else if (consolidarStages.post.status !== "completed") {
+    nextCode = "post_encuentro";
+    nextLabel = "Post-Encuentro";
+    nextEligible = true;
+  } else if (consolidarDone && !n1Done) {
+    nextCode = "destino_n1";
+    nextLabel = "Capacitación Destino 1";
+    nextEligible = true;
+  } else if (n1Done && !n2Done) {
     nextCode = "destino_n2";
-    nextLabel = "Destino Nivel 2";
+    nextLabel = "Capacitación Destino 2";
     nextEligible = true;
-  } else if (n2Done && !n3Done) {
-    nextCode = "destino_n3";
-    nextLabel = "Destino Nivel 3";
-    nextEligible = true;
-  } else if (n3Done && !emDone) {
-    nextCode = "escuela_ministerial";
-    nextLabel = "Escuela Ministerial";
-    nextEligible = true;
-  } else if (emDone && !reDone) {
+  } else if (n2Done && !reDone) {
     nextCode = "reencuentro";
     nextLabel = "Re-Encuentro";
     nextEligible = true;
-  } else if (reDone) {
+  } else if (n2Done && reDone && !n3Done) {
+    nextCode = "destino_n3";
+    nextLabel = "Capacitación Destino 3";
+    nextEligible = true;
+  } else if (n3Done && !em1Done) {
+    nextCode = "em1";
+    nextLabel = "Escuela Ministerial 1";
+    nextEligible = true;
+  } else if (em1Done && !em2Done) {
+    nextCode = "em2";
+    nextLabel = "Escuela Ministerial 2";
+    nextEligible = true;
+  } else if (em2Done && !em3Done) {
+    nextCode = "em3";
+    nextLabel = "Escuela Ministerial 3";
+    nextEligible = true;
+  } else if (em3Done) {
     nextCode = "enviar";
     nextLabel = "Enviar (próxima etapa)";
     nextEligible = true;
@@ -1098,22 +1129,35 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
     personId,
     ganar: { status: "completed" as const, label: "Completado" },
     consolidar: {
-      status: consolidar?.status ?? "pending",
-      label: statusLabel(consolidar?.status ?? "pending"),
+      status: consolidar?.status ?? consolidarStages.consolidar.status,
+      label: statusLabel(consolidar?.status ?? consolidarStages.consolidar.status),
       progress: consolidar,
+      stages: consolidarStages,
     },
+    /** @deprecated UDV is not an official gate; kept for legacy display only */
     udv: {
       status: udv?.status ?? "pending",
       label: statusLabel(udv?.status ?? "pending"),
       progress: udv,
-      eligible: consolidar?.status === "completed",
+      eligible: false,
+      legacy: true as const,
+    },
+    discipular: {
+      cd1: destinoLevels.n1,
+      cd2: destinoLevels.n2,
+      reencuentro,
+      cd3: destinoLevels.n3,
+      em1: emLevels.em1,
+      em2: emLevels.em2,
+      em3: emLevels.em3,
     },
     destino: {
       n1: destinoLevels.n1,
       n2: destinoLevels.n2,
       n3: destinoLevels.n3,
     },
-    escuelaMinisterial: em,
+    escuelaMinisterial: emLevels.em1,
+    emLevels,
     reencuentro,
     next: {
       code: nextCode,
@@ -1171,14 +1215,7 @@ export async function getProcessDashboardCounts(
   } else if (actor.ministryIds.length) {
     conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
   } else {
-    return {
-      consolidarPending: 0,
-      consolidarInProgress: 0,
-      consolidarCompleted: 0,
-      udvEligible: 0,
-      udvInProgress: 0,
-      udvCompleted: 0,
-    };
+    return emptyOfficialDashboardCounts();
   }
 
   const where =
@@ -1194,16 +1231,73 @@ export async function getProcessDashboardCounts(
     .where(where)
     .groupBy(personProcessProgress.processType, personProcessProgress.status);
 
-  const pick = (type: string, status: string) =>
-    Number(rows.find((r) => r.processType === type && r.status === status)?.c ?? 0);
+  const pick = (type: string, statuses: string[]) =>
+    Number(
+      rows
+        .filter((r) => r.processType === type && statuses.includes(r.status))
+        .reduce((acc, r) => acc + Number(r.c), 0),
+    );
+  const pickOne = (type: string, status: string) => pick(type, [status]);
 
   return {
-    consolidarPending: pick("consolidar", "pending"),
-    consolidarInProgress: pick("consolidar", "in_progress"),
-    consolidarCompleted: pick("consolidar", "completed"),
-    udvEligible: pick("udv", "pending"),
-    udvInProgress: pick("udv", "in_progress"),
-    udvCompleted: pick("udv", "completed"),
+    consolidarPending: pickOne("consolidar", "pending"),
+    consolidarInProgress: pickOne("consolidar", "in_progress"),
+    consolidarCompleted: pickOne("consolidar", "completed"),
+    // Official stage counts
+    preEncuentro: pick("pre_encuentro", ["eligible", "in_progress", "academic_completed"]),
+    encuentro: pick("encuentro", ["eligible", "in_progress", "academic_completed"]),
+    postEncuentro: pick("post_encuentro", ["eligible", "in_progress", "academic_completed"]),
+    cd1: pick("destino_n1", ["eligible", "in_progress", "academic_completed"]),
+    cd2: pick("destino_n2", ["eligible", "in_progress", "academic_completed"]),
+    reencuentro: pick("reencuentro", ["eligible", "in_progress", "academic_completed"]),
+    cd3: pick("destino_n3", ["eligible", "in_progress", "academic_completed"]),
+    em1: pick("em1", ["eligible", "in_progress", "academic_completed"]),
+    em2: pick("em2", ["eligible", "in_progress", "academic_completed"]),
+    em3: pick("em3", ["eligible", "in_progress", "academic_completed"]),
+    // Aptos (eligible status)
+    aptosEncuentro: pickOne("encuentro", "eligible"),
+    aptosPostEncuentro: pickOne("post_encuentro", "eligible"),
+    aptosCd1: pickOne("destino_n1", "eligible"),
+    aptosCd2: pickOne("destino_n2", "eligible"),
+    aptosReencuentro: pickOne("reencuentro", "eligible"),
+    aptosCd3: pickOne("destino_n3", "eligible"),
+    aptosEm1: pickOne("em1", "eligible"),
+    aptosEm2: pickOne("em2", "eligible"),
+    aptosEm3: pickOne("em3", "eligible"),
+    // Legacy UDV (not a gate)
+    udvEligible: pickOne("udv", "pending"),
+    udvInProgress: pickOne("udv", "in_progress"),
+    udvCompleted: pickOne("udv", "completed"),
+  };
+}
+
+function emptyOfficialDashboardCounts() {
+  return {
+    consolidarPending: 0,
+    consolidarInProgress: 0,
+    consolidarCompleted: 0,
+    preEncuentro: 0,
+    encuentro: 0,
+    postEncuentro: 0,
+    cd1: 0,
+    cd2: 0,
+    reencuentro: 0,
+    cd3: 0,
+    em1: 0,
+    em2: 0,
+    em3: 0,
+    aptosEncuentro: 0,
+    aptosPostEncuentro: 0,
+    aptosCd1: 0,
+    aptosCd2: 0,
+    aptosReencuentro: 0,
+    aptosCd3: 0,
+    aptosEm1: 0,
+    aptosEm2: 0,
+    aptosEm3: 0,
+    udvEligible: 0,
+    udvInProgress: 0,
+    udvCompleted: 0,
   };
 }
 
@@ -1386,12 +1480,18 @@ export async function getPersonsProcessSummary(personIds: string[]) {
     string,
     {
       consolidar?: string;
+      preEncuentro?: string;
+      encuentro?: string;
+      postEncuentro?: string;
       udv?: string;
       destinoLabel?: string;
       destinoN1?: string;
       destinoN2?: string;
       destinoN3?: string;
       emStatus?: string;
+      em1?: string;
+      em2?: string;
+      em3?: string;
       reencuentroStatus?: string;
       compactLabel?: string;
     }
@@ -1399,47 +1499,52 @@ export async function getPersonsProcessSummary(personIds: string[]) {
   for (const row of rows) {
     map[row.personId] ??= {};
     if (row.processType === "consolidar") map[row.personId].consolidar = row.status;
+    if (row.processType === "pre_encuentro") map[row.personId].preEncuentro = row.status;
+    if (row.processType === "encuentro") map[row.personId].encuentro = row.status;
+    if (row.processType === "post_encuentro") map[row.personId].postEncuentro = row.status;
     if (row.processType === "udv") map[row.personId].udv = row.status;
     if (row.processType === "destino_n1") map[row.personId].destinoN1 = row.status;
     if (row.processType === "destino_n2") map[row.personId].destinoN2 = row.status;
     if (row.processType === "destino_n3") map[row.personId].destinoN3 = row.status;
     if (row.processType === "escuela_ministerial") map[row.personId].emStatus = row.status;
+    if (row.processType === "em1") map[row.personId].em1 = row.status;
+    if (row.processType === "em2") map[row.personId].em2 = row.status;
+    if (row.processType === "em3") map[row.personId].em3 = row.status;
     if (row.processType === "reencuentro") map[row.personId].reencuentroStatus = row.status;
   }
   for (const personId of Object.keys(map)) {
     const entry = map[personId]!;
-    if (entry.destinoN3 && entry.destinoN3 !== "pending") {
-      entry.destinoLabel =
-        entry.destinoN3 === "academic_completed"
-          ? "Nivel 3 — pendiente requisito"
-          : entry.destinoN3 === "completed"
-            ? "Nivel 3"
-            : `Nivel 3 — ${statusLabel(entry.destinoN3)}`;
+    // Compact summary: prefer deepest official stage
+    if (entry.em3 && entry.em3 !== "pending") {
+      entry.compactLabel = `Discipular: EM3 ${statusLabel(entry.em3)}`;
+    } else if (entry.em2 && entry.em2 !== "pending") {
+      entry.compactLabel = `Discipular: EM2 ${statusLabel(entry.em2)}`;
+    } else if (entry.em1 && entry.em1 !== "pending") {
+      entry.compactLabel = `Discipular: EM1 ${statusLabel(entry.em1)}`;
+    } else if (entry.destinoN3 && entry.destinoN3 !== "pending") {
+      entry.destinoLabel = `CD3 — ${statusLabel(entry.destinoN3)}`;
+      entry.compactLabel = `Discipular: CD3`;
+    } else if (entry.reencuentroStatus && entry.reencuentroStatus !== "pending") {
+      entry.compactLabel =
+        entry.reencuentroStatus === "eligible"
+          ? "Discipular: Re-Encuentro apto"
+          : `Discipular: Re-Encuentro`;
     } else if (entry.destinoN2 && entry.destinoN2 !== "pending") {
-      entry.destinoLabel =
-        entry.destinoN2 === "academic_completed"
-          ? "Nivel 2 — pendiente requisito"
-          : entry.destinoN2 === "completed"
-            ? "Nivel 2"
-            : `Nivel 2 — ${statusLabel(entry.destinoN2)}`;
+      entry.destinoLabel = `CD2 — ${statusLabel(entry.destinoN2)}`;
+      entry.compactLabel = `Discipular: CD2`;
     } else if (entry.destinoN1 && entry.destinoN1 !== "pending") {
-      entry.destinoLabel =
-        entry.destinoN1 === "academic_completed"
-          ? "Nivel 1 — pendiente requisito"
-          : entry.destinoN1 === "completed"
-            ? "Nivel 1"
-            : `Nivel 1 — ${statusLabel(entry.destinoN1)}`;
-    }
-    const emPart = entry.emStatus
-      ? `EM: ${statusLabel(entry.emStatus)}`
-      : null;
-    const rePart = entry.reencuentroStatus
-      ? `Re-Encuentro: ${statusLabel(entry.reencuentroStatus)}`
-      : null;
-    if (emPart || rePart) {
-      entry.compactLabel = [emPart, rePart].filter(Boolean).join(" · ");
-    } else if (entry.destinoLabel) {
-      entry.compactLabel = `Destino: ${entry.destinoLabel}`;
+      entry.destinoLabel = `CD1 — ${statusLabel(entry.destinoN1)}`;
+      entry.compactLabel = `Discipular: CD1`;
+    } else if (entry.consolidar === "completed") {
+      entry.compactLabel = "Consolidar: completado";
+    } else if (entry.postEncuentro && entry.postEncuentro !== "pending") {
+      entry.compactLabel = `Consolidar: Post-Encuentro`;
+    } else if (entry.encuentro && entry.encuentro !== "pending") {
+      entry.compactLabel = `Consolidar: Encuentro`;
+    } else if (entry.preEncuentro && entry.preEncuentro !== "pending") {
+      entry.compactLabel = `Consolidar: Pre-Encuentro`;
+    } else if (entry.consolidar) {
+      entry.compactLabel = `Consolidar: ${statusLabel(entry.consolidar)}`;
     }
   }
   return map;
@@ -1447,15 +1552,22 @@ export async function getPersonsProcessSummary(personIds: string[]) {
 
 /** Pure helpers for unit tests */
 export const FormationRules = {
+  /** @deprecated UDV is not an official gate; legacy compat only */
   canEnterUdv(consolidarStatus: string | null | undefined) {
     return consolidarStatus === "completed";
   },
   completingUdvActivatesLeader() {
     return false;
   },
+  /** @deprecated Official next after consolidar is CD1, not UDV */
   nextStageEligibleAfterUdv(udvStatus: string) {
     return udvStatus === "completed";
   },
+  /** Official: Consolidar completed → CD1 eligible (UDV never gates). */
+  consolidarEnablesCd1(consolidarStatus: string | null | undefined) {
+    return consolidarStatus === "completed";
+  },
+  udvIsNotGateBeforeCd1: true as const,
   duplicateEnrollmentBlocked(alreadyEnrolled: boolean) {
     return alreadyEnrolled;
   },

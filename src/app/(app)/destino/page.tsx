@@ -43,14 +43,14 @@ export default async function DestinoPage({ searchParams }: { searchParams: Sear
     <div className="space-y-8">
       <PageHeader
         title="Capacitación Destino"
-        description="Niveles 1–3. Requiere UDV completada. Académico ≠ pastoral. Completar no activa liderazgo."
+        description="CD1 → CD2 → Re-Encuentro → CD3. CD1 requiere Consolidar completado (no UDV). Completar no activa liderazgo."
         actions={
           <div className="flex gap-3">
             <Link href="/proceso" className="text-sm font-medium underline">
               Escalera
             </Link>
-            <Link href="/udv" className="text-sm font-medium underline">
-              UDV
+            <Link href="/reencuentro" className="text-sm font-medium underline">
+              Re-Encuentro
             </Link>
           </div>
         }

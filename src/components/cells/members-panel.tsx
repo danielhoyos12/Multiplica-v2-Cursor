@@ -144,8 +144,8 @@ export function CellMembersPanel({ cellId, members, siblingCells, canManage }: P
                         ? ` · ${m.compactLabel}`
                         : m.destinoLabel
                           ? ` · Destino: ${m.destinoLabel}`
-                          : !m.destinoLabel && (m.consolidarStatus || m.udvStatus)
-                            ? ` · Consolidar: ${m.consolidarStatus ?? "—"} · UDV: ${m.udvStatus ?? "—"}`
+                          : m.consolidarStatus
+                            ? ` · Consolidar: ${m.consolidarStatus}`
                             : ""}
                     </p>
                   </div>
