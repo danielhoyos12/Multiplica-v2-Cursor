@@ -1,5 +1,8 @@
-# formation
+# Formation — Escalera del Éxito (Fase 5)
 
-Placeholder module for MULTIPLICA Phase 0.
+- Consolidar + Universidad de la Vida
+- Identidad única: `persons.id`
+- Programas/módulos/ciclos reutilizables (`training_*`)
+- NO implementa Destino / Escuela Ministerial / Classroom
 
-Pastoral workflows for this domain are intentionally not implemented yet.
+Ver `docs/phase-5-cierre.md`.

@@ -15,6 +15,7 @@ import {
 } from "@/modules/cells";
 import { closeCellAction } from "@/modules/cells/actions";
 import { countsAsTwelveLeader, getTwelveProgress } from "@/modules/leadership";
+import { getPersonsProcessSummary, statusLabel } from "@/modules/formation";
 import { requireAppActor } from "@/server/actor";
 
 export const metadata = { title: "Detalle de célula" };
@@ -72,6 +73,19 @@ export default async function CellDetailPage({ params }: { params: Params }) {
         isActiveLeader: await countsAsTwelveLeader(m.personId),
       })),
   );
+
+  const processMap = await getPersonsProcessSummary(
+    detail.members.filter((m) => m.status === "active").map((m) => m.personId),
+  );
+  const membersWithProcess = detail.members.map((m) => ({
+    ...m,
+    consolidarStatus: processMap[m.personId]?.consolidar
+      ? statusLabel(processMap[m.personId]!.consolidar!)
+      : undefined,
+    udvStatus: processMap[m.personId]?.udv
+      ? statusLabel(processMap[m.personId]!.udv!)
+      : undefined,
+  }));
 
   return (
     <div className="space-y-8">
@@ -154,7 +168,7 @@ export default async function CellDetailPage({ params }: { params: Params }) {
 
       <CellMembersPanel
         cellId={id}
-        members={detail.members}
+        members={membersWithProcess}
         siblingCells={siblingCells}
         canManage={canManage}
       />

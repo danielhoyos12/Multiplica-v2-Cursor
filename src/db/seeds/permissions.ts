@@ -104,6 +104,46 @@ export const PERMISSION_SEEDS = [
     name: "Leer auditoría",
     description: "Consultar audit logs autorizados.",
   },
+  {
+    code: "process.read",
+    name: "Leer Escalera del Éxito",
+    description: "Ver progreso pastoral (Consolidar / UDV) en el alcance.",
+  },
+  {
+    code: "process.update",
+    name: "Actualizar proceso pastoral",
+    description: "Iniciar/pausar/retomar etapas de la Escalera.",
+  },
+  {
+    code: "consolidation.manage",
+    name: "Gestionar Consolidar",
+    description: "Completar y administrar Consolidar.",
+  },
+  {
+    code: "udv.read",
+    name: "Leer Universidad de la Vida",
+    description: "Ver ciclos, inscritos y progreso UDV.",
+  },
+  {
+    code: "udv.manage",
+    name: "Gestionar Universidad de la Vida",
+    description: "Inscribir, pausar y completar participantes UDV.",
+  },
+  {
+    code: "udv.attendance",
+    name: "Asistencia UDV",
+    description: "Registrar asistencia y recuperaciones autorizadas.",
+  },
+  {
+    code: "school.cycles.manage",
+    name: "Gestionar ciclos formativos",
+    description: "Crear/activar/cerrar ciclos de programas.",
+  },
+  {
+    code: "school.catalog.manage",
+    name: "Gestionar catálogo formativo",
+    description: "Administrar programas y módulos configurables.",
+  },
 ] as const;
 
 const CELL_PERMS = [
@@ -124,6 +164,16 @@ const LEADER_PERMS = [
   "g12.convert_twelve",
 ] as const;
 
+const PROCESS_PERMS = [
+  "process.read",
+  "process.update",
+  "consolidation.manage",
+  "udv.read",
+  "udv.manage",
+  "udv.attendance",
+  "school.cycles.manage",
+] as const;
+
 export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
   superadmin: [
     "platform.configure",
@@ -136,6 +186,8 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "persons.write",
     ...CELL_PERMS,
     ...LEADER_PERMS,
+    ...PROCESS_PERMS,
+    "school.catalog.manage",
     "audit.read",
   ],
   leader_general: [
@@ -146,6 +198,7 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "persons.write",
     ...CELL_PERMS,
     ...LEADER_PERMS,
+    ...PROCESS_PERMS,
     "audit.read",
   ],
   leader: [
@@ -161,6 +214,12 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "leaders.activate",
     "leaders.view_descendants",
     "g12.convert_twelve",
+    "process.read",
+    "process.update",
+    "consolidation.manage",
+    "udv.read",
+    "udv.manage",
+    "udv.attendance",
   ],
   staff: [
     "persons.read",
@@ -170,5 +229,8 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "cells.read",
     "cells.attendance",
     "leaders.read",
+    "process.read",
+    "udv.read",
+    "udv.attendance",
   ],
 };

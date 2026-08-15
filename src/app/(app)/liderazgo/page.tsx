@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { hasPermission } from "@/modules/authorization";
+import { getProcessDashboardCounts } from "@/modules/formation";
 import { getLeaderDashboard } from "@/modules/leadership";
 import { requireAppActor } from "@/server/actor";
 
@@ -40,6 +41,15 @@ export default async function LiderazgoHomePage() {
     );
   }
 
+  let processCounts = null;
+  if (hasPermission(auth, "process.read")) {
+    try {
+      processCounts = await getProcessDashboardCounts(session.id, auth.personId);
+    } catch {
+      processCounts = null;
+    }
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -62,6 +72,20 @@ export default async function LiderazgoHomePage() {
           value={dashboard.readyForTwelve ? "Sí" : "No"}
         />
       </div>
+
+      {processCounts ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Kpi label="Consolidar en curso" value={processCounts.consolidarInProgress} />
+          <Kpi label="Consolidar completado" value={processCounts.consolidarCompleted} />
+          <Kpi label="UDV aptos" value={processCounts.udvEligible} />
+          <Kpi label="UDV en curso" value={processCounts.udvInProgress} />
+          <Kpi label="UDV completada" value={processCounts.udvCompleted} />
+          <Kpi
+            label="Pendientes seguimiento"
+            value={processCounts.consolidarPending + processCounts.consolidarInProgress}
+          />
+        </div>
+      ) : null}
 
       <section className="space-y-3">
         <h2 className="font-medium">Mis células</h2>

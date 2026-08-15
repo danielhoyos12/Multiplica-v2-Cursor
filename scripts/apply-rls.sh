@@ -18,6 +18,7 @@ if ! command -v psql >/dev/null 2>&1; then
   echo "  - src/db/rls/003_phase2_ganar_rls.sql"
   echo "  - src/db/rls/004_phase3_cells_rls.sql"
   echo "  - src/db/rls/005_phase4_leadership_rls.sql"
+  echo "  - src/db/rls/006_phase5_formation_rls.sql"
   exit 1
 fi
 
@@ -26,4 +27,5 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/002_phase1_mini
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/003_phase2_ganar_rls.sql"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/004_phase3_cells_rls.sql"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/005_phase4_leadership_rls.sql"
-echo "RLS applied (foundation + phase 1 + phase 2 + phase 3 + phase 4)."
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$ROOT_DIR/src/db/rls/006_phase5_formation_rls.sql"
+echo "RLS applied (foundation + phases 1–5)."
