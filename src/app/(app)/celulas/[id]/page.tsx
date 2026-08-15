@@ -86,6 +86,7 @@ export default async function CellDetailPage({ params }: { params: Params }) {
       ? statusLabel(processMap[m.personId]!.udv!)
       : undefined,
     destinoLabel: processMap[m.personId]?.destinoLabel,
+    compactLabel: processMap[m.personId]?.compactLabel,
   }));
 
   return (

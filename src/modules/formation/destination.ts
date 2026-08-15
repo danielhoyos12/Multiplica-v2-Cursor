@@ -992,7 +992,9 @@ export async function completeDestinoLevel(
       metadata: { personId: raw.personId, nextLevel: next },
     });
   } else {
-    // Nivel 3 complete → next stage signal (Escuela Ministerial future)
+    // Nivel 3 complete → Escuela Ministerial eligible
+    const { ensureEmEligible } = await import("./ministerial");
+    await ensureEmEligible(raw.personId, org.ministryId, org.networkId);
     await writeAuditLog({
       actorUserId,
       action: "destination.next_level_eligible",
@@ -1001,7 +1003,7 @@ export async function completeDestinoLevel(
       metadata: {
         personId: raw.personId,
         nextStage: "escuela_ministerial",
-        implemented: false,
+        implemented: true,
       },
     });
   }

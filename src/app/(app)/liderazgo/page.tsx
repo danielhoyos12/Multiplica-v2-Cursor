@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { hasPermission } from "@/modules/authorization";
-import { getProcessDashboardCounts } from "@/modules/formation";
+import { getEmDashboardCounts, getProcessDashboardCounts, getReencuentroDashboardCounts } from "@/modules/formation";
 import { getLeaderDashboard } from "@/modules/leadership";
 import { requireAppActor } from "@/server/actor";
 
@@ -50,6 +50,23 @@ export default async function LiderazgoHomePage() {
     }
   }
 
+  let emCounts = null;
+  let reCounts = null;
+  if (hasPermission(auth, "ministerial_school.read") || hasPermission(auth, "process.read")) {
+    try {
+      emCounts = await getEmDashboardCounts(session.id);
+    } catch {
+      emCounts = null;
+    }
+  }
+  if (hasPermission(auth, "reencounter.read") || hasPermission(auth, "process.read")) {
+    try {
+      reCounts = await getReencuentroDashboardCounts(session.id);
+    } catch {
+      reCounts = null;
+    }
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -87,13 +104,23 @@ export default async function LiderazgoHomePage() {
         </div>
       ) : null}
 
-      {hasPermission(auth, "destination.read") || hasPermission(auth, "process.read") ? (
-        <p className="text-sm">
-          <Link href="/destino" className="font-medium underline">
-            Ver Capacitación Destino
-          </Link>{" "}
-          (niveles, aptos y pendientes pastorales en el alcance).
-        </p>
+      {emCounts || reCounts ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {emCounts ? (
+            <>
+              <Kpi label="EM elegibles" value={emCounts.eligible} />
+              <Kpi label="EM en curso" value={emCounts.inProgress} />
+              <Kpi label="EM completados" value={emCounts.completed} />
+            </>
+          ) : null}
+          {reCounts ? (
+            <>
+              <Kpi label="Re-Encuentro elegibles" value={reCounts.eligible} />
+              <Kpi label="Re-Encuentro completados" value={reCounts.completed} />
+              <Kpi label="Re-Encuentro pendientes" value={reCounts.pending} />
+            </>
+          ) : null}
+        </div>
       ) : null}
 
       <section className="space-y-3">

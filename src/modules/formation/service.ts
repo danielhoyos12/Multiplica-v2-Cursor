@@ -716,7 +716,9 @@ export async function recordTrainingAttendance(
   const input = recordAttendanceInputSchema.parse(raw);
   if (
     !hasPermission(actor, "udv.attendance") &&
-    !hasPermission(actor, "destination.attendance")
+    !hasPermission(actor, "destination.attendance") &&
+    !hasPermission(actor, "ministerial_school.attendance") &&
+    !hasPermission(actor, "reencounter.attendance")
   ) {
     throw new DomainError(
       DomainErrorCode.NOT_AUTHORIZED,
@@ -847,7 +849,9 @@ export async function authorizeAttendanceRecovery(actorUserId: string, raw: unkn
   const input = authorizeRecoveryInputSchema.parse(raw);
   if (
     !hasPermission(actor, "udv.attendance") &&
-    !hasPermission(actor, "destination.attendance")
+    !hasPermission(actor, "destination.attendance") &&
+    !hasPermission(actor, "ministerial_school.attendance") &&
+    !hasPermission(actor, "reencounter.attendance")
   ) {
     throw new DomainError(
       DomainErrorCode.NOT_AUTHORIZED,
@@ -1053,11 +1057,17 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
   const udv = await getProgress(personId, "udv");
   const { getPersonDestinoSummary } = await import("./destination");
   const destinoLevels = await getPersonDestinoSummary(personId);
+  const { getPersonEmSummary } = await import("./ministerial");
+  const { getPersonReencuentroSummary } = await import("./reencounter");
+  const em = await getPersonEmSummary(personId);
+  const reencuentro = await getPersonReencuentroSummary(personId);
 
   const n3Done = destinoLevels.n3.status === "completed";
   const n2Done = destinoLevels.n2.status === "completed";
   const n1Done = destinoLevels.n1.status === "completed";
   const udvDone = udv?.status === "completed";
+  const emDone = em.status === "completed";
+  const reDone = reencuentro.status === "completed";
 
   let nextCode = "destino_n1";
   let nextLabel = "Destino Nivel 1";
@@ -1070,9 +1080,17 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
     nextCode = "destino_n3";
     nextLabel = "Destino Nivel 3";
     nextEligible = true;
-  } else if (n3Done) {
+  } else if (n3Done && !emDone) {
     nextCode = "escuela_ministerial";
-    nextLabel = "Siguiente etapa (pendiente)";
+    nextLabel = "Escuela Ministerial";
+    nextEligible = true;
+  } else if (emDone && !reDone) {
+    nextCode = "reencuentro";
+    nextLabel = "Re-Encuentro";
+    nextEligible = true;
+  } else if (reDone) {
+    nextCode = "enviar";
+    nextLabel = "Enviar (próxima etapa)";
     nextEligible = true;
   }
 
@@ -1095,11 +1113,13 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
       n2: destinoLevels.n2,
       n3: destinoLevels.n3,
     },
+    escuelaMinisterial: em,
+    reencuentro,
     next: {
       code: nextCode,
       label: nextLabel,
       eligible: nextEligible,
-      implemented: !n3Done,
+      implemented: nextCode !== "enviar",
     },
   };
 }
@@ -1371,6 +1391,9 @@ export async function getPersonsProcessSummary(personIds: string[]) {
       destinoN1?: string;
       destinoN2?: string;
       destinoN3?: string;
+      emStatus?: string;
+      reencuentroStatus?: string;
+      compactLabel?: string;
     }
   > = {};
   for (const row of rows) {
@@ -1380,6 +1403,8 @@ export async function getPersonsProcessSummary(personIds: string[]) {
     if (row.processType === "destino_n1") map[row.personId].destinoN1 = row.status;
     if (row.processType === "destino_n2") map[row.personId].destinoN2 = row.status;
     if (row.processType === "destino_n3") map[row.personId].destinoN3 = row.status;
+    if (row.processType === "escuela_ministerial") map[row.personId].emStatus = row.status;
+    if (row.processType === "reencuentro") map[row.personId].reencuentroStatus = row.status;
   }
   for (const personId of Object.keys(map)) {
     const entry = map[personId]!;
@@ -1404,6 +1429,17 @@ export async function getPersonsProcessSummary(personIds: string[]) {
           : entry.destinoN1 === "completed"
             ? "Nivel 1"
             : `Nivel 1 — ${statusLabel(entry.destinoN1)}`;
+    }
+    const emPart = entry.emStatus
+      ? `EM: ${statusLabel(entry.emStatus)}`
+      : null;
+    const rePart = entry.reencuentroStatus
+      ? `Re-Encuentro: ${statusLabel(entry.reencuentroStatus)}`
+      : null;
+    if (emPart || rePart) {
+      entry.compactLabel = [emPart, rePart].filter(Boolean).join(" · ");
+    } else if (entry.destinoLabel) {
+      entry.compactLabel = `Destino: ${entry.destinoLabel}`;
     }
   }
   return map;

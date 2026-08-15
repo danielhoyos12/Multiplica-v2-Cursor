@@ -22,6 +22,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/proceso", label: "Escalera", enabled: true },
   { href: "/udv", label: "UDV", enabled: true },
   { href: "/destino", label: "Destino", enabled: true },
+  { href: "/escuela-ministerial", label: "Escuela Min.", enabled: true },
+  { href: "/reencuentro", label: "Re-Encuentro", enabled: true },
   { href: "#", label: "Reportes", enabled: false },
 ];
 

@@ -91,3 +91,53 @@ export const assignCycleStaffInputSchema = z.object({
   role: z.enum(["teacher", "coordinator", "assistant"]).optional(),
   canCompleteLevel: z.boolean().optional(),
 });
+
+export const createEmCycleInputSchema = z.object({
+  name: z.string().trim().min(3).max(160),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  ministryId: z.string().uuid().optional().nullable().or(z.literal("")),
+});
+
+export const enrollEmInputSchema = z.object({
+  personId: z.string().uuid(),
+  cycleId: z.string().uuid(),
+});
+
+export const markEmAcademicInputSchema = z.object({
+  personId: z.string().uuid(),
+  enrollmentId: z.string().uuid().optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const completeEmInputSchema = z.object({
+  personId: z.string().uuid(),
+  note: z.string().trim().max(500).optional(),
+  overrideRequirementIds: z.array(z.string().uuid()).optional(),
+  overrideReason: z.string().trim().min(5).max(500).optional(),
+});
+
+export const createReencuentroEventInputSchema = z.object({
+  name: z.string().trim().min(3).max(160),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  ministryId: z.string().uuid().optional().nullable().or(z.literal("")),
+});
+
+export const enrollReencuentroInputSchema = z.object({
+  personId: z.string().uuid(),
+  cycleId: z.string().uuid(),
+});
+
+export const recordReencuentroAttendanceInputSchema = z.object({
+  enrollmentId: z.string().uuid(),
+  status: z.enum(["present", "absent", "excused", "recovered"]),
+  attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  notes: z.string().trim().max(400).optional().or(z.literal("")),
+});
+
+export const completeReencuentroInputSchema = z.object({
+  personId: z.string().uuid(),
+  enrollmentId: z.string().uuid().optional(),
+  note: z.string().trim().max(500).optional(),
+});

@@ -44,13 +44,54 @@ export {
 } from "./destination";
 
 export {
+  completeEm,
+  createEmCycle,
+  enrollEm,
+  ensureEmEligible,
+  ensureEmProgram,
+  getEmCycleBoard,
+  getEmDashboardCounts,
+  getPersonEmSummary,
+  isEmEligible,
+  listEmCycles,
+  listEmEligible,
+  markEmAcademicCompleted,
+  MinisterialRules,
+  pauseEm,
+  resumeEm,
+} from "./ministerial";
+
+export {
+  completeReencuentro,
+  createReencuentroEvent,
+  enrollReencuentro,
+  ensureReencuentroEligible,
+  ensureReencuentroProgram,
+  getPersonReencuentroSummary,
+  getReencuentroDashboardCounts,
+  getReencuentroEventBoard,
+  isReencuentroEligible,
+  listReencuentroEligible,
+  listReencuentroEvents,
+  recordReencuentroAttendance,
+  ReencuentroRules,
+} from "./reencounter";
+
+export {
   assignCycleStaffInputSchema,
   completeConsolidationInputSchema,
   completeDestinoLevelInputSchema,
+  completeEmInputSchema,
+  completeReencuentroInputSchema,
   createCycleInputSchema,
   createDestinoCycleInputSchema,
+  createEmCycleInputSchema,
+  createReencuentroEventInputSchema,
   enrollDestinoInputSchema,
+  enrollEmInputSchema,
+  enrollReencuentroInputSchema,
   enrollUdvInputSchema,
   markAcademicCompletedInputSchema,
+  markEmAcademicInputSchema,
   startConsolidationInputSchema,
 } from "./validation";

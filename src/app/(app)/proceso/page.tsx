@@ -41,14 +41,17 @@ export default async function ProcesoPage({
     <div className="space-y-8">
       <PageHeader
         title="Escalera del Éxito"
-        description="GANAR → Consolidar → UDV → Capacitación Destino."
+        description="GANAR → Consolidar → UDV → Destino → Escuela Ministerial → Re-Encuentro."
         actions={
           <div className="flex gap-3">
+            <Link href="/escuela-ministerial" className="text-sm font-medium underline">
+              Escuela Min.
+            </Link>
+            <Link href="/reencuentro" className="text-sm font-medium underline">
+              Re-Encuentro
+            </Link>
             <Link href="/destino" className="text-sm font-medium underline">
               Destino
-            </Link>
-            <Link href="/udv" className="text-sm font-medium underline">
-              Universidad de la Vida
             </Link>
           </div>
         }

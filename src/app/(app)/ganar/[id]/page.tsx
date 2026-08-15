@@ -280,6 +280,22 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
               </li>
             </ul>
           </li>
+          <li className="flex justify-between gap-2">
+            <span>ESCUELA MINISTERIAL</span>
+            <StatusBadge
+              label={ladder?.escuelaMinisterial?.label ?? "Pendiente"}
+              tone={
+                ladder?.escuelaMinisterial?.status === "completed" ? "success" : "warning"
+              }
+            />
+          </li>
+          <li className="flex justify-between gap-2">
+            <span>RE-ENCUENTRO</span>
+            <StatusBadge
+              label={ladder?.reencuentro?.label ?? "Pendiente"}
+              tone={ladder?.reencuentro?.status === "completed" ? "success" : "warning"}
+            />
+          </li>
           <li className="flex justify-between gap-2 text-[var(--muted)]">
             <span>Siguiente etapa</span>
             <span>
@@ -334,6 +350,16 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
           {ladder?.udv.status === "completed" ? (
             <Link href="/destino" className="text-sm font-medium underline">
               Ir a Capacitación Destino
+            </Link>
+          ) : null}
+          {ladder?.destino?.n3.status === "completed" ? (
+            <Link href="/escuela-ministerial" className="text-sm font-medium underline">
+              Ir a Escuela Ministerial
+            </Link>
+          ) : null}
+          {ladder?.escuelaMinisterial?.status === "completed" ? (
+            <Link href="/reencuentro" className="text-sm font-medium underline">
+              Ir a Re-Encuentro
             </Link>
           ) : null}
         </div>

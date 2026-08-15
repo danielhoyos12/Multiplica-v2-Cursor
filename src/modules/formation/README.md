@@ -1,6 +1,7 @@
-# Formation — Escalera del Éxito (Fases 5–6)
+# Formation — Escalera del Éxito (Fases 5–7)
 
-- **Fase 5:** Consolidar + Universidad de la Vida (`training_*`, `person_process_*`)
-- **Fase 6:** Capacitación Destino Niveles 1–3 (reutiliza la misma arquitectura)
+- **Fase 5:** Consolidar + UDV
+- **Fase 6:** Capacitación Destino N1–N3
+- **Fase 7:** Escuela Ministerial + Re-Encuentro
 
-No crear silos de personas. Completar Destino no activa liderazgo ni abre célula.
+Reutiliza `training_*` + `person_process_*`. No silos de personas. Completar etapas formativas no activa liderazgo.

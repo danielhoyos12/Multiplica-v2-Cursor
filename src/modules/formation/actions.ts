@@ -26,18 +26,40 @@ import {
   markAcademicCompleted,
 } from "./destination";
 import {
+  completeEm,
+  createEmCycle,
+  enrollEm,
+  markEmAcademicCompleted,
+  pauseEm,
+  resumeEm,
+} from "./ministerial";
+import {
+  completeReencuentro,
+  createReencuentroEvent,
+  enrollReencuentro,
+  recordReencuentroAttendance,
+} from "./reencounter";
+import {
   assignCycleStaffInputSchema,
   authorizeRecoveryInputSchema,
   completeConsolidationInputSchema,
   completeDestinoLevelInputSchema,
+  completeEmInputSchema,
+  completeReencuentroInputSchema,
   completeUdvInputSchema,
   createCycleInputSchema,
   createDestinoCycleInputSchema,
+  createEmCycleInputSchema,
+  createReencuentroEventInputSchema,
   enrollDestinoInputSchema,
+  enrollEmInputSchema,
+  enrollReencuentroInputSchema,
   enrollUdvInputSchema,
   markAcademicCompletedInputSchema,
+  markEmAcademicInputSchema,
   pauseProcessInputSchema,
   recordAttendanceInputSchema,
+  recordReencuentroAttendanceInputSchema,
   resumeProcessInputSchema,
   startConsolidationInputSchema,
 } from "./validation";
@@ -318,6 +340,193 @@ export async function activateDestinoCycleAction(cycleId: string) {
     revalidatePath("/destino");
     revalidatePath(`/destino/${cycleId}`);
     return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function createEmCycleAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = createEmCycleInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const cycle = await createEmCycle(user.id, {
+      ...parsed.data,
+      ministryId: parsed.data.ministryId || null,
+    });
+    revalidatePath("/escuela-ministerial");
+    return { ok: true as const, cycleId: cycle.id };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function activateEmCycleAction(cycleId: string) {
+  try {
+    const user = await requireSessionUser();
+    await activateTrainingCycle(user.id, cycleId);
+    revalidatePath("/escuela-ministerial");
+    revalidatePath(`/escuela-ministerial/${cycleId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function enrollEmAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = enrollEmInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await enrollEm(user.id, parsed.data);
+    revalidatePath("/escuela-ministerial");
+    revalidatePath(`/escuela-ministerial/${parsed.data.cycleId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function markEmAcademicAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = markEmAcademicInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await markEmAcademicCompleted(user.id, parsed.data);
+    revalidatePath("/escuela-ministerial");
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function completeEmAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = completeEmInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const result = await completeEm(user.id, parsed.data);
+    revalidatePath("/escuela-ministerial");
+    revalidatePath("/reencuentro");
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    return {
+      ok: true as const,
+      nextStageEligible: result.nextStageEligible,
+      leadershipActivated: result.leadershipActivated,
+    };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function pauseEmAction(personId: string, note?: string) {
+  try {
+    const user = await requireSessionUser();
+    await pauseEm(user.id, personId, note);
+    revalidatePath("/escuela-ministerial");
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function resumeEmAction(personId: string) {
+  try {
+    const user = await requireSessionUser();
+    await resumeEm(user.id, personId);
+    revalidatePath("/escuela-ministerial");
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function createReencuentroEventAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = createReencuentroEventInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const cycle = await createReencuentroEvent(user.id, {
+      ...parsed.data,
+      ministryId: parsed.data.ministryId || null,
+    });
+    revalidatePath("/reencuentro");
+    return { ok: true as const, cycleId: cycle.id };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function activateReencuentroEventAction(cycleId: string) {
+  try {
+    const user = await requireSessionUser();
+    await activateTrainingCycle(user.id, cycleId);
+    revalidatePath("/reencuentro");
+    revalidatePath(`/reencuentro/${cycleId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function enrollReencuentroAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = enrollReencuentroInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await enrollReencuentro(user.id, parsed.data);
+    revalidatePath("/reencuentro");
+    revalidatePath(`/reencuentro/${parsed.data.cycleId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function recordReencuentroAttendanceAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = recordReencuentroAttendanceInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await recordReencuentroAttendance(user.id, parsed.data);
+    revalidatePath("/reencuentro");
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function completeReencuentroAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = completeReencuentroInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const result = await completeReencuentro(user.id, parsed.data);
+    revalidatePath("/reencuentro");
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    return {
+      ok: true as const,
+      nextStageEligible: result.nextStageEligible,
+      eligibleForSend: result.eligibleForSend,
+      leadershipActivated: result.leadershipActivated,
+    };
   } catch (error) {
     return toActionError(error);
   }

@@ -22,6 +22,8 @@ export const processTypeEnum = pgEnum("process_type", [
   "destino_n1",
   "destino_n2",
   "destino_n3",
+  "escuela_ministerial",
+  "reencuentro",
 ]);
 
 export const processStatusEnum = pgEnum("process_status", [
@@ -296,6 +298,10 @@ export const DESTINO_N1_CODE = "destino_n1" as const;
 export const DESTINO_N2_CODE = "destino_n2" as const;
 export const DESTINO_N3_CODE = "destino_n3" as const;
 export const DESTINO_FAMILY = "destino" as const;
+export const EM_PROGRAM_CODE = "escuela_ministerial" as const;
+export const EM_FAMILY = "ministerial" as const;
+export const REENCUENTRO_PROGRAM_CODE = "reencuentro" as const;
+export const REENCUENTRO_FAMILY = "reencuentro" as const;
 
 /** Configurable completion requirements per program/level. */
 export const trainingCompletionRequirements = pgTable(
