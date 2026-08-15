@@ -27,11 +27,12 @@ function actor(partial?: Partial<AuthContext>): AuthContext {
 }
 
 describe("DestinationRules", () => {
-  it("1. UDV completed → Nivel 1 eligible", () => {
+  it("1. Consolidar completed → CD1 eligible (UDV is NOT the gate)", () => {
     expect(DestinationRules.canEnterLevel1("completed")).toBe(true);
+    expect(DestinationRules.udvIsNotGateBeforeCd1).toBe(true);
   });
 
-  it("2. UDV incomplete → Nivel 1 deny", () => {
+  it("2. Consolidar incomplete → CD1 deny", () => {
     expect(DestinationRules.canEnterLevel1("in_progress")).toBe(false);
     expect(DestinationRules.canEnterLevel1(null)).toBe(false);
   });
@@ -39,6 +40,11 @@ describe("DestinationRules", () => {
   it("3–6. sequential level gates", () => {
     expect(DestinationRules.canEnterLevel(true)).toBe(true);
     expect(DestinationRules.canEnterLevel(false)).toBe(false);
+  });
+
+  it("CD3 requires CD2 + Re-Encuentro", () => {
+    expect(DestinationRules.canEnterLevel3(true, true)).toBe(true);
+    expect(DestinationRules.canEnterLevel3(true, false)).toBe(false);
   });
 
   it("8. elegibility does not enroll", () => {

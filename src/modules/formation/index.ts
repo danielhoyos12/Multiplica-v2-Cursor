@@ -44,13 +44,90 @@ export {
 } from "./destination";
 
 export {
+  completeEm,
+  createEmCycle,
+  enrollEm,
+  ensureEmEligible,
+  ensureEmProgram,
+  getEmCycleBoard,
+  getEmDashboardCounts,
+  getPersonEmSummary,
+  isEmEligible,
+  listEmCycles,
+  listEmEligible,
+  markEmAcademicCompleted,
+  MinisterialRules,
+  pauseEm,
+  resumeEm,
+} from "./ministerial";
+
+export {
+  assertEmLevelEligible,
+  completeEmLevel,
+  createEmLevelCycle,
+  EmLevelRules,
+  enrollEmLevel,
+  ensureEmLevelEligible,
+  getEmLevelCycleBoard,
+  getEmLevelsDashboardCounts,
+  getPersonEmLevelsSummary,
+  isEmLevelEligible,
+  listEmLevelCycles,
+  markEmLevelAcademic,
+} from "./em-levels";
+
+export {
+  assertStageEligible,
+  completeConsolidarStage,
+  ConsolidarRules,
+  createConsolidarCycle,
+  enrollConsolidarStage,
+  getConsolidarCycleBoard,
+  getConsolidarDashboardCounts,
+  getPersonConsolidarSummary,
+  listConsolidarCycles,
+  syncConsolidarAggregate,
+} from "./consolidar-stages";
+
+export {
+  countCatalogExpectation,
+  ensureOfficialCatalog,
+  LEGACY_PROCESS_NOTES,
+  OFFICIAL_SEQUENCE,
+  OfficialEligibility,
+} from "./official-catalog";
+
+export {
+  completeReencuentro,
+  createReencuentroEvent,
+  enrollReencuentro,
+  ensureReencuentroEligible,
+  ensureReencuentroProgram,
+  getPersonReencuentroSummary,
+  getReencuentroDashboardCounts,
+  getReencuentroEventBoard,
+  isReencuentroEligible,
+  listReencuentroEligible,
+  listReencuentroEvents,
+  recordReencuentroAttendance,
+  ReencuentroRules,
+} from "./reencounter";
+
+export {
   assignCycleStaffInputSchema,
   completeConsolidationInputSchema,
   completeDestinoLevelInputSchema,
+  completeEmInputSchema,
+  completeReencuentroInputSchema,
   createCycleInputSchema,
   createDestinoCycleInputSchema,
+  createEmCycleInputSchema,
+  createReencuentroEventInputSchema,
   enrollDestinoInputSchema,
+  enrollEmInputSchema,
+  enrollReencuentroInputSchema,
   enrollUdvInputSchema,
   markAcademicCompletedInputSchema,
+  markEmAcademicInputSchema,
   startConsolidationInputSchema,
 } from "./validation";

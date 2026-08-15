@@ -64,7 +64,15 @@ export type MutateAction =
   | "destination.complete_academic"
   | "destination.complete_level"
   | "destination.override_requirement"
-  | "training.cycles.assign_staff";
+  | "training.cycles.assign_staff"
+  | "ministerial_school.read"
+  | "ministerial_school.manage"
+  | "ministerial_school.attendance"
+  | "ministerial_school.complete"
+  | "reencounter.read"
+  | "reencounter.manage"
+  | "reencounter.attendance"
+  | "reencounter.complete";
 
 export function isSuperadmin(actor: AuthContext): boolean {
   return actor.roleCodes.includes("superadmin");
@@ -170,7 +178,9 @@ export function canView(
       if (
         !hasPermission(actor, "process.read") &&
         !hasPermission(actor, "udv.read") &&
-        !hasPermission(actor, "destination.read")
+        !hasPermission(actor, "destination.read") &&
+        !hasPermission(actor, "ministerial_school.read") &&
+        !hasPermission(actor, "reencounter.read")
       ) {
         return false;
       }

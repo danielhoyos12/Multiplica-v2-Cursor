@@ -28,7 +28,7 @@ function actor(partial?: Partial<AuthContext>): AuthContext {
 }
 
 describe("FormationRules", () => {
-  it("requires consolidar completed to enter UDV", () => {
+  it("legacy: consolidar completed still gates UDV catalog access", () => {
     expect(FormationRules.canEnterUdv("completed")).toBe(true);
     expect(FormationRules.canEnterUdv("in_progress")).toBe(false);
     expect(FormationRules.canEnterUdv(null)).toBe(false);
@@ -38,9 +38,9 @@ describe("FormationRules", () => {
     expect(FormationRules.completingUdvActivatesLeader()).toBe(false);
   });
 
-  it("UDV completed enables next stage", () => {
-    expect(FormationRules.nextStageEligibleAfterUdv("completed")).toBe(true);
-    expect(FormationRules.nextStageEligibleAfterUdv("in_progress")).toBe(false);
+  it("official: Consolidar enables CD1; UDV is not a gate", () => {
+    expect(FormationRules.consolidarEnablesCd1("completed")).toBe(true);
+    expect(FormationRules.udvIsNotGateBeforeCd1).toBe(true);
   });
 
   it("blocks duplicate enrollment", () => {

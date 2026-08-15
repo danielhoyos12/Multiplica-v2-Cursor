@@ -16,8 +16,8 @@ export default async function DashboardPage() {
     <div className="space-y-8">
       <PageHeader
         title="MULTIPLICA"
-        description="Fase 6: Capacitación Destino — Niveles 1–3 sobre training_*."
-        actions={<StatusBadge label="Fase 6" tone="brand" />}
+        description="Fase 7 reconciliación: secuencia pastoral oficial Consolidar + Discipular."
+        actions={<StatusBadge label="Fase 7" tone="brand" />}
       />
 
       <div className="grid gap-3 text-sm text-[var(--muted)] sm:grid-cols-2">
@@ -33,11 +33,20 @@ export default async function DashboardPage() {
 
       <EmptyState
         title="Proceso pastoral"
-        description="Escalera → UDV → Destino. Completar un nivel no activa liderazgo ni abre célula."
+        description="GANAR → Consolidar (Pre/Encuentro/Post) → Discipular (CD1→CD2→Re-Encuentro→CD3→EM1–3). Completar no activa liderazgo."
       />
-      <p className="text-sm">
+      <p className="flex flex-wrap gap-3 text-sm">
+        <Link href="/proceso" className="font-medium underline">
+          Escalera
+        </Link>
         <Link href="/destino" className="font-medium underline">
-          Ir a Capacitación Destino
+          Destino
+        </Link>
+        <Link href="/reencuentro" className="font-medium underline">
+          Re-Encuentro
+        </Link>
+        <Link href="/escuela-ministerial" className="font-medium underline">
+          Escuela Ministerial
         </Link>
       </p>
     </div>

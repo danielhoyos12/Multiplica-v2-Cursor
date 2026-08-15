@@ -179,6 +179,46 @@ export const PERMISSION_SEEDS = [
     name: "Asignar staff de ciclo",
     description: "Definir profesores/responsables de ciclos formativos.",
   },
+  {
+    code: "ministerial_school.read",
+    name: "Leer Escuela Ministerial",
+    description: "Ver ciclos y progreso de Escuela Ministerial.",
+  },
+  {
+    code: "ministerial_school.manage",
+    name: "Gestionar Escuela Ministerial",
+    description: "Inscribir y administrar participantes EM.",
+  },
+  {
+    code: "ministerial_school.attendance",
+    name: "Asistencia Escuela Ministerial",
+    description: "Registrar asistencia EM.",
+  },
+  {
+    code: "ministerial_school.complete",
+    name: "Completar Escuela Ministerial",
+    description: "Marcar académico y completar formalmente EM.",
+  },
+  {
+    code: "reencounter.read",
+    name: "Leer Re-Encuentro",
+    description: "Ver eventos y progreso de Re-Encuentro.",
+  },
+  {
+    code: "reencounter.manage",
+    name: "Gestionar Re-Encuentro",
+    description: "Inscribir participantes en Re-Encuentro.",
+  },
+  {
+    code: "reencounter.attendance",
+    name: "Asistencia Re-Encuentro",
+    description: "Registrar asistencia al evento Re-Encuentro.",
+  },
+  {
+    code: "reencounter.complete",
+    name: "Completar Re-Encuentro",
+    description: "Completar formalmente Re-Encuentro.",
+  },
 ] as const;
 
 const CELL_PERMS = [
@@ -213,6 +253,14 @@ const PROCESS_PERMS = [
   "destination.complete_academic",
   "destination.complete_level",
   "training.cycles.assign_staff",
+  "ministerial_school.read",
+  "ministerial_school.manage",
+  "ministerial_school.attendance",
+  "ministerial_school.complete",
+  "reencounter.read",
+  "reencounter.manage",
+  "reencounter.attendance",
+  "reencounter.complete",
 ] as const;
 
 export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
@@ -268,6 +316,14 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "destination.attendance",
     "destination.complete_academic",
     "destination.complete_level",
+    "ministerial_school.read",
+    "ministerial_school.manage",
+    "ministerial_school.attendance",
+    "ministerial_school.complete",
+    "reencounter.read",
+    "reencounter.manage",
+    "reencounter.attendance",
+    "reencounter.complete",
   ],
   staff: [
     "persons.read",
@@ -282,5 +338,9 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "udv.attendance",
     "destination.read",
     "destination.attendance",
+    "ministerial_school.read",
+    "ministerial_school.attendance",
+    "reencounter.read",
+    "reencounter.attendance",
   ],
 };

@@ -1,6 +1,16 @@
-# Formation — Escalera del Éxito (Fases 5–6)
+# Formation — Escalera del Éxito (Fases 5–7 + reconciliación)
 
-- **Fase 5:** Consolidar + Universidad de la Vida (`training_*`, `person_process_*`)
-- **Fase 6:** Capacitación Destino Niveles 1–3 (reutiliza la misma arquitectura)
+Secuencia pastoral oficial (Phase 7 reconciliation):
 
-No crear silos de personas. Completar Destino no activa liderazgo ni abre célula.
+```
+GANAR → CONSOLIDAR (Pre → Encuentro → Post)
+      → DISCIPULAR (CD1 → CD2 → Re-Encuentro → CD3 → EM1 → EM2 → EM3)
+      → ENVIAR (eligible only)
+```
+
+- UDV **no** es gate antes de CD1 (legacy/deprecated).
+- Re-Encuentro está entre CD2 y CD3 (no después de EM).
+- Reutiliza `training_*` + `person_process_*`. Sin silos de personas.
+- Completar etapas formativas **no** activa liderazgo.
+
+Ver `docs/phase-7-reconciliation-cierre.md`.

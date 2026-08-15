@@ -230,56 +230,142 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
 
       <section className="space-y-4 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-5">
         <h2 className="font-medium text-[var(--ink)]">Escalera del Éxito</h2>
-        <ul className="space-y-2 text-sm">
+        <ul className="space-y-3 text-sm">
           <li className="flex justify-between gap-2">
-            <span>GANAR</span>
+            <span className="font-medium">GANAR</span>
             <StatusBadge label="Completado" tone="success" />
           </li>
-          <li className="flex justify-between gap-2">
-            <span>CONSOLIDAR</span>
-            <StatusBadge
-              label={ladder ? statusLabel(ladder.consolidar.status) : "—"}
-              tone={ladder?.consolidar.status === "completed" ? "success" : "warning"}
-            />
-          </li>
-          <li className="flex justify-between gap-2">
-            <span>UNIVERSIDAD DE LA VIDA</span>
-            <StatusBadge
-              label={ladder ? statusLabel(ladder.udv.status) : "—"}
-              tone={ladder?.udv.status === "completed" ? "success" : "warning"}
-            />
-          </li>
-          <li className="space-y-1">
+
+          <li className="space-y-2">
             <div className="flex justify-between gap-2">
-              <span>CAPACITACIÓN DESTINO</span>
-              <Link href="/destino" className="text-xs underline">
-                Ver
-              </Link>
+              <span className="font-medium">CONSOLIDAR</span>
+              <StatusBadge
+                label={ladder ? statusLabel(ladder.consolidar.status) : "—"}
+                tone={ladder?.consolidar.status === "completed" ? "success" : "warning"}
+              />
             </div>
-            <ul className="ml-2 space-y-1 text-[var(--muted)]">
+            <ul className="ml-3 space-y-1 text-[var(--muted)]">
               <li className="flex justify-between gap-2">
-                <span>Nivel 1</span>
+                <span>Pre-Encuentro</span>
                 <StatusBadge
-                  label={ladder?.destino?.n1.label ?? "Pendiente"}
-                  tone={ladder?.destino?.n1.status === "completed" ? "success" : "warning"}
+                  label={ladder?.consolidar.stages?.pre.label ?? "Pendiente"}
+                  tone={
+                    ladder?.consolidar.stages?.pre.status === "completed"
+                      ? "success"
+                      : "warning"
+                  }
                 />
               </li>
               <li className="flex justify-between gap-2">
-                <span>Nivel 2</span>
+                <span>Encuentro</span>
                 <StatusBadge
-                  label={ladder?.destino?.n2.label ?? "Pendiente"}
-                  tone={ladder?.destino?.n2.status === "completed" ? "success" : "warning"}
+                  label={ladder?.consolidar.stages?.encuentro.label ?? "Pendiente"}
+                  tone={
+                    ladder?.consolidar.stages?.encuentro.status === "completed"
+                      ? "success"
+                      : "warning"
+                  }
                 />
               </li>
               <li className="flex justify-between gap-2">
-                <span>Nivel 3</span>
+                <span>Post-Encuentro</span>
                 <StatusBadge
-                  label={ladder?.destino?.n3.label ?? "Pendiente"}
-                  tone={ladder?.destino?.n3.status === "completed" ? "success" : "warning"}
+                  label={ladder?.consolidar.stages?.post.label ?? "Pendiente"}
+                  tone={
+                    ladder?.consolidar.stages?.post.status === "completed"
+                      ? "success"
+                      : "warning"
+                  }
                 />
               </li>
             </ul>
           </li>
+
+          <li className="space-y-2">
+            <div className="flex justify-between gap-2">
+              <span className="font-medium">DISCIPULAR</span>
+              <Link href="/destino" className="text-xs underline">
+                Ver
+              </Link>
+            </div>
+            <ul className="ml-3 space-y-1 text-[var(--muted)]">
+              <li className="flex justify-between gap-2">
+                <span>Capacitación Destino 1</span>
+                <StatusBadge
+                  label={ladder?.discipular?.cd1.label ?? "Pendiente"}
+                  tone={
+                    ladder?.discipular?.cd1.status === "completed" ? "success" : "warning"
+                  }
+                />
+              </li>
+              <li className="flex justify-between gap-2">
+                <span>Capacitación Destino 2</span>
+                <StatusBadge
+                  label={ladder?.discipular?.cd2.label ?? "Pendiente"}
+                  tone={
+                    ladder?.discipular?.cd2.status === "completed" ? "success" : "warning"
+                  }
+                />
+              </li>
+              <li className="flex justify-between gap-2">
+                <span>Re-Encuentro</span>
+                <StatusBadge
+                  label={ladder?.discipular?.reencuentro.label ?? "Pendiente"}
+                  tone={
+                    ladder?.discipular?.reencuentro.status === "completed"
+                      ? "success"
+                      : "warning"
+                  }
+                />
+              </li>
+              <li className="flex justify-between gap-2">
+                <span>Capacitación Destino 3</span>
+                <StatusBadge
+                  label={ladder?.discipular?.cd3.label ?? "Pendiente"}
+                  tone={
+                    ladder?.discipular?.cd3.status === "completed" ? "success" : "warning"
+                  }
+                />
+              </li>
+              <li className="flex justify-between gap-2">
+                <span>Escuela Ministerial 1</span>
+                <StatusBadge
+                  label={ladder?.discipular?.em1.label ?? "Pendiente"}
+                  tone={
+                    ladder?.discipular?.em1.status === "completed" ? "success" : "warning"
+                  }
+                />
+              </li>
+              <li className="flex justify-between gap-2">
+                <span>Escuela Ministerial 2</span>
+                <StatusBadge
+                  label={ladder?.discipular?.em2.label ?? "Pendiente"}
+                  tone={
+                    ladder?.discipular?.em2.status === "completed" ? "success" : "warning"
+                  }
+                />
+              </li>
+              <li className="flex justify-between gap-2">
+                <span>Escuela Ministerial 3</span>
+                <StatusBadge
+                  label={ladder?.discipular?.em3.label ?? "Pendiente"}
+                  tone={
+                    ladder?.discipular?.em3.status === "completed" ? "success" : "warning"
+                  }
+                />
+              </li>
+            </ul>
+          </li>
+
+          <li className="flex justify-between gap-2">
+            <span className="font-medium">ENVIAR</span>
+            <span className="text-[var(--muted)]">
+              {ladder?.next.code === "enviar" && ladder.next.eligible
+                ? "Apto (no implementado)"
+                : "—"}
+            </span>
+          </li>
+
           <li className="flex justify-between gap-2 text-[var(--muted)]">
             <span>Siguiente etapa</span>
             <span>
@@ -326,14 +412,20 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
               </button>
             </form>
           ) : null}
-          {ladder?.udv.eligible ? (
-            <Link href="/udv" className="text-sm font-medium underline">
-              Ir a Universidad de la Vida
-            </Link>
-          ) : null}
-          {ladder?.udv.status === "completed" ? (
+          {ladder?.consolidar.status === "completed" ? (
             <Link href="/destino" className="text-sm font-medium underline">
               Ir a Capacitación Destino
+            </Link>
+          ) : null}
+          {ladder?.discipular?.cd2.status === "completed" &&
+          ladder?.discipular?.reencuentro.status !== "completed" ? (
+            <Link href="/reencuentro" className="text-sm font-medium underline">
+              Ir a Re-Encuentro
+            </Link>
+          ) : null}
+          {ladder?.discipular?.cd3.status === "completed" ? (
+            <Link href="/escuela-ministerial" className="text-sm font-medium underline">
+              Ir a Escuela Ministerial
             </Link>
           ) : null}
         </div>

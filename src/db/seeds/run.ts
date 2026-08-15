@@ -23,6 +23,10 @@ import {
   DESTINO_N1_CODE,
   DESTINO_N2_CODE,
   DESTINO_N3_CODE,
+  EM_FAMILY,
+  EM_PROGRAM_CODE,
+  REENCUENTRO_FAMILY,
+  REENCUENTRO_PROGRAM_CODE,
   trainingCompletionRequirements,
 } from "../schema";
 
@@ -282,12 +286,94 @@ async function seedDestinoCatalog(db: ReturnType<typeof getDb>) {
           requirementType: "active_cell_members",
           numericValue: 12,
           category: "pastoral",
-          label: "12 personas activas en célula evangelística",
+          label: "12 personas activas en célula evangelística (desactivado — no confirmado por nivel)",
           isRequired: true,
-          isActive: true,
+          isActive: false,
         },
       ]);
     }
+  }
+}
+
+async function seedEmAndReencuentroCatalog(db: ReturnType<typeof getDb>) {
+  let [em] = await db
+    .select()
+    .from(trainingPrograms)
+    .where(eq(trainingPrograms.code, EM_PROGRAM_CODE))
+    .limit(1);
+  if (!em) {
+    [em] = await db
+      .insert(trainingPrograms)
+      .values({
+        code: EM_PROGRAM_CODE,
+        name: "Escuela Ministerial",
+        description: "Formación posterior a Capacitación Destino.",
+        family: EM_FAMILY,
+        isActive: true,
+      })
+      .returning();
+  }
+  const emModules = await db
+    .select()
+    .from(trainingModules)
+    .where(eq(trainingModules.programId, em.id));
+  if (emModules.length === 0) {
+    await db.insert(trainingModules).values(
+      [1, 2, 3, 4].map((n) => ({
+        programId: em.id,
+        code: `EM-M${n}`,
+        name: `Módulo ${n}`,
+        orderIndex: n,
+        isActive: true,
+        isRequired: true,
+      })),
+    );
+  }
+  const emReqs = await db
+    .select()
+    .from(trainingCompletionRequirements)
+    .where(eq(trainingCompletionRequirements.programId, em.id));
+  if (emReqs.length === 0) {
+    await db.insert(trainingCompletionRequirements).values({
+      programId: em.id,
+      requirementType: "manual_approval",
+      category: "academic",
+      label: "Componente académico aprobado",
+      isRequired: true,
+      isActive: true,
+    });
+  }
+
+  let [re] = await db
+    .select()
+    .from(trainingPrograms)
+    .where(eq(trainingPrograms.code, REENCUENTRO_PROGRAM_CODE))
+    .limit(1);
+  if (!re) {
+    [re] = await db
+      .insert(trainingPrograms)
+      .values({
+        code: REENCUENTRO_PROGRAM_CODE,
+        name: "Re-Encuentro",
+        description: "Evento pastoral (módulo único RE-EVENT).",
+        family: REENCUENTRO_FAMILY,
+        isActive: true,
+      })
+      .returning();
+  }
+  const reModules = await db
+    .select()
+    .from(trainingModules)
+    .where(eq(trainingModules.programId, re.id));
+  if (reModules.length === 0) {
+    await db.insert(trainingModules).values({
+      programId: re.id,
+      code: "RE-EVENT",
+      name: "Evento Re-Encuentro",
+      orderIndex: 1,
+      isActive: true,
+      isRequired: true,
+    });
   }
 }
 
@@ -308,11 +394,20 @@ async function main() {
   console.log("Seeding roles and permissions...");
   await seedRbac(db);
 
-  console.log("Seeding Universidad de la Vida catalog...");
+  console.log("Seeding Universidad de la Vida catalog (legacy)...");
   await seedUdvCatalog(db);
 
   console.log("Seeding Capacitación Destino catalog...");
   await seedDestinoCatalog(db);
+
+  console.log("Seeding Escuela Ministerial + Re-Encuentro catalogs (legacy single EM)...");
+  await seedEmAndReencuentroCatalog(db);
+
+  console.log("Seeding official formation catalog (Phase 7 reconciliation)...");
+  const { ensureOfficialCatalog } = await import(
+    "../../modules/formation/official-catalog"
+  );
+  await ensureOfficialCatalog();
 
   console.log(
     "Seeds completed. Ministries Generales are NOT seeded (Superadmin setup).",
