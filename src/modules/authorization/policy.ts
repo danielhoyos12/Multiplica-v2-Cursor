@@ -19,6 +19,8 @@ export type ResourceRef = {
     | "person"
     | "cell"
     | "leader"
+    | "process"
+    | "training"
     | "audit"
     | "platform";
   id?: string;
@@ -47,7 +49,15 @@ export type MutateAction =
   | "leaders.deactivate"
   | "leaders.manage_tree"
   | "leaders.view_descendants"
-  | "g12.convert_twelve";
+  | "g12.convert_twelve"
+  | "process.read"
+  | "process.update"
+  | "consolidation.manage"
+  | "udv.read"
+  | "udv.manage"
+  | "udv.attendance"
+  | "school.cycles.manage"
+  | "school.catalog.manage";
 
 export function isSuperadmin(actor: AuthContext): boolean {
   return actor.roleCodes.includes("superadmin");
@@ -147,6 +157,24 @@ export function canView(
         return true;
       }
       // Regular leaders: ministry id alone is NOT enough (sibling deny).
+      return false;
+    case "process":
+    case "training":
+      if (
+        !hasPermission(actor, "process.read") &&
+        !hasPermission(actor, "udv.read")
+      ) {
+        return false;
+      }
+      if (target.personId && actor.personId && target.personId === actor.personId) {
+        return true;
+      }
+      if (options?.isDescendant) {
+        return true;
+      }
+      if (target.ministryId && isLeaderGeneral(actor) && canAccessMinistry(actor, target.ministryId)) {
+        return true;
+      }
       return false;
     case "audit":
       return hasPermission(actor, "audit.read");

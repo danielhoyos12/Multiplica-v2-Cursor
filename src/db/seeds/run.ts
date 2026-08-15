@@ -17,6 +17,7 @@ import {
   ROLE_PERMISSION_MAP,
   ROLE_SEEDS,
 } from "./data";
+import { trainingModules, trainingPrograms, UDV_PROGRAM_CODE } from "../schema";
 
 async function seedNetworks(db: ReturnType<typeof getDb>) {
   for (const network of NETWORK_SEEDS) {
@@ -141,6 +142,66 @@ async function seedRbac(db: ReturnType<typeof getDb>) {
   }
 }
 
+async function seedUdvCatalog(db: ReturnType<typeof getDb>) {
+  let [program] = await db
+    .select()
+    .from(trainingPrograms)
+    .where(eq(trainingPrograms.code, UDV_PROGRAM_CODE))
+    .limit(1);
+  if (!program) {
+    [program] = await db
+      .insert(trainingPrograms)
+      .values({
+        code: UDV_PROGRAM_CODE,
+        name: "Universidad de la Vida",
+        description: "Programa pastoral previo a Capacitación Destino.",
+        isActive: true,
+      })
+      .returning();
+  }
+
+  const existing = await db
+    .select()
+    .from(trainingModules)
+    .where(eq(trainingModules.programId, program.id));
+  if (existing.length === 0) {
+    await db.insert(trainingModules).values([
+      {
+        programId: program.id,
+        code: "M1",
+        name: "Módulo 1",
+        orderIndex: 1,
+        isActive: true,
+        isRequired: true,
+      },
+      {
+        programId: program.id,
+        code: "M2",
+        name: "Módulo 2",
+        orderIndex: 2,
+        isActive: true,
+        isRequired: true,
+      },
+      {
+        programId: program.id,
+        code: "M3",
+        name: "Módulo 3",
+        orderIndex: 3,
+        isActive: true,
+        isRequired: true,
+      },
+      {
+        programId: program.id,
+        code: "M4",
+        name: "Módulo 4",
+        orderIndex: 4,
+        isActive: true,
+        isRequired: true,
+      },
+    ]);
+  }
+}
+
 async function main() {
   if (!process.env.DATABASE_URL) {
     console.error("DATABASE_URL is required to run seeds.");
@@ -157,6 +218,9 @@ async function main() {
 
   console.log("Seeding roles and permissions...");
   await seedRbac(db);
+
+  console.log("Seeding Universidad de la Vida catalog...");
+  await seedUdvCatalog(db);
 
   console.log(
     "Seeds completed. Ministries Generales are NOT seeded (Superadmin setup).",

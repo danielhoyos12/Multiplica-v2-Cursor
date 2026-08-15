@@ -43,6 +43,13 @@
       "when": 1786753947846,
       "tag": "0005_high_deathbird",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786755050633,
+      "tag": "0006_youthful_mastermind",
+      "breakpoints": true
     }
   ]
 }

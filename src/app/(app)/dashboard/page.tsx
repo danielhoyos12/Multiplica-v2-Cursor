@@ -14,8 +14,8 @@ export default async function DashboardPage() {
     <div className="space-y-8">
       <PageHeader
         title="MULTIPLICA"
-        description="Fase 4: activación de líderes, credenciales, árbol G12 y navegación generacional."
-        actions={<StatusBadge label="Fase 4" tone="brand" />}
+        description="Fase 5: Escalera del Éxito — Consolidar y Universidad de la Vida."
+        actions={<StatusBadge label="Fase 5" tone="brand" />}
       />
 
       <div className="grid gap-3 text-sm text-[var(--muted)] sm:grid-cols-2">
@@ -30,8 +30,8 @@ export default async function DashboardPage() {
       </div>
 
       <EmptyState
-        title="Mi estructura G12"
-        description="Un líder activo requiere célula propia. Navega tu subárbol desde Mi estructura. Elegible ≠ activado."
+        title="Proceso pastoral"
+        description="Sigue Consolidar y Universidad de la Vida desde Escalera. Capacitación Destino llega después."
       />
     </div>
   );

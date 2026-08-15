@@ -19,7 +19,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/liderazgo", label: "Mi estructura", enabled: true },
   { href: "/ganar", label: "Ganar", enabled: true },
   { href: "/celulas", label: "Células", enabled: true },
-  { href: "#", label: "Escuela", enabled: false },
+  { href: "/proceso", label: "Escalera", enabled: true },
+  { href: "/udv", label: "UDV", enabled: true },
   { href: "#", label: "Reportes", enabled: false },
 ];
 

@@ -9,6 +9,11 @@ import { getDb } from "@/db/client";
 import { personLeadership } from "@/db/schema";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { hasPermission, isSuperadmin } from "@/modules/authorization";
+import { getPersonLadder, statusLabel } from "@/modules/formation";
+import {
+  completeConsolidationAction,
+  startConsolidationAction,
+} from "@/modules/formation/actions";
 import {
   formatFullName,
   getMinistryNetworkMaps,
@@ -48,12 +53,21 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
   const canSeePrayer = isSuperadmin(auth) || hasPermission(auth, "persons.read");
   const canMarkEligible = hasPermission(auth, "leaders.mark_eligible");
   const canActivate = hasPermission(auth, "leaders.activate");
+  const canProcess = hasPermission(auth, "process.update");
+  const canCompleteConsol = hasPermission(auth, "consolidation.manage");
 
   const [leadership] = await getDb()
     .select()
     .from(personLeadership)
     .where(eq(personLeadership.personId, id))
     .limit(1);
+
+  let ladder: Awaited<ReturnType<typeof getPersonLadder>> | null = null;
+  try {
+    ladder = await getPersonLadder(session.id, id);
+  } catch {
+    ladder = null;
+  }
 
   const currentMinistry = detail.current?.ministryId
     ? maps.ministryById[detail.current.ministryId]
@@ -214,12 +228,76 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
         )}
       </section>
 
-      <section className="rounded-[var(--radius)] border border-dashed border-[var(--border)] bg-[var(--surface-soft)] p-5">
+      <section className="space-y-4 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-5">
         <h2 className="font-medium text-[var(--ink)]">Escalera del Éxito</h2>
-        <p className="mt-2 text-sm text-[var(--muted)]">
-          Placeholder técnico. Consolidar, Discipular y Enviar se implementarán en
-          fases posteriores. Esta persona permanece referenciada por su UUID maestro.
-        </p>
+        <ul className="space-y-2 text-sm">
+          <li className="flex justify-between gap-2">
+            <span>GANAR</span>
+            <StatusBadge label="Completado" tone="success" />
+          </li>
+          <li className="flex justify-between gap-2">
+            <span>CONSOLIDAR</span>
+            <StatusBadge
+              label={ladder ? statusLabel(ladder.consolidar.status) : "—"}
+              tone={ladder?.consolidar.status === "completed" ? "success" : "warning"}
+            />
+          </li>
+          <li className="flex justify-between gap-2">
+            <span>UNIVERSIDAD DE LA VIDA</span>
+            <StatusBadge
+              label={ladder ? statusLabel(ladder.udv.status) : "—"}
+              tone={ladder?.udv.status === "completed" ? "success" : "warning"}
+            />
+          </li>
+          <li className="flex justify-between gap-2 text-[var(--muted)]">
+            <span>Capacitación Destino</span>
+            <span>{ladder?.next.eligible ? "Apto (próximamente)" : "Próximamente"}</span>
+          </li>
+        </ul>
+        <div className="flex flex-wrap gap-2 pt-2">
+          {canProcess &&
+          detail.current?.ministryId &&
+          ladder?.consolidar.status !== "completed" &&
+          ladder?.consolidar.status !== "in_progress" ? (
+            <form
+              action={async () => {
+                "use server";
+                await startConsolidationAction({
+                  personId: id,
+                  ministryId: detail.current!.ministryId!,
+                  assignedLeaderPersonId: auth.personId,
+                });
+              }}
+            >
+              <button
+                type="submit"
+                className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm text-white"
+              >
+                Iniciar Consolidar
+              </button>
+            </form>
+          ) : null}
+          {canCompleteConsol && ladder?.consolidar.status === "in_progress" ? (
+            <form
+              action={async () => {
+                "use server";
+                await completeConsolidationAction({ personId: id });
+              }}
+            >
+              <button
+                type="submit"
+                className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+              >
+                Completar Consolidar
+              </button>
+            </form>
+          ) : null}
+          {ladder?.udv.eligible ? (
+            <Link href="/udv" className="text-sm font-medium underline">
+              Ir a Universidad de la Vida
+            </Link>
+          ) : null}
+        </div>
       </section>
 
       {canWrite ? (
