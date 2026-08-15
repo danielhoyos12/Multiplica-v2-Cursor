@@ -19,11 +19,16 @@ export const processTypeEnum = pgEnum("process_type", [
   "consolidar",
   "udv",
   "destino",
+  "destino_n1",
+  "destino_n2",
+  "destino_n3",
 ]);
 
 export const processStatusEnum = pgEnum("process_status", [
   "pending",
+  "eligible",
   "in_progress",
+  "academic_completed",
   "completed",
   "paused",
   "abandoned",
@@ -38,6 +43,7 @@ export const trainingCycleStatusEnum = pgEnum("training_cycle_status", [
 export const trainingEnrollmentStatusEnum = pgEnum("training_enrollment_status", [
   "enrolled",
   "in_progress",
+  "academic_completed",
   "completed",
   "paused",
 ]);
@@ -47,6 +53,20 @@ export const trainingAttendanceStatusEnum = pgEnum("training_attendance_status",
   "absent",
   "excused",
   "recovered",
+]);
+
+export const trainingRequirementTypeEnum = pgEnum("training_requirement_type", [
+  "modules_completed",
+  "attendance",
+  "active_cell_members",
+  "leadership_status",
+  "manual_approval",
+]);
+
+export const trainingCycleStaffRoleEnum = pgEnum("training_cycle_staff_role", [
+  "teacher",
+  "coordinator",
+  "assistant",
 ]);
 
 const timestamps = {
@@ -142,10 +162,16 @@ export const trainingPrograms = pgTable(
     code: text("code").notNull(),
     name: text("name").notNull(),
     description: text("description"),
+    /** Optional sequential level within a family (e.g. Destino 1–3). */
+    level: integer("level"),
+    family: text("family"),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps,
   },
-  (table) => [uniqueIndex("training_programs_code_uidx").on(table.code)],
+  (table) => [
+    uniqueIndex("training_programs_code_uidx").on(table.code),
+    index("training_programs_family_level_idx").on(table.family, table.level),
+  ],
 );
 
 export const trainingModules = pgTable(
@@ -266,3 +292,81 @@ export const trainingAttendance = pgTable(
 
 export const UDV_PROGRAM_CODE = "udv" as const;
 export const DESTINO_PROGRAM_CODE = "destino" as const;
+export const DESTINO_N1_CODE = "destino_n1" as const;
+export const DESTINO_N2_CODE = "destino_n2" as const;
+export const DESTINO_N3_CODE = "destino_n3" as const;
+export const DESTINO_FAMILY = "destino" as const;
+
+/** Configurable completion requirements per program/level. */
+export const trainingCompletionRequirements = pgTable(
+  "training_completion_requirements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    programId: uuid("program_id")
+      .notNull()
+      .references(() => trainingPrograms.id, { onDelete: "restrict" }),
+    requirementType: trainingRequirementTypeEnum("requirement_type").notNull(),
+    numericValue: integer("numeric_value"),
+    isRequired: boolean("is_required").notNull().default(true),
+    isActive: boolean("is_active").notNull().default(true),
+    /** academic | pastoral */
+    category: text("category").notNull().default("pastoral"),
+    label: text("label"),
+    ...timestamps,
+  },
+  (table) => [
+    index("training_completion_requirements_program_idx").on(table.programId),
+    index("training_completion_requirements_type_idx").on(table.requirementType),
+  ],
+);
+
+/** Staff authorized on a cycle (teachers / coordinators). */
+export const trainingCycleStaff = pgTable(
+  "training_cycle_staff",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    cycleId: uuid("cycle_id")
+      .notNull()
+      .references(() => trainingCycles.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: trainingCycleStaffRoleEnum("role").notNull().default("teacher"),
+    canTakeAttendance: boolean("can_take_attendance").notNull().default(true),
+    canAuthorizeRecovery: boolean("can_authorize_recovery").notNull().default(true),
+    canCompleteAcademic: boolean("can_complete_academic").notNull().default(true),
+    canCompleteLevel: boolean("can_complete_level").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("training_cycle_staff_cycle_user_uidx").on(table.cycleId, table.userId),
+    index("training_cycle_staff_user_id_idx").on(table.userId),
+  ],
+);
+
+/** Audited requirement overrides. */
+export const trainingRequirementOverrides = pgTable(
+  "training_requirement_overrides",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => persons.id, { onDelete: "restrict" }),
+    programId: uuid("program_id")
+      .notNull()
+      .references(() => trainingPrograms.id, { onDelete: "restrict" }),
+    requirementId: uuid("requirement_id").references(
+      () => trainingCompletionRequirements.id,
+      { onDelete: "set null" },
+    ),
+    reason: text("reason").notNull(),
+    actorUserId: uuid("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("training_requirement_overrides_person_idx").on(table.personId),
+    index("training_requirement_overrides_program_idx").on(table.programId),
+  ],
+);

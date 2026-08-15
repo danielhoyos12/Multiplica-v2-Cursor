@@ -145,8 +145,24 @@ async function appendEvent(params: {
   personId: string;
   processType: "consolidar" | "udv" | "destino";
   eventType: string;
-  fromStatus?: "pending" | "in_progress" | "completed" | "paused" | "abandoned" | null;
-  toStatus?: "pending" | "in_progress" | "completed" | "paused" | "abandoned" | null;
+  fromStatus?:
+    | "pending"
+    | "eligible"
+    | "in_progress"
+    | "academic_completed"
+    | "completed"
+    | "paused"
+    | "abandoned"
+    | null;
+  toStatus?:
+    | "pending"
+    | "eligible"
+    | "in_progress"
+    | "academic_completed"
+    | "completed"
+    | "paused"
+    | "abandoned"
+    | null;
   actorUserId: string;
   note?: string | null;
   metadata?: Record<string, unknown>;
@@ -698,7 +714,15 @@ export async function recordTrainingAttendance(
 ) {
   const actor = await requireActor(actorUserId);
   const input = recordAttendanceInputSchema.parse(raw);
-  assertCanMutate(actor, "udv.attendance", { type: "training" });
+  if (
+    !hasPermission(actor, "udv.attendance") &&
+    !hasPermission(actor, "destination.attendance")
+  ) {
+    throw new DomainError(
+      DomainErrorCode.NOT_AUTHORIZED,
+      "Sin permiso de asistencia formativa.",
+    );
+  }
 
   const db = getDb();
   const [enrollment] = await db
@@ -821,7 +845,15 @@ export async function recordTrainingAttendance(
 export async function authorizeAttendanceRecovery(actorUserId: string, raw: unknown) {
   const actor = await requireActor(actorUserId);
   const input = authorizeRecoveryInputSchema.parse(raw);
-  assertCanMutate(actor, "udv.attendance", { type: "training" });
+  if (
+    !hasPermission(actor, "udv.attendance") &&
+    !hasPermission(actor, "destination.attendance")
+  ) {
+    throw new DomainError(
+      DomainErrorCode.NOT_AUTHORIZED,
+      "Sin permiso de asistencia formativa.",
+    );
+  }
 
   const db = getDb();
   const [row] = await db
@@ -892,6 +924,12 @@ export async function completeUdv(actorUserId: string, raw: unknown) {
   await assertProcessAccess(actor, input.personId, progress.ministryId);
 
   if (progress.status === "completed") {
+    const { ensureDestinoN1Eligible } = await import("./destination");
+    await ensureDestinoN1Eligible(
+      input.personId,
+      progress.ministryId,
+      progress.networkId,
+    );
     return { progress, nextStageEligible: true, leadershipActivated: false };
   }
 
@@ -921,7 +959,7 @@ export async function completeUdv(actorUserId: string, raw: unknown) {
     .where(eq(personProcessProgress.id, progress.id))
     .returning();
 
-  // Mark open enrollments completed
+  // Mark open UDV enrollments completed (scoped via program when possible)
   await db
     .update(trainingEnrollments)
     .set({
@@ -937,7 +975,7 @@ export async function completeUdv(actorUserId: string, raw: unknown) {
       ),
     );
 
-  // Prepare destino as pending eligibility signal (no Destino implementation)
+  // Legacy aggregate signal + concrete Destino Nivel 1 eligibility
   const destino = await getProgress(input.personId, "destino");
   if (!destino) {
     await db.insert(personProcessProgress).values({
@@ -951,6 +989,13 @@ export async function completeUdv(actorUserId: string, raw: unknown) {
       metadata: { eligible_for_destination: true },
     });
   }
+
+  const { ensureDestinoN1Eligible } = await import("./destination");
+  await ensureDestinoN1Eligible(
+    input.personId,
+    progress.ministryId,
+    progress.networkId,
+  );
 
   await appendEvent({
     progressId: row.id,
@@ -1006,7 +1051,30 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
 
   const consolidar = await getProgress(personId, "consolidar");
   const udv = await getProgress(personId, "udv");
-  const destino = await getProgress(personId, "destino");
+  const { getPersonDestinoSummary } = await import("./destination");
+  const destinoLevels = await getPersonDestinoSummary(personId);
+
+  const n3Done = destinoLevels.n3.status === "completed";
+  const n2Done = destinoLevels.n2.status === "completed";
+  const n1Done = destinoLevels.n1.status === "completed";
+  const udvDone = udv?.status === "completed";
+
+  let nextCode = "destino_n1";
+  let nextLabel = "Destino Nivel 1";
+  let nextEligible = udvDone && destinoLevels.n1.status !== "completed";
+  if (n1Done && !n2Done) {
+    nextCode = "destino_n2";
+    nextLabel = "Destino Nivel 2";
+    nextEligible = true;
+  } else if (n2Done && !n3Done) {
+    nextCode = "destino_n3";
+    nextLabel = "Destino Nivel 3";
+    nextEligible = true;
+  } else if (n3Done) {
+    nextCode = "escuela_ministerial";
+    nextLabel = "Siguiente etapa (pendiente)";
+    nextEligible = true;
+  }
 
   return {
     personId,
@@ -1022,14 +1090,16 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
       progress: udv,
       eligible: consolidar?.status === "completed",
     },
+    destino: {
+      n1: destinoLevels.n1,
+      n2: destinoLevels.n2,
+      n3: destinoLevels.n3,
+    },
     next: {
-      code: "destino",
-      label: "Capacitación Destino",
-      eligible: Boolean(
-        (udv?.status === "completed" && udv.metadata?.eligible_for_destination !== false) ||
-          destino?.status === "pending",
-      ),
-      implemented: false,
+      code: nextCode,
+      label: nextLabel,
+      eligible: nextEligible,
+      implemented: !n3Done,
     },
   };
 }
@@ -1038,8 +1108,12 @@ export function statusLabel(status: string) {
   switch (status) {
     case "pending":
       return "Pendiente";
+    case "eligible":
+      return "Apto";
     case "in_progress":
       return "En curso";
+    case "academic_completed":
+      return "Académico completado";
     case "completed":
       return "Completado";
     case "paused":
@@ -1290,12 +1364,47 @@ export async function getPersonsProcessSummary(personIds: string[]) {
     .where(inArray(personProcessProgress.personId, personIds));
   const map: Record<
     string,
-    { consolidar?: string; udv?: string }
+    {
+      consolidar?: string;
+      udv?: string;
+      destinoLabel?: string;
+      destinoN1?: string;
+      destinoN2?: string;
+      destinoN3?: string;
+    }
   > = {};
   for (const row of rows) {
     map[row.personId] ??= {};
     if (row.processType === "consolidar") map[row.personId].consolidar = row.status;
     if (row.processType === "udv") map[row.personId].udv = row.status;
+    if (row.processType === "destino_n1") map[row.personId].destinoN1 = row.status;
+    if (row.processType === "destino_n2") map[row.personId].destinoN2 = row.status;
+    if (row.processType === "destino_n3") map[row.personId].destinoN3 = row.status;
+  }
+  for (const personId of Object.keys(map)) {
+    const entry = map[personId]!;
+    if (entry.destinoN3 && entry.destinoN3 !== "pending") {
+      entry.destinoLabel =
+        entry.destinoN3 === "academic_completed"
+          ? "Nivel 3 — pendiente requisito"
+          : entry.destinoN3 === "completed"
+            ? "Nivel 3"
+            : `Nivel 3 — ${statusLabel(entry.destinoN3)}`;
+    } else if (entry.destinoN2 && entry.destinoN2 !== "pending") {
+      entry.destinoLabel =
+        entry.destinoN2 === "academic_completed"
+          ? "Nivel 2 — pendiente requisito"
+          : entry.destinoN2 === "completed"
+            ? "Nivel 2"
+            : `Nivel 2 — ${statusLabel(entry.destinoN2)}`;
+    } else if (entry.destinoN1 && entry.destinoN1 !== "pending") {
+      entry.destinoLabel =
+        entry.destinoN1 === "academic_completed"
+          ? "Nivel 1 — pendiente requisito"
+          : entry.destinoN1 === "completed"
+            ? "Nivel 1"
+            : `Nivel 1 — ${statusLabel(entry.destinoN1)}`;
+    }
   }
   return map;
 }

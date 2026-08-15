@@ -19,11 +19,23 @@ import {
   startConsolidation,
 } from "./service";
 import {
+  assignCycleStaff,
+  completeDestinoLevel,
+  createDestinoCycle,
+  enrollDestino,
+  markAcademicCompleted,
+} from "./destination";
+import {
+  assignCycleStaffInputSchema,
   authorizeRecoveryInputSchema,
   completeConsolidationInputSchema,
+  completeDestinoLevelInputSchema,
   completeUdvInputSchema,
   createCycleInputSchema,
+  createDestinoCycleInputSchema,
+  enrollDestinoInputSchema,
   enrollUdvInputSchema,
+  markAcademicCompletedInputSchema,
   pauseProcessInputSchema,
   recordAttendanceInputSchema,
   resumeProcessInputSchema,
@@ -167,6 +179,7 @@ export async function recordAttendanceAction(raw: unknown) {
     }
     await recordTrainingAttendance(user.id, parsed.data);
     revalidatePath("/udv");
+    revalidatePath("/destino");
     return { ok: true as const };
   } catch (error) {
     return toActionError(error);
@@ -182,6 +195,7 @@ export async function authorizeRecoveryAction(raw: unknown) {
     }
     await authorizeAttendanceRecovery(user.id, parsed.data);
     revalidatePath("/udv");
+    revalidatePath("/destino");
     return { ok: true as const };
   } catch (error) {
     return toActionError(error);
@@ -198,12 +212,112 @@ export async function completeUdvAction(raw: unknown) {
     const result = await completeUdv(user.id, parsed.data);
     revalidatePath("/udv");
     revalidatePath("/proceso");
+    revalidatePath("/destino");
     revalidatePath(`/ganar/${parsed.data.personId}`);
     return {
       ok: true as const,
       nextStageEligible: result.nextStageEligible,
       leadershipActivated: result.leadershipActivated,
     };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function createDestinoCycleAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = createDestinoCycleInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const cycle = await createDestinoCycle(user.id, {
+      ...parsed.data,
+      ministryId: parsed.data.ministryId || null,
+    });
+    revalidatePath("/destino");
+    return { ok: true as const, cycleId: cycle.id };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function enrollDestinoAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = enrollDestinoInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await enrollDestino(user.id, parsed.data);
+    revalidatePath("/destino");
+    revalidatePath(`/destino/${parsed.data.cycleId}`);
+    revalidatePath("/proceso");
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function markAcademicCompletedAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = markAcademicCompletedInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await markAcademicCompleted(user.id, parsed.data);
+    revalidatePath("/destino");
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function completeDestinoLevelAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = completeDestinoLevelInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const result = await completeDestinoLevel(user.id, parsed.data);
+    revalidatePath("/destino");
+    revalidatePath("/proceso");
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    return {
+      ok: true as const,
+      nextEligible: result.nextEligible,
+      leadershipActivated: result.leadershipActivated,
+    };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function assignCycleStaffAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = assignCycleStaffInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await assignCycleStaff(user.id, parsed.data);
+    revalidatePath("/destino");
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function activateDestinoCycleAction(cycleId: string) {
+  try {
+    const user = await requireSessionUser();
+    await activateTrainingCycle(user.id, cycleId);
+    revalidatePath("/destino");
+    revalidatePath(`/destino/${cycleId}`);
+    return { ok: true as const };
   } catch (error) {
     return toActionError(error);
   }

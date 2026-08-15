@@ -22,6 +22,7 @@ type Member = {
   leftAt?: Date | string | null;
   consolidarStatus?: string;
   udvStatus?: string;
+  destinoLabel?: string;
 };
 
 type CellOption = { id: string; name: string };
@@ -138,7 +139,8 @@ export function CellMembersPanel({ cellId, members, siblingCells, canManage }: P
                     <p className="text-sm text-[var(--muted)]">{m.phone ?? "—"}</p>
                     <p className="text-xs text-[var(--muted)]">
                       Ingreso {new Date(m.joinedAt).toLocaleDateString("es-PE")}
-                      {m.consolidarStatus || m.udvStatus
+                      {m.destinoLabel ? ` · Destino: ${m.destinoLabel}` : ""}
+                      {!m.destinoLabel && (m.consolidarStatus || m.udvStatus)
                         ? ` · Consolidar: ${m.consolidarStatus ?? "—"} · UDV: ${m.udvStatus ?? "—"}`
                         : ""}
                     </p>

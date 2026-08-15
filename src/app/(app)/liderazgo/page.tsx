@@ -87,6 +87,15 @@ export default async function LiderazgoHomePage() {
         </div>
       ) : null}
 
+      {hasPermission(auth, "destination.read") || hasPermission(auth, "process.read") ? (
+        <p className="text-sm">
+          <Link href="/destino" className="font-medium underline">
+            Ver Capacitación Destino
+          </Link>{" "}
+          (niveles, aptos y pendientes pastorales en el alcance).
+        </p>
+      ) : null}
+
       <section className="space-y-3">
         <h2 className="font-medium">Mis células</h2>
         <ul className="space-y-2">

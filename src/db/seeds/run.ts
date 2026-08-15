@@ -18,6 +18,13 @@ import {
   ROLE_SEEDS,
 } from "./data";
 import { trainingModules, trainingPrograms, UDV_PROGRAM_CODE } from "../schema";
+import {
+  DESTINO_FAMILY,
+  DESTINO_N1_CODE,
+  DESTINO_N2_CODE,
+  DESTINO_N3_CODE,
+  trainingCompletionRequirements,
+} from "../schema";
 
 async function seedNetworks(db: ReturnType<typeof getDb>) {
   for (const network of NETWORK_SEEDS) {
@@ -202,6 +209,88 @@ async function seedUdvCatalog(db: ReturnType<typeof getDb>) {
   }
 }
 
+async function seedDestinoCatalog(db: ReturnType<typeof getDb>) {
+  const defs = [
+    { code: DESTINO_N1_CODE, name: "Destino Nivel 1", level: 1 },
+    { code: DESTINO_N2_CODE, name: "Destino Nivel 2", level: 2 },
+    { code: DESTINO_N3_CODE, name: "Destino Nivel 3", level: 3 },
+  ] as const;
+
+  for (const def of defs) {
+    let [program] = await db
+      .select()
+      .from(trainingPrograms)
+      .where(eq(trainingPrograms.code, def.code))
+      .limit(1);
+    if (!program) {
+      [program] = await db
+        .insert(trainingPrograms)
+        .values({
+          code: def.code,
+          name: def.name,
+          description: `Capacitación Destino — Nivel ${def.level}`,
+          level: def.level,
+          family: DESTINO_FAMILY,
+          isActive: true,
+        })
+        .returning();
+    } else {
+      await db
+        .update(trainingPrograms)
+        .set({
+          family: DESTINO_FAMILY,
+          level: def.level,
+          name: def.name,
+          updatedAt: new Date(),
+        })
+        .where(eq(trainingPrograms.id, program.id));
+    }
+
+    const modules = await db
+      .select()
+      .from(trainingModules)
+      .where(eq(trainingModules.programId, program.id));
+    if (modules.length === 0) {
+      await db.insert(trainingModules).values(
+        [1, 2, 3, 4].map((n) => ({
+          programId: program.id,
+          code: `M${n}`,
+          name: `Módulo ${n}`,
+          orderIndex: n,
+          isActive: true,
+          isRequired: true,
+        })),
+      );
+    }
+
+    const reqs = await db
+      .select()
+      .from(trainingCompletionRequirements)
+      .where(eq(trainingCompletionRequirements.programId, program.id));
+    if (reqs.length === 0) {
+      await db.insert(trainingCompletionRequirements).values([
+        {
+          programId: program.id,
+          requirementType: "manual_approval",
+          category: "academic",
+          label: "Componente académico aprobado",
+          isRequired: true,
+          isActive: true,
+        },
+        {
+          programId: program.id,
+          requirementType: "active_cell_members",
+          numericValue: 12,
+          category: "pastoral",
+          label: "12 personas activas en célula evangelística",
+          isRequired: true,
+          isActive: true,
+        },
+      ]);
+    }
+  }
+}
+
 async function main() {
   if (!process.env.DATABASE_URL) {
     console.error("DATABASE_URL is required to run seeds.");
@@ -221,6 +310,9 @@ async function main() {
 
   console.log("Seeding Universidad de la Vida catalog...");
   await seedUdvCatalog(db);
+
+  console.log("Seeding Capacitación Destino catalog...");
+  await seedDestinoCatalog(db);
 
   console.log(
     "Seeds completed. Ministries Generales are NOT seeded (Superadmin setup).",

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -14,8 +16,8 @@ export default async function DashboardPage() {
     <div className="space-y-8">
       <PageHeader
         title="MULTIPLICA"
-        description="Fase 5: Escalera del Éxito — Consolidar y Universidad de la Vida."
-        actions={<StatusBadge label="Fase 5" tone="brand" />}
+        description="Fase 6: Capacitación Destino — Niveles 1–3 sobre training_*."
+        actions={<StatusBadge label="Fase 6" tone="brand" />}
       />
 
       <div className="grid gap-3 text-sm text-[var(--muted)] sm:grid-cols-2">
@@ -31,8 +33,13 @@ export default async function DashboardPage() {
 
       <EmptyState
         title="Proceso pastoral"
-        description="Sigue Consolidar y Universidad de la Vida desde Escalera. Capacitación Destino llega después."
+        description="Escalera → UDV → Destino. Completar un nivel no activa liderazgo ni abre célula."
       />
+      <p className="text-sm">
+        <Link href="/destino" className="font-medium underline">
+          Ir a Capacitación Destino
+        </Link>
+      </p>
     </div>
   );
 }

@@ -55,3 +55,39 @@ export const completeUdvInputSchema = z.object({
   personId: z.string().uuid(),
   note: z.string().trim().max(500).optional(),
 });
+
+export const createDestinoCycleInputSchema = z.object({
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  name: z.string().trim().min(3).max(160),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  ministryId: z.string().uuid().optional().nullable().or(z.literal("")),
+});
+
+export const enrollDestinoInputSchema = z.object({
+  personId: z.string().uuid(),
+  cycleId: z.string().uuid(),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+});
+
+export const markAcademicCompletedInputSchema = z.object({
+  personId: z.string().uuid(),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  enrollmentId: z.string().uuid().optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const completeDestinoLevelInputSchema = z.object({
+  personId: z.string().uuid(),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  note: z.string().trim().max(500).optional(),
+  overrideRequirementIds: z.array(z.string().uuid()).optional(),
+  overrideReason: z.string().trim().min(5).max(500).optional(),
+});
+
+export const assignCycleStaffInputSchema = z.object({
+  cycleId: z.string().uuid(),
+  userId: z.string().uuid(),
+  role: z.enum(["teacher", "coordinator", "assistant"]).optional(),
+  canCompleteLevel: z.boolean().optional(),
+});

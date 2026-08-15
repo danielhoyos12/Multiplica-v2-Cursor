@@ -249,9 +249,43 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
               tone={ladder?.udv.status === "completed" ? "success" : "warning"}
             />
           </li>
+          <li className="space-y-1">
+            <div className="flex justify-between gap-2">
+              <span>CAPACITACIÓN DESTINO</span>
+              <Link href="/destino" className="text-xs underline">
+                Ver
+              </Link>
+            </div>
+            <ul className="ml-2 space-y-1 text-[var(--muted)]">
+              <li className="flex justify-between gap-2">
+                <span>Nivel 1</span>
+                <StatusBadge
+                  label={ladder?.destino?.n1.label ?? "Pendiente"}
+                  tone={ladder?.destino?.n1.status === "completed" ? "success" : "warning"}
+                />
+              </li>
+              <li className="flex justify-between gap-2">
+                <span>Nivel 2</span>
+                <StatusBadge
+                  label={ladder?.destino?.n2.label ?? "Pendiente"}
+                  tone={ladder?.destino?.n2.status === "completed" ? "success" : "warning"}
+                />
+              </li>
+              <li className="flex justify-between gap-2">
+                <span>Nivel 3</span>
+                <StatusBadge
+                  label={ladder?.destino?.n3.label ?? "Pendiente"}
+                  tone={ladder?.destino?.n3.status === "completed" ? "success" : "warning"}
+                />
+              </li>
+            </ul>
+          </li>
           <li className="flex justify-between gap-2 text-[var(--muted)]">
-            <span>Capacitación Destino</span>
-            <span>{ladder?.next.eligible ? "Apto (próximamente)" : "Próximamente"}</span>
+            <span>Siguiente etapa</span>
+            <span>
+              {ladder?.next.label}
+              {ladder?.next.eligible ? " · apto" : ""}
+            </span>
           </li>
         </ul>
         <div className="flex flex-wrap gap-2 pt-2">
@@ -295,6 +329,11 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
           {ladder?.udv.eligible ? (
             <Link href="/udv" className="text-sm font-medium underline">
               Ir a Universidad de la Vida
+            </Link>
+          ) : null}
+          {ladder?.udv.status === "completed" ? (
+            <Link href="/destino" className="text-sm font-medium underline">
+              Ir a Capacitación Destino
             </Link>
           ) : null}
         </div>

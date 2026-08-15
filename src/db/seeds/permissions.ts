@@ -144,6 +144,41 @@ export const PERMISSION_SEEDS = [
     name: "Gestionar catálogo formativo",
     description: "Administrar programas y módulos configurables.",
   },
+  {
+    code: "destination.read",
+    name: "Leer Capacitación Destino",
+    description: "Ver niveles, ciclos y progreso Destino en el alcance.",
+  },
+  {
+    code: "destination.manage",
+    name: "Gestionar Capacitación Destino",
+    description: "Inscribir y administrar participantes Destino.",
+  },
+  {
+    code: "destination.attendance",
+    name: "Asistencia Destino",
+    description: "Registrar asistencia Destino (ciclos asignados o alcance).",
+  },
+  {
+    code: "destination.complete_academic",
+    name: "Completar académico Destino",
+    description: "Marcar componente académico de un nivel Destino.",
+  },
+  {
+    code: "destination.complete_level",
+    name: "Completar nivel Destino",
+    description: "Aprobar formalmente un nivel Destino.",
+  },
+  {
+    code: "destination.override_requirement",
+    name: "Override requisito Destino",
+    description: "Excepción auditada de requisitos pastorales/académicos.",
+  },
+  {
+    code: "training.cycles.assign_staff",
+    name: "Asignar staff de ciclo",
+    description: "Definir profesores/responsables de ciclos formativos.",
+  },
 ] as const;
 
 const CELL_PERMS = [
@@ -172,6 +207,12 @@ const PROCESS_PERMS = [
   "udv.manage",
   "udv.attendance",
   "school.cycles.manage",
+  "destination.read",
+  "destination.manage",
+  "destination.attendance",
+  "destination.complete_academic",
+  "destination.complete_level",
+  "training.cycles.assign_staff",
 ] as const;
 
 export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
@@ -188,6 +229,7 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     ...LEADER_PERMS,
     ...PROCESS_PERMS,
     "school.catalog.manage",
+    "destination.override_requirement",
     "audit.read",
   ],
   leader_general: [
@@ -199,6 +241,7 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     ...CELL_PERMS,
     ...LEADER_PERMS,
     ...PROCESS_PERMS,
+    "destination.override_requirement",
     "audit.read",
   ],
   leader: [
@@ -220,6 +263,11 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "udv.read",
     "udv.manage",
     "udv.attendance",
+    "destination.read",
+    "destination.manage",
+    "destination.attendance",
+    "destination.complete_academic",
+    "destination.complete_level",
   ],
   staff: [
     "persons.read",
@@ -232,5 +280,7 @@ export const ROLE_PERMISSION_MAP: Record<string, string[]> = {
     "process.read",
     "udv.read",
     "udv.attendance",
+    "destination.read",
+    "destination.attendance",
   ],
 };
