@@ -50,6 +50,13 @@
       "when": 1786755050633,
       "tag": "0006_youthful_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786755636971,
+      "tag": "0007_serious_the_hunter",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/celulas", label: "Células", enabled: true },
   { href: "/proceso", label: "Escalera", enabled: true },
   { href: "/udv", label: "UDV", enabled: true },
+  { href: "/destino", label: "Destino", enabled: true },
   { href: "#", label: "Reportes", enabled: false },
 ];
 

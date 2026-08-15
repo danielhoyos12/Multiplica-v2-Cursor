@@ -1,8 +1,6 @@
-# Formation — Escalera del Éxito (Fase 5)
+# Formation — Escalera del Éxito (Fases 5–6)
 
-- Consolidar + Universidad de la Vida
-- Identidad única: `persons.id`
-- Programas/módulos/ciclos reutilizables (`training_*`)
-- NO implementa Destino / Escuela Ministerial / Classroom
+- **Fase 5:** Consolidar + Universidad de la Vida (`training_*`, `person_process_*`)
+- **Fase 6:** Capacitación Destino Niveles 1–3 (reutiliza la misma arquitectura)
 
-Ver `docs/phase-5-cierre.md`.
+No crear silos de personas. Completar Destino no activa liderazgo ni abre célula.

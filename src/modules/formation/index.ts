@@ -24,8 +24,33 @@ export {
 } from "./service";
 
 export {
+  assignCycleStaff,
+  assertDestinoEligible,
+  completeDestinoLevel,
+  countActiveCellMembersForPerson,
+  createDestinoCycle,
+  DestinationRules,
+  enrollDestino,
+  ensureDestinoN1Eligible,
+  ensureDestinoPrograms,
+  evaluateLevelRequirements,
+  getDestinoCycleBoard,
+  getDestinoDashboardCounts,
+  getPersonDestinoSummary,
+  isDestinoLevelEligible,
+  listDestinoCycles,
+  listDestinoEligible,
+  markAcademicCompleted,
+} from "./destination";
+
+export {
+  assignCycleStaffInputSchema,
   completeConsolidationInputSchema,
+  completeDestinoLevelInputSchema,
   createCycleInputSchema,
+  createDestinoCycleInputSchema,
+  enrollDestinoInputSchema,
   enrollUdvInputSchema,
+  markAcademicCompletedInputSchema,
   startConsolidationInputSchema,
 } from "./validation";
