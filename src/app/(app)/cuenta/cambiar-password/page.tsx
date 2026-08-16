@@ -7,8 +7,8 @@ export default function ChangePasswordPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Primer ingreso"
-        description="Establece tu contraseña definitiva. Las credenciales temporales no se guardan en auditoría."
+        title="Cambiar contraseña"
+        description="Establece tu contraseña definitiva antes de continuar. Hasta completarlo no puedes navegar la aplicación."
       />
       <ChangePasswordForm />
     </div>

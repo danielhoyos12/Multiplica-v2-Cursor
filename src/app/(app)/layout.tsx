@@ -1,12 +1,17 @@
 import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { filterSecondaryGroups } from "@/components/layout/nav-config";
+import { PasswordGateShell } from "@/components/layout/password-gate-shell";
 import { getDb } from "@/db/client";
 import { users } from "@/db/schema";
 import { hasSupabasePublicConfig } from "@/lib/env";
+import {
+  MUST_CHANGE_PASSWORD_COOKIE,
+  passwordGateCookieOptions,
+} from "@/lib/password-change-gate";
 import { isPasswordChangeAllowedPath } from "@/lib/safe-redirect";
 import {
   hasPermission,
@@ -16,6 +21,7 @@ import {
 import { ensureAppUserProfile } from "@/modules/organization";
 import { signOut } from "@/server/actions/auth";
 import { getSessionUser } from "@/server/auth";
+import { createClient } from "@/server/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -52,13 +58,28 @@ export default async function AuthenticatedLayout({
 
   const headerList = await headers();
   const pathname = headerList.get("x-multiplica-pathname") ?? "";
+  const mustChange = Boolean(profile?.mustChangePassword);
 
-  if (
-    profile?.mustChangePassword &&
-    pathname &&
-    !isPasswordChangeAllowedPath(pathname)
-  ) {
+  if (mustChange && pathname && !isPasswordChangeAllowedPath(pathname)) {
     redirect("/cuenta/cambiar-password");
+  }
+
+  if (mustChange) {
+    // Keep Auth metadata + cookie in sync for middleware (no second source of truth).
+    const cookieStore = await cookies();
+    cookieStore.set(MUST_CHANGE_PASSWORD_COOKIE, "1", passwordGateCookieOptions());
+    try {
+      const supabase = await createClient();
+      await supabase.auth.updateUser({ data: { must_change_password: true } });
+    } catch {
+      // Non-fatal: DB + cookie still gate navigation.
+    }
+
+    return (
+      <PasswordGateShell userEmail={user.email} signOutAction={signOut}>
+        {children}
+      </PasswordGateShell>
+    );
   }
 
   const auth = await loadAuthContext(user.id);
@@ -77,15 +98,6 @@ export default async function AuthenticatedLayout({
       signOutAction={signOut}
       secondaryGroups={secondaryGroups}
     >
-      {profile?.mustChangePassword ? (
-        <div
-          role="status"
-          className="mb-4 rounded-[var(--radius-sm)] border border-[var(--warning-border)] bg-[var(--warning-soft)] px-4 py-3 text-sm"
-        >
-          Debes cambiar tu contraseña temporal para continuar. Solo esta página
-          está disponible hasta completarlo.
-        </div>
-      ) : null}
       {children}
     </AppShell>
   );
