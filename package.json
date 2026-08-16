@@ -27,6 +27,7 @@
     "verify:release": "tsx --env-file=.env.local scripts/verify-release.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.7.6",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
     "clsx": "^2.1.1",
