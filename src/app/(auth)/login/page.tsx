@@ -14,14 +14,12 @@ export default function LoginPage() {
   const configured = hasSupabasePublicConfig();
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,color-mix(in_oklab,var(--brand)_22%,transparent),transparent_50%),linear-gradient(160deg,#e8f1ed,#f7f4ea)]" />
-      <div className="w-full max-w-md space-y-8 rounded-[var(--radius)] border border-[var(--border)] bg-[color-mix(in_oklab,var(--surface)_92%,transparent)] p-8 shadow-[var(--shadow)] backdrop-blur">
+    <div className="relative flex min-h-screen items-center justify-center bg-[var(--rice)] px-4 py-10">
+      <div className="w-full max-w-md space-y-8 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 shadow-[var(--shadow-card)]">
         <div className="space-y-3">
           <BrandMark />
           <p className="text-sm leading-relaxed text-[var(--muted)]">
-            Accede a la plataforma foundation. Los módulos pastorales se habilitarán por
-            fases.
+            Accede a MULTIPLICA. Usa tu correo y contraseña asignados.
           </p>
         </div>
         {!configured ? (

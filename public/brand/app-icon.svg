@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">MULTIPLICA — icono de aplicación</title>
+  <desc id="desc">M maestra blanca sobre negro tinta con acento bermellón.</desc>
+  <rect width="512" height="512" rx="112" fill="#111111"/>
+  <defs>
+    <mask id="m-cut">
+      <rect width="280" height="280" fill="white"/>
+      <path d="M-12 78 L110 192" fill="none" stroke="black" stroke-width="18" stroke-linecap="square"/>
+    </mask>
+  </defs>
+  <path transform="translate(116 116)" mask="url(#m-cut)" fill="#FFFFFF" d="M0 280V0h60l80 80 80-80h60v280h-60V86l-80 78-80-78v194z"/>
+  <circle cx="424" cy="88" r="12" fill="#E33B24"/>
+</svg>

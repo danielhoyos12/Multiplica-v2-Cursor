@@ -36,7 +36,7 @@ export default async function PublicGanarRegistroPage({
   });
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#dcebE5,_var(--page-bg)_45%)] px-4 py-10 sm:px-6">
+    <main className="min-h-screen bg-[var(--rice)] px-4 py-10 sm:px-6">
       <div className="mx-auto flex max-w-lg flex-col gap-8">
         <header className="space-y-3 text-center">
           <p className="font-[family-name:var(--font-display)] text-2xl tracking-tight text-[var(--brand-ink)]">

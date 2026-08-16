@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="180" viewBox="0 0 1000 180" role="img" aria-labelledby="title desc">
+  <title id="title">MULTIPLICA — versión negativa</title>
+  <desc id="desc">Wordmark blanco sobre fondo negro tinta.</desc>
+  <rect width="1000" height="180" rx="8" fill="#111111"/>
+  <defs>
+    <mask id="m-cut">
+      <rect width="140" height="140" fill="white"/>
+      <path d="M-6 39 L55 96" fill="none" stroke="black" stroke-width="9" stroke-linecap="square"/>
+    </mask>
+  </defs>
+  <g transform="translate(22 20)">
+    <path mask="url(#m-cut)" fill="#FFFFFF" d="M0 140V0h30l40 40 40-40h30v140h-30V43L70 82 30 43v97z"/>
+    <text x="158" y="136" fill="#FFFFFF" font-family="Nimbus Sans Narrow, Arial Narrow, sans-serif" font-size="156" font-weight="700" letter-spacing="1">ULTIPLICA</text>
+  </g>
+</svg>
