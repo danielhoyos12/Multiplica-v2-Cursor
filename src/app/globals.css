@@ -1,29 +1,59 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #10241f;
-  --muted: #5b6f68;
-  --brand: #1f6f5b;
-  --brand-ink: #0f3d33;
-  --brand-soft: #e4f2ed;
-  --brand-border: #b7d7cc;
-  --accent: #b08d3e;
-  --page-bg: #eef3f0;
+  /* Neo Editorial — official tokens */
+  --ink: #111111;
+  --ink-secondary: #292927;
+  --muted: #5f5f5a;
+  --rice: #f3f0e8;
+  --page-bg: #f3f0e8;
   --surface: #ffffff;
-  --surface-soft: #f5f8f6;
-  --border: #d5e0db;
-  --danger: #9b2c2c;
-  --danger-soft: #fce8e8;
-  --danger-border: #f0b4b4;
-  --success: #1f6b3a;
-  --success-soft: #e5f5eb;
-  --success-border: #b7dfc4;
-  --warning: #8a5a10;
+  --surface-soft: #f7f5ef;
+  --border: #d4d2ca;
+  --cobalt: #3157ff;
+  --cobalt-dark: #2343d6;
+  --vermilion: #e33b24;
+  --vermilion-dark: #c92e1b;
+  --success: #176b52;
+  --success-soft: #e6f4ef;
+  --success-border: #9dcebd;
+  --warning: #9a5b00;
   --warning-soft: #fff3dc;
-  --warning-border: #f0d39a;
-  --radius: 0.75rem;
-  --radius-sm: 0.5rem;
-  --shadow: 0 18px 40px color-mix(in oklab, var(--ink) 12%, transparent);
+  --warning-border: #e6c48a;
+  --danger: #c92e1b;
+  --danger-soft: #fdecea;
+  --danger-border: #f0b4aa;
+
+  /* Compat aliases used across existing pages */
+  --brand: var(--cobalt);
+  --brand-ink: var(--ink);
+  --brand-soft: color-mix(in srgb, var(--cobalt) 12%, white);
+  --brand-border: color-mix(in srgb, var(--cobalt) 30%, white);
+  --accent: var(--vermilion);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --radius: var(--radius-md);
+
+  --shadow-float: 0 12px 36px rgba(17, 17, 17, 0.14);
+  --shadow-card: 0 1px 0 rgba(17, 17, 17, 0.08);
+  --shadow: var(--shadow-float);
+
+  --focus-ring: var(--cobalt);
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --ease-editorial: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --sidebar-collapsed: 72px;
+  --sidebar-expanded: 272px;
+  --sidebar-inset: 16px;
+  --dock-height: 64px;
+  --content-max: 1440px;
+  --touch-min: 44px;
+  --bp-desktop: 1180px;
+
   --background: var(--page-bg);
   --foreground: var(--ink);
 }
@@ -35,8 +65,63 @@
   --font-display: var(--font-display);
 }
 
+html {
+  color-scheme: light;
+}
+
 body {
   background: var(--page-bg);
   color: var(--ink);
-  font-family: var(--font-sans), ui-sans-serif, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-display), var(--font-sans), ui-sans-serif, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Utility helpers for neo shell */
+.neo-touch {
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+}
+
+@keyframes neo-slide {
+  from {
+    opacity: 0.6;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes neo-sheet-up {
+  from {
+    opacity: 0.7;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
