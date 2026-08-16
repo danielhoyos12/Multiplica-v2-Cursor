@@ -29,6 +29,7 @@ const isAuthRoute = createRouteMatcher([
   "/login(.*)",
   "/sign-up(.*)",
   "/recuperar(.*)",
+  "/bienvenida(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, request: NextRequest) => {
@@ -37,6 +38,7 @@ export default clerkMiddleware(async (auth, request: NextRequest) => {
 
   const pathname = request.nextUrl.pathname;
   const isPublicGanarForm = pathname.startsWith("/ganar/registro");
+  const isBienvenida = pathname.startsWith("/bienvenida");
 
   if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     return NextResponse.next({
@@ -93,7 +95,14 @@ export default clerkMiddleware(async (auth, request: NextRequest) => {
     );
   }
 
-  if (userId && isAuthRoute(request) && !pathname.startsWith("/recuperar")) {
+  // Do not bounce signed-in users off /bienvenida into /dashboard when the
+  // interim app profile DB is unavailable (that caused a redirect loop).
+  if (
+    userId &&
+    isAuthRoute(request) &&
+    !pathname.startsWith("/recuperar") &&
+    !isBienvenida
+  ) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = mustChange ? "/cuenta/cambiar-password" : "/dashboard";
     redirectUrl.search = "";

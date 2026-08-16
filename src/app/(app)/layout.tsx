@@ -1,3 +1,4 @@
+import { auth as clerkAuth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -33,10 +34,17 @@ export default async function AuthenticatedLayout({
     redirect("/login");
   }
 
+  const { userId } = await clerkAuth();
   const user = await getSessionUser();
   if (!user) {
+    // Signed into Clerk but no app profile yet (often missing interim DB).
+    // Avoid /login ↔ /dashboard redirect loops.
+    if (userId) {
+      redirect("/bienvenida");
+    }
     redirect("/login");
   }
+
 
   if (user.email) {
     await ensureAppUserProfile({

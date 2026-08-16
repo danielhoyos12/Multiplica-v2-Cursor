@@ -54,7 +54,13 @@ export default function RootLayout({
       className={`${inter.variable} ${archivo.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
-        <ClerkProvider>
+        <ClerkProvider
+          signInUrl="/login"
+          signUpUrl="/sign-up"
+          signInFallbackRedirectUrl="/dashboard"
+          signUpFallbackRedirectUrl="/bienvenida"
+          afterSignOutUrl="/login"
+        >
           <ConvexClientProvider convexUrl={resolveConvexUrlForProvider()}>
             {children}
           </ConvexClientProvider>
