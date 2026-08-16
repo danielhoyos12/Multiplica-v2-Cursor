@@ -8,6 +8,7 @@ import {
 import { AppShell } from "@/components/layout/app-shell";
 
 export const metadata = { title: "UI Preview" };
+export const dynamic = "force-dynamic";
 
 /**
  * Visual harness for Neo Editorial shell + Phase 2 dashboard.

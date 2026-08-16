@@ -260,6 +260,16 @@ export const previewDashboard: ExecutiveDashboard = {
   timings: { scope: 2, persons: 8, ladder: 11, leadership: 14, cells: 9, transfers: 3, alerts: 12, trends: 4 },
 };
 
+const emptyStage = {
+  eligible: 0,
+  in_progress: 0,
+  academic_completed: 0,
+  completed: 0,
+  paused: 0,
+  pending: 0,
+  total: 0,
+};
+
 export const previewEmptyDashboard: ExecutiveDashboard = {
   ...previewDashboard,
   scope: {
@@ -274,8 +284,25 @@ export const previewEmptyDashboard: ExecutiveDashboard = {
     newChangeLabel: "0%",
   },
   ladder: {
-    ...previewDashboard.ladder,
+    methodology: "current_state_counts",
+    note: previewDashboard.ladder.note,
     ganarCompleted: 0,
+    consolidar: {
+      pre: { ...emptyStage },
+      encuentro: { ...emptyStage },
+      post: { ...emptyStage },
+      consolidarCompleted: 0,
+    },
+    discipular: {
+      cd1: { ...emptyStage },
+      cd2: { ...emptyStage },
+      reencuentro: { ...emptyStage },
+      cd3: { ...emptyStage },
+      em1: { ...emptyStage },
+      em2: { ...emptyStage },
+      em3: { ...emptyStage },
+    },
+    enviar: { ...emptyStage, ungidos: 0, activados: 0 },
     funnel: [
       { code: "ganar", label: "GANAR", count: 0 },
       { code: "consolidar", label: "CONSOLIDAR", count: 0 },
