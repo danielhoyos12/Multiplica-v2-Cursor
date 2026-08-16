@@ -4,9 +4,11 @@
 | --- | --- |
 | Branch | `cursor/hotfix-recovery-password-gate-a3cc` |
 | Base | `origin/staging` (= `main` @ `24fbb95`) |
-| PR | (actualizar) |
+| PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/18 |
+| Commits | `599148c` fix(auth): block app nav until password change completes |
 | Merge | **NO** |
 | Producción | **NO** |
+| Base PR | `staging` (UAT) |
 
 ---
 
@@ -57,7 +59,12 @@ Allowlist: `/cuenta/cambiar-password`, `/login`, `/auth/*`, `/api/health`, `/api
 
 ## Gates
 
-(actualizar tras ejecución)
+| Gate | Resultado |
+| --- | --- |
+| lint | **PASS** |
+| typecheck | **PASS** |
+| test | **PASS** — 152 |
+| build | **PASS** |
 
 ## Reproducir en staging (tras deploy del hotfix)
 
