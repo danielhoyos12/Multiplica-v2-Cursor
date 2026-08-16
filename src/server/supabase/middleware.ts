@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 
 import {
   MUST_CHANGE_PASSWORD_COOKIE,
+  passwordGateCookieOptions,
   sessionRequiresPasswordChange,
 } from "@/lib/password-change-gate";
 import { isPasswordChangeAllowedPath, safeInternalPath } from "@/lib/safe-redirect";
@@ -89,14 +90,37 @@ export async function updateSession(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/cuenta/cambiar-password";
     redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
+    const redirectResponse = NextResponse.redirect(redirectUrl);
+    // Middleware may set cookies on the response (not during RSC render).
+    redirectResponse.cookies.set(
+      MUST_CHANGE_PASSWORD_COOKIE,
+      "1",
+      passwordGateCookieOptions(),
+    );
+    return redirectResponse;
+  }
+
+  if (user && mustChange) {
+    supabaseResponse.cookies.set(
+      MUST_CHANGE_PASSWORD_COOKIE,
+      "1",
+      passwordGateCookieOptions(),
+    );
   }
 
   if (user && isAuthRoute && !pathname.startsWith("/recuperar")) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = mustChange ? "/cuenta/cambiar-password" : "/dashboard";
     redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
+    const redirectResponse = NextResponse.redirect(redirectUrl);
+    if (mustChange) {
+      redirectResponse.cookies.set(
+        MUST_CHANGE_PASSWORD_COOKIE,
+        "1",
+        passwordGateCookieOptions(),
+      );
+    }
+    return redirectResponse;
   }
 
   return supabaseResponse;
