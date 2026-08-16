@@ -5,7 +5,8 @@
 | Estado | **PREPROD VALIDATION COMPLETE** — pendiente aprobación humana |
 | Branch | `cursor/ui-phase-5-preprod-readiness-a3cc` |
 | Base | `main` @ `e100765` (post Phase 4 / PR #16) |
-| PR | (actualizar tras create) |
+| PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/17 |
+| Commits | `f28bed7` feat(preprod): Phase 5 validation harness and authz export fix |
 | Merge | **NO** |
 | Producción | **NO** |
 | Recomendación | **NO-GO FOR PRODUCTION** |
