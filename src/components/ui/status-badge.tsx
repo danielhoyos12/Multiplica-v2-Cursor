@@ -7,11 +7,11 @@ type StatusBadgeProps = {
 };
 
 const toneClass: Record<NonNullable<StatusBadgeProps["tone"]>, string> = {
-  neutral: "bg-[var(--surface-soft)] text-[var(--muted)] border-[var(--border)]",
+  neutral: "bg-[var(--paper-100)] text-[var(--muted)] border-[var(--border)]",
   success: "bg-[var(--success-soft)] text-[var(--success)] border-[var(--success-border)]",
   warning: "bg-[var(--warning-soft)] text-[var(--warning)] border-[var(--warning-border)]",
-  danger: "bg-[var(--danger-soft)] text-[var(--danger)] border-[var(--danger-border)]",
-  brand: "bg-[var(--brand-soft)] text-[var(--brand-ink)] border-[var(--brand-border)]",
+  danger: "bg-[var(--vermilion-soft)] text-[var(--vermilion)] border-[var(--danger-border)]",
+  brand: "bg-[var(--cobalt-soft)] text-[var(--ink)] border-[var(--brand-border)]",
 };
 
 export function StatusBadge({
