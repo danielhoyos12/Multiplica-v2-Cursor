@@ -8,7 +8,7 @@
 | Branch | `cursor/ui-phase-4-deep-ux-hardening-a3cc` |
 | Base | `main` @ `9d4bf57` (post PR #15) |
 | PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/16 |
-| Commits | `c88995e` feat(ui): Phase 4 deep UX hardening and polish · `af6da19` fix(a11y): full focus trap on ConfirmDialog |
+| Commits | `c88995e` feat · `af6da19` a11y focus trap · `961c3bd` docs PR #16 |
 | Merge | **NO** |
 | Producción | **NO** |
 
