@@ -48,7 +48,10 @@ export function ChangePasswordForm() {
     setLoading(true);
     try {
       const supabase = createClient();
-      const { error: updateError } = await supabase.auth.updateUser({ password });
+      const { error: updateError } = await supabase.auth.updateUser({
+        password,
+        data: { must_change_password: false },
+      });
       if (updateError) {
         setError("No se pudo actualizar la contraseña. Intenta de nuevo o contacta soporte.");
         setLoading(false);

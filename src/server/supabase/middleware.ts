@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-import { safeInternalPath } from "@/lib/safe-redirect";
+import {
+  MUST_CHANGE_PASSWORD_COOKIE,
+  sessionRequiresPasswordChange,
+} from "@/lib/password-change-gate";
+import { isPasswordChangeAllowedPath, safeInternalPath } from "@/lib/safe-redirect";
 
 const APP_PREFIXES = [
   "/dashboard",
@@ -76,9 +80,22 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
+  const mustChange = sessionRequiresPasswordChange({
+    user,
+    cookieValue: request.cookies.get(MUST_CHANGE_PASSWORD_COOKIE)?.value,
+  });
+
+  if (user && mustChange && !isPasswordChangeAllowedPath(pathname)) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/cuenta/cambiar-password";
+    redirectUrl.search = "";
+    return NextResponse.redirect(redirectUrl);
+  }
+
   if (user && isAuthRoute && !pathname.startsWith("/recuperar")) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/dashboard";
+    redirectUrl.pathname = mustChange ? "/cuenta/cambiar-password" : "/dashboard";
+    redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
   }
 
