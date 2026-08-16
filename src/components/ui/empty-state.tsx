@@ -13,11 +13,14 @@ export function EmptyState({ title, description, action, className }: EmptyState
   return (
     <div
       className={cn(
-        "flex flex-col items-start gap-3 rounded-[var(--radius)] border border-dashed border-[var(--border)] bg-[var(--surface-soft)] px-6 py-10",
+        "flex flex-col items-start gap-3 rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-10 shadow-[var(--shadow-card)]",
         className,
       )}
     >
-      <h2 className="font-[family-name:var(--font-display)] text-xl text-[var(--ink)]">
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--muted)]">
+        Sin datos
+      </p>
+      <h2 className="font-[family-name:var(--font-display)] text-xl tracking-tight text-[var(--ink)]">
         {title}
       </h2>
       {description ? (
