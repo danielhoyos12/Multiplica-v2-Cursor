@@ -88,7 +88,11 @@ export function ExportMenu({
       fd.set("rootPersonId", rootPersonId);
       const res = await exportReportFormatAction(fd);
       if (!res.ok) {
-        setError(res.error);
+        setError(
+          res.code === "REPORT_EXPORT_DENIED"
+            ? "No tienes permiso para exportar reportes."
+            : res.error,
+        );
         return;
       }
       if (res.format === "csv") {

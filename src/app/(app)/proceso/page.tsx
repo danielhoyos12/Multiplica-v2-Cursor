@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { DataCard, KpiCard, SectionHeader, StatGroup } from "@/components/dashboard";
+import { ProcesoEtapaFocus } from "@/components/formation/proceso-etapa-focus";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -15,7 +16,9 @@ import { requireAppActor } from "@/server/actor";
 
 export const metadata = { title: "Escalera del Éxito" };
 
-type Search = Promise<{ tipo?: string; estado?: string }>;
+type Search = Promise<{ tipo?: string; estado?: string; etapa?: string }>;
+
+const ETAPA_VALUES = new Set(["pre", "encuentro", "post"]);
 
 export default async function ProcesoPage({
   searchParams,
@@ -31,6 +34,8 @@ export default async function ProcesoPage({
   const processType =
     params.tipo === "udv" || params.tipo === "consolidar" ? params.tipo : undefined;
   const status = params.estado || undefined;
+  const etapa =
+    params.etapa && ETAPA_VALUES.has(params.etapa) ? params.etapa : null;
 
   const counts = await getProcessDashboardCounts(session.id);
   const people = await listProcessPeople(session.id, {
@@ -41,9 +46,10 @@ export default async function ProcesoPage({
 
   return (
     <div className="space-y-8">
+      <ProcesoEtapaFocus etapa={etapa} />
       <PageHeader
         title="Escalera del Éxito"
-        description="GANAR → Consolidar (Pre → Encuentro → Post) → Discipular (CD1 → CD2 → Re-Encuentro → CD3 → EM1–3) → Enviar apto."
+        description="GANAR → Consolidar (Pre → Encuentro → Post) → Discipular (Capacitación Destino → Re-Encuentro → EM) → Enviar."
         actions={
           <div className="flex flex-wrap gap-3">
             <Link href="/destino" className="text-sm font-medium underline">
@@ -59,6 +65,28 @@ export default async function ProcesoPage({
         }
       />
 
+      <div className="print:hidden flex flex-wrap gap-2 text-sm">
+        <span className="text-[var(--muted)]">Focalizar:</span>
+        {(
+          [
+            ["pre", "Pre-Encuentro"],
+            ["encuentro", "Encuentro"],
+            ["post", "Post-Encuentro"],
+          ] as const
+        ).map(([key, label]) => (
+          <Link
+            key={key}
+            href={`/proceso?etapa=${key}`}
+            className={
+              etapa === key
+                ? "rounded-[var(--radius-sm)] bg-[var(--cobalt)] px-2 py-1 text-white"
+                : "rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1"
+            }
+          >
+            {label}
+          </Link>
+        ))}
+      </div>
       <section className="space-y-3" aria-labelledby="pre-encuentro">
         <SectionHeader
           id="pre-encuentro"

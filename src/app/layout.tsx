@@ -21,6 +21,12 @@ export const metadata: Metadata = {
     template: "%s · MULTIPLICA",
   },
   description: "Sistema de gestión integral de la Visión G12",
+  icons: {
+    icon: [{ url: "/brand/app-icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/brand/app-icon.svg" }],
+    shortcut: ["/brand/app-icon.svg"],
+  },
+  applicationName: "MULTIPLICA",
 };
 
 export default function RootLayout({
