@@ -8,7 +8,7 @@
 | Branch | `cursor/ui-phase-2-dashboard-neo-editorial-a3cc` |
 | Base | `main` (post PR #13) |
 | PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/14 |
-| Commit | ver `git log` en branch |
+| Commit | `01bffc4` (HEAD) · `54ae1ea` (implementación) |
 | Merge | **NO** |
 | Producción | **NO** |
 
