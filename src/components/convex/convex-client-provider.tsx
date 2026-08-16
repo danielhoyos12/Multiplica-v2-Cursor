@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  ConvexConnectionIndicator,
+  ConvexDisconnectedIndicator,
+} from "@/components/convex/convex-connection-indicator";
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import type { ReactNode } from "react";
 
@@ -14,16 +18,24 @@ const client = url ? new ConvexReactClient(url) : null;
 export function ConvexClientProvider({ children }: { children: ReactNode }) {
   if (!client) {
     return (
-      <div className="mx-auto max-w-lg space-y-3 py-12 text-sm text-[var(--muted)]">
-        <p className="font-medium text-[var(--ink)]">Convex no configurado</p>
-        <p>
-          Define <code>NEXT_PUBLIC_CONVEX_URL</code> (vía{" "}
-          <code>CONVEX_AGENT_MODE=anonymous npx convex dev</code>) y reinicia el
-          frontend.
-        </p>
-      </div>
+      <>
+        <ConvexDisconnectedIndicator />
+        <div className="mx-auto max-w-lg space-y-3 py-12 text-sm text-[var(--muted)]">
+          <p className="font-medium text-[var(--ink)]">Convex no configurado</p>
+          <p>
+            Define <code>NEXT_PUBLIC_CONVEX_URL</code> (vía{" "}
+            <code>CONVEX_AGENT_MODE=anonymous npx convex dev</code>) y reinicia el
+            frontend.
+          </p>
+        </div>
+      </>
     );
   }
 
-  return <ConvexProvider client={client}>{children}</ConvexProvider>;
+  return (
+    <ConvexProvider client={client}>
+      <ConvexConnectionIndicator />
+      {children}
+    </ConvexProvider>
+  );
 }
