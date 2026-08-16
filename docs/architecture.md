@@ -11,15 +11,18 @@ GANAR
 
 ## Stack
 
-| Layer | Choice |
-| --- | --- |
-| Web | Next.js App Router + TypeScript + Tailwind |
-| Backend | Modular monolith (server actions + domain modules) |
-| Database | PostgreSQL (Supabase) |
-| Authn | Supabase Auth |
-| Authz | Domain policies + RLS deny-by-default |
-| ORM | Drizzle + versioned SQL migrations `0000`–`0010` |
-| Deploy | Vercel + Supabase (recommended) |
+| Layer | Choice (today) | Target |
+| --- | --- | --- |
+| Web | Next.js App Router + TypeScript + Tailwind | same |
+| Backend | Modular monolith (server actions + domain modules) | same modules → Convex functions |
+| Database | PostgreSQL (Supabase) + Drizzle | **Convex** (phased cutover) |
+| Authn | Supabase Auth | Supabase Auth until phase 10, then Convex Auth / bridge |
+| Authz | Domain policies + RLS deny-by-default | Domain policies in Convex mutations |
+| Realtime | None (pastoral) | Convex subscriptions where useful |
+| Deploy | Vercel + Supabase | Vercel + Convex (+ Supabase Auth meanwhile) |
+
+Cutover plan: [`docs/convex-full-cutover-plan.md`](./convex-full-cutover-plan.md).
+
 
 ## Modules (implemented)
 
