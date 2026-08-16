@@ -1,9 +1,11 @@
 /**
  * Live Phase 4 verification against multiplica-dev.
- * Tree isolation, activation, credentials audit safety, RLS anon deny, conversion readiness.
+ * Tree isolation, activation, credentials audit safety, conversion readiness.
  */
 import { randomBytes } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
+
+import { recordInterimDatabaseReady } from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { getDb } from "../src/db/client";
@@ -66,17 +68,18 @@ async function createPerson(name: string, ministryId: string, networkId: string)
 
 async function main() {
   const results: Result[] = [];
-  const db = getDb();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  record(results, "service_role configured", Boolean(serviceKey));
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
   record(
     results,
     "DATABASE_URL server-only (not NEXT_PUBLIC)",
     !process.env.NEXT_PUBLIC_DATABASE_URL,
   );
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 4 verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
+  const db = getDb();
+  const serviceKey = process.env.CLERK_SECRET_KEY;
 
   const ministryRows = await db
     .select()
@@ -92,25 +95,6 @@ async function main() {
     .limit(1);
 
   record(results, "catalogs ready", Boolean(ministryA && ministryB && networkH));
-
-  // Anon RLS
-  const anon = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const anonLead = await anon.from("person_leadership").select("id").limit(5);
-  record(
-    results,
-    "anonymous person_leadership DENY/empty",
-    Boolean(anonLead.error) || (anonLead.data?.length ?? 0) === 0,
-    anonLead.error?.message ?? `rows=${anonLead.data?.length ?? 0}`,
-  );
-  const anonClosure = await anon.from("leadership_closure").select("depth").limit(5);
-  record(
-    results,
-    "anonymous leadership_closure DENY/empty",
-    Boolean(anonClosure.error) || (anonClosure.data?.length ?? 0) === 0,
-    anonClosure.error?.message ?? `rows=${anonClosure.data?.length ?? 0}`,
-  );
 
   // Pure rules
   record(
@@ -564,7 +548,7 @@ async function main() {
         else if (/\.(js|map)$/.test(entry.name) && entry.name.includes("client")) {
           const text = fs.readFileSync(p, "utf8");
           if (
-            text.includes("SUPABASE_SERVICE_ROLE") ||
+            text.includes("CLERK_SECRET_KEY") ||
             text.includes("DATABASE_URL") ||
             (serviceKey && text.includes(serviceKey))
           ) {

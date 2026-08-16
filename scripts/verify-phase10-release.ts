@@ -1,8 +1,7 @@
 /**
- * Phase 10 release verification — coordinates safe checks against multiplica-dev.
+ * Phase 10 release verification — Clerk + Convex + interim Postgres (non-Supabase).
  * Never targets production.
  */
-import { createClient } from "@supabase/supabase-js";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -10,7 +9,13 @@ import { assertNotProductionTarget, redactDatabaseUrl } from "../src/lib/prod-gu
 import { safeInternalPath } from "../src/lib/safe-redirect";
 import { runIntegrityChecks } from "../src/modules/reporting/integrity";
 import { sanitizeCsvCell } from "../src/modules/reporting/csv";
-import { hasDatabaseUrl, hasSupabasePublicConfig } from "../src/lib/env";
+import {
+  hasClerkPublicConfig,
+  hasClerkSecret,
+  hasConvexPublicConfig,
+  hasDatabaseUrl,
+} from "../src/lib/env";
+import { recordInterimDatabaseReady } from "./lib/verify-env";
 
 type Result = { name: string; pass: boolean; detail?: string };
 
@@ -53,8 +58,11 @@ async function main() {
     record(results, "prod guard allows current env", false, String(e));
   }
 
-  record(results, "public supabase config", hasSupabasePublicConfig());
-  record(results, "database url configured", hasDatabaseUrl());
+  record(results, "Clerk public config", hasClerkPublicConfig());
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
+  record(results, "Convex public config", hasConvexPublicConfig());
+  const dbReady = recordInterimDatabaseReady(results);
+  record(results, "database url configured (non-Supabase)", hasDatabaseUrl());
   record(
     results,
     "DATABASE_URL redacted helper",
@@ -66,11 +74,11 @@ async function main() {
   record(results, "open redirect //evil blocked", safeInternalPath("//evil.com") === "/dashboard");
   record(results, "csv formula sanitize", sanitizeCsvCell("=1+1").startsWith("'"));
 
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const clerkSecret = process.env.CLERK_SECRET_KEY ?? "";
   const dbUrl = process.env.DATABASE_URL ?? "";
   const secretPatterns: RegExp[] = [];
-  if (serviceKey.length > 20) {
-    secretPatterns.push(new RegExp(serviceKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  if (clerkSecret.length > 20) {
+    secretPatterns.push(new RegExp(clerkSecret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   if (dbUrl.includes("@")) {
     const pass = (() => {
@@ -99,40 +107,31 @@ async function main() {
   // JWT-like hardcoded tokens in src (exclude placeholders)
   record(results, "src hardcoded JWT scan", srcHits.length === 0, srcHits[0]);
 
-  const anon = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
-  const tables = [
-    "persons",
-    "cells",
-    "person_leadership",
-    "pastoral_transfer_requests",
-    "audit_logs",
-    "person_process_progress",
-  ];
-  for (const t of tables) {
-    const res = await anon.from(t).select("id").limit(3);
-    const denied =
-      Boolean(res.error) || (res.data?.length ?? 0) === 0 || res.error?.code === "PGRST301";
-    // Empty + error both acceptable for deny-by-default
+  if (dbReady) {
+    try {
+      const integrity = await runIntegrityChecks();
+      record(
+        results,
+        "system health critical=0",
+        integrity.criticalCount === 0,
+        `critical=${integrity.criticalCount} warning=${integrity.warningCount}`,
+      );
+    } catch (e) {
+      record(
+        results,
+        "system health critical=0",
+        false,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  } else {
     record(
       results,
-      `anonymous ${t} DENY/empty`,
-      Boolean(res.error) || (res.data?.length ?? 0) === 0,
-      res.error?.message ?? `rows=${res.data?.length ?? 0}`,
+      "system health critical=0",
+      false,
+      "skipped — interim DATABASE_URL unavailable or Supabase-hosted",
     );
-    void denied;
   }
-
-  const integrity = await runIntegrityChecks();
-  record(
-    results,
-    "system health critical=0",
-    integrity.criticalCount === 0,
-    `critical=${integrity.criticalCount} warning=${integrity.warningCount}`,
-  );
 
   const failed = results.filter((r) => !r.pass).length;
   const passed = results.filter((r) => r.pass).length;

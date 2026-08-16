@@ -2,7 +2,9 @@
  * Live Phase 6 verification — Capacitación Destino against multiplica-dev.
  */
 import { randomBytes } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
+
+import { recordInterimDatabaseReady } from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "../src/db/client";
@@ -113,17 +115,18 @@ async function seedCellWithMembers(
 
 async function main() {
   const results: Result[] = [];
-  const db = getDb();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  record(results, "service_role present", Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
   record(results, "DATABASE_URL not public", !process.env.NEXT_PUBLIC_DATABASE_URL);
   record(
     results,
     "rule: 12 persons ≠ 12 leaders",
     DestinationRules.twelvePersonsIsNotTwelveLeaders,
   );
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 6 verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
+  const db = getDb();
 
   const [ministryA, ministryB] = await db
     .select()
@@ -137,29 +140,6 @@ async function main() {
     .where(eq(networks.code, "hombres"))
     .limit(1);
   record(results, "catalogs ready", Boolean(ministryA && ministryB && networkH));
-
-  const anon = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const anonReq = await anon.from("training_completion_requirements").select("id").limit(3);
-  record(
-    results,
-    "anonymous requirements DENY/empty",
-    Boolean(anonReq.error) || (anonReq.data?.length ?? 0) === 0,
-    anonReq.error?.message ?? `rows=${anonReq.data?.length ?? 0}`,
-  );
-  const anonStaff = await anon.from("training_cycle_staff").select("id").limit(3);
-  record(
-    results,
-    "anonymous cycle_staff DENY/empty",
-    Boolean(anonStaff.error) || (anonStaff.data?.length ?? 0) === 0,
-  );
-  const anonOverride = await anon.from("training_requirement_overrides").select("id").limit(3);
-  record(
-    results,
-    "anonymous overrides DENY/empty",
-    Boolean(anonOverride.error) || (anonOverride.data?.length ?? 0) === 0,
-  );
 
   const [superRole] = await db.select().from(roles).where(eq(roles.code, "superadmin")).limit(1);
   const [superAssign] = superRole

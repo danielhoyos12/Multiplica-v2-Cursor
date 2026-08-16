@@ -1,0 +1,161 @@
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+/**
+ * MULTIPLICA Convex schema — FULL_CUTOVER phase 0.
+ *
+ * Foundation tables mirror the pastoral domain (formerly Drizzle/Postgres).
+ * Postgres remains source of truth for live pastoral data until each domain
+ * phase cuts over. See docs/convex-full-cutover-plan.md.
+ *
+ * IDs: Convex document ids. During dual-run, `legacyPostgresId` (optional)
+ * stores the former UUID for migration/import.
+ */
+
+const timestamps = {
+  createdAt: v.number(),
+  updatedAt: v.number(),
+};
+
+const legacyId = v.optional(v.string());
+
+export default defineSchema({
+  /** Local-dev smoke only — not pastoral. */
+  healthChecks: defineTable({
+    label: v.string(),
+    createdAt: v.number(),
+  }).index("by_createdAt", ["createdAt"]),
+
+  districts: defineTable({
+    name: v.string(),
+    metroArea: v.string(),
+    isActive: v.boolean(),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  })
+    .index("by_metro_name", ["metroArea", "name"])
+    .index("by_active", ["isActive"]),
+
+  networks: defineTable({
+    code: v.union(
+      v.literal("hombres"),
+      v.literal("mujeres"),
+      v.literal("jovenes"),
+      v.literal("ninos"),
+    ),
+    name: v.string(),
+    isActive: v.boolean(),
+    isConfigurable: v.boolean(),
+    sortOrder: v.number(),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  })
+    .index("by_code", ["code"])
+    .index("by_active", ["isActive"]),
+
+  ministries: defineTable({
+    code: v.string(),
+    name: v.string(),
+    isActive: v.boolean(),
+    sortOrder: v.number(),
+    /** App user id (Convex) of Líder General — optional. */
+    responsibleUserId: v.optional(v.id("users")),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  })
+    .index("by_code", ["code"])
+    .index("by_active", ["isActive"])
+    .index("by_responsibleUserId", ["responsibleUserId"]),
+
+  persons: defineTable({
+    firstName: v.string(),
+    lastName: v.string(),
+    phone: v.optional(v.string()),
+    phoneNormalized: v.optional(v.string()),
+    email: v.optional(v.string()),
+    address: v.optional(v.string()),
+    districtId: v.optional(v.id("districts")),
+    prayerRequest: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    source: v.union(v.literal("internal_form"), v.literal("public_form")),
+    isActive: v.boolean(),
+    registeredAt: v.number(),
+    deletedAt: v.optional(v.number()),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  })
+    .index("by_phoneNormalized", ["phoneNormalized"])
+    .index("by_email", ["email"])
+    .index("by_name", ["lastName", "firstName"])
+    .index("by_registeredAt", ["registeredAt"])
+    .index("by_active", ["isActive"]),
+
+  /**
+   * App profile. During dual-run, `authSubject` = Supabase `auth.users.id`.
+   * After auth cutover (phase 10), may map to Convex Auth subject.
+   */
+  users: defineTable({
+    authSubject: v.string(),
+    email: v.string(),
+    username: v.optional(v.string()),
+    displayName: v.optional(v.string()),
+    personId: v.optional(v.id("persons")),
+    isActive: v.boolean(),
+    mustChangePassword: v.boolean(),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  })
+    .index("by_authSubject", ["authSubject"])
+    .index("by_email", ["email"])
+    .index("by_username", ["username"])
+    .index("by_personId", ["personId"])
+    .index("by_active", ["isActive"]),
+
+  roles: defineTable({
+    code: v.string(),
+    name: v.string(),
+    description: v.optional(v.string()),
+    scopeType: v.union(
+      v.literal("global"),
+      v.literal("ministry"),
+      v.literal("network"),
+      v.literal("tree"),
+    ),
+    isSystem: v.boolean(),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  }).index("by_code", ["code"]),
+
+  permissions: defineTable({
+    code: v.string(),
+    name: v.string(),
+    description: v.optional(v.string()),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  }).index("by_code", ["code"]),
+
+  rolePermissions: defineTable({
+    roleId: v.id("roles"),
+    permissionId: v.id("permissions"),
+    createdAt: v.number(),
+  })
+    .index("by_role", ["roleId"])
+    .index("by_permission", ["permissionId"])
+    .index("by_role_permission", ["roleId", "permissionId"]),
+
+  userRoleAssignments: defineTable({
+    userId: v.id("users"),
+    roleId: v.id("roles"),
+    ministryId: v.optional(v.id("ministries")),
+    networkId: v.optional(v.id("networks")),
+    startsAt: v.number(),
+    endsAt: v.optional(v.number()),
+    createdByUserId: v.optional(v.id("users")),
+    legacyPostgresId: legacyId,
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_role", ["roleId"])
+    .index("by_ministry", ["ministryId"])
+    .index("by_network", ["networkId"]),
+});

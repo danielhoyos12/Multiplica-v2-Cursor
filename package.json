@@ -24,13 +24,17 @@
     "db:push": "drizzle-kit push",
     "verify:invariants": "tsx --env-file=.env.local scripts/verify-data-invariants.ts",
     "verify:phase10": "tsx --env-file=.env.local scripts/verify-phase10-release.ts",
-    "verify:release": "tsx --env-file=.env.local scripts/verify-release.ts"
+    "verify:release": "tsx --env-file=.env.local scripts/verify-release.ts",
+    "convex:dev": "CONVEX_AGENT_MODE=anonymous npx convex dev",
+    "convex:once": "CONVEX_AGENT_MODE=anonymous npx convex dev --once",
+    "convex:dashboard": "npx convex dashboard"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.7.6",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
     "clsx": "^2.1.1",
+    "convex": "^1.44.0",
     "drizzle-orm": "^0.45.2",
     "exceljs": "^4.4.0",
     "next": "16.3.1",

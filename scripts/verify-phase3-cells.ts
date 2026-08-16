@@ -2,7 +2,13 @@
  * Live Phase 3 verification against multiplica-dev.
  */
 import { createHash } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
+
+import {
+  createEphemeralClerkUser,
+  deleteClerkUser,
+  recordInterimDatabaseReady,
+} from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "../src/db/client";
@@ -40,10 +46,13 @@ function record(results: Result[], name: string, pass: boolean, detail?: string)
 
 async function main() {
   const results: Result[] = [];
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 3 verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
   const db = getDb();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey = process.env.CLERK_SECRET_KEY;
 
   const ministryRows = await db
     .select()
@@ -61,31 +70,6 @@ async function main() {
 
   record(results, "catalogs ready", Boolean(ministryA && ministryB && networkH));
   record(results, "Niños inactive", ninos?.isActive === false);
-
-  const anon = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const anonSelect = await anon.from("cells").select("id").limit(5);
-  record(
-    results,
-    "anonymous cells SELECT DENY/empty",
-    Boolean(anonSelect.error) || (anonSelect.data?.length ?? 0) === 0,
-    anonSelect.error?.message ?? `rows=${anonSelect.data?.length ?? 0}`,
-  );
-  const anonInsert = await anon.from("cells").insert({
-    name: "Hacker Cell",
-    type: "evangelistic",
-    ministry_id: ministryA?.id,
-    network_id: networkH?.id,
-    day_of_week: "monday",
-    start_time: "19:00",
-  });
-  record(
-    results,
-    "anonymous cells INSERT DENY",
-    Boolean(anonInsert.error),
-    anonInsert.error?.message ?? "unexpected ok",
-  );
 
   const [superRole] = await db.select().from(roles).where(eq(roles.code, "superadmin")).limit(1);
   const [superAssign] = superRole
@@ -303,24 +287,20 @@ async function main() {
   );
 
   if (serviceKey) {
-    const admin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
     const email = `phase3-leader-${Date.now()}@example.com`;
     const password = createHash("sha256").update(email).digest("hex").slice(0, 24) + "Aa1!";
-    const createdUser = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    });
-    const leaderId = createdUser.data.user?.id;
-    if (leaderId) {
-      await db.insert(users).values({
-        id: leaderId,
-        email,
-        displayName: "Leader Phase3",
-        isActive: true,
-      });
+    try {
+      const ephemeral = await createEphemeralClerkUser(email, password);
+      const [inserted] = await db
+        .insert(users)
+        .values({
+          clerkUserId: ephemeral.clerkUserId,
+          email,
+          displayName: "Leader Phase3",
+          isActive: true,
+        })
+        .returning({ id: users.id });
+      const leaderId = inserted.id;
       const [leaderRole] = await db
         .select()
         .from(roles)
@@ -343,19 +323,19 @@ async function main() {
           !scoped.rows.some((r) => r.id === cellA.id),
         `rows=${scoped.total}`,
       );
-      await admin.auth.admin.deleteUser(leaderId);
-    } else {
-      record(results, "leader B isolation", false, createdUser.error?.message);
+      await deleteClerkUser(ephemeral.clerkUserId);
+    } catch (e) {
+      record(results, "leader B isolation", false, e instanceof Error ? e.message : String(e));
     }
   } else {
-    record(results, "leader B isolation", false, "no service role");
+    record(results, "leader B isolation", false, "no CLERK_SECRET_KEY");
   }
 
   // client secret scan
   const { readdirSync, readFileSync, existsSync } = await import("node:fs");
   const { join } = await import("node:path");
   let secretHit = false;
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRole = process.env.CLERK_SECRET_KEY;
   const databaseUrl = process.env.DATABASE_URL;
   if (existsSync(".next/static")) {
     const walk = (dir: string) => {

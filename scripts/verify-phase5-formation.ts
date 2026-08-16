@@ -2,7 +2,9 @@
  * Live Phase 5 verification — Consolidar + UDV against multiplica-dev.
  */
 import { randomBytes } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
+
+import { recordInterimDatabaseReady } from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "../src/db/client";
@@ -67,16 +69,17 @@ async function createPerson(name: string, ministryId: string, networkId: string)
 
 async function main() {
   const results: Result[] = [];
-  const db = getDb();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  record(results, "service_role present", Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
   record(
     results,
     "DATABASE_URL not public",
     !process.env.NEXT_PUBLIC_DATABASE_URL,
   );
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 5 verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
+  const db = getDb();
 
   const [ministryA, ministryB] = await db
     .select()
@@ -90,23 +93,6 @@ async function main() {
     .where(eq(networks.code, "hombres"))
     .limit(1);
   record(results, "catalogs ready", Boolean(ministryA && ministryB && networkH));
-
-  const anon = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const anonProgress = await anon.from("person_process_progress").select("id").limit(3);
-  record(
-    results,
-    "anonymous process progress DENY/empty",
-    Boolean(anonProgress.error) || (anonProgress.data?.length ?? 0) === 0,
-    anonProgress.error?.message ?? `rows=${anonProgress.data?.length ?? 0}`,
-  );
-  const anonAtt = await anon.from("training_attendance").select("id").limit(3);
-  record(
-    results,
-    "anonymous training_attendance DENY/empty",
-    Boolean(anonAtt.error) || (anonAtt.data?.length ?? 0) === 0,
-  );
 
   record(
     results,
