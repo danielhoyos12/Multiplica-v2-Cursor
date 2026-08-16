@@ -43,7 +43,7 @@ export function KpiCard({
           value === "NO_DATA" && "text-2xl text-[var(--muted)] sm:text-3xl",
         )}
       >
-        {value}
+        {value === "NO_DATA" ? "Sin datos" : value}
       </p>
       {delta ? (
         <div className="mt-2">

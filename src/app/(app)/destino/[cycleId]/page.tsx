@@ -15,7 +15,7 @@ import {
 } from "@/modules/formation/actions";
 import { requireAppActor } from "@/server/actor";
 
-export const metadata = { title: "Ciclo Destino" };
+export const metadata = { title: "Ciclo Capacitación Destino" };
 
 type Params = Promise<{ cycleId: string }>;
 
@@ -48,7 +48,7 @@ export default async function DestinoCyclePage({ params }: { params: Params }) {
     <div className="space-y-8">
       <PageHeader
         title={board.cycle.name}
-        description={`${board.program?.name ?? "Destino"} · ${String(board.cycle.startDate)} → ${String(board.cycle.endDate)}`}
+        description={`Capacitación Destino · ${board.program?.name ?? "Nivel"} · ${String(board.cycle.startDate)} → ${String(board.cycle.endDate)}`}
         actions={
           <div className="flex gap-2">
             <Link href="/destino" className="text-sm underline">
@@ -148,7 +148,7 @@ export default async function DestinoCyclePage({ params }: { params: Params }) {
                   >
                     <button
                       type="submit"
-                      className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-2 py-1 text-xs text-white"
+                      className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-2 py-1 text-xs text-white"
                     >
                       Completar nivel
                     </button>

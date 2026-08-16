@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { DataCard, SectionHeader } from "@/components/dashboard";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -32,34 +33,34 @@ export default async function NetworksAdminPage() {
         description="Catálogo de Redes. Niños permanece desactivado hasta activación explícita. Compatibilidad según invariante 16."
       />
 
-      <DataTable
-        rows={networks}
-        getRowId={(row) => row.id}
-        columns={[
-          { key: "code", header: "Código", cell: (row) => row.code },
-          { key: "name", header: "Nombre", cell: (row) => row.name },
-          {
-            key: "status",
-            header: "Estado",
-            cell: (row) => (
-              <StatusBadge
-                label={row.isActive ? "Activa" : "Desactivada"}
-                tone={row.isActive ? "success" : "warning"}
-              />
-            ),
-          },
-          {
-            key: "configurable",
-            header: "Configurable",
-            cell: (row) => (row.isConfigurable ? "Sí" : "No"),
-          },
-        ]}
-      />
+      <DataCard>
+        <DataTable
+          rows={networks}
+          getRowId={(row) => row.id}
+          columns={[
+            { key: "code", header: "Código", cell: (row) => row.code },
+            { key: "name", header: "Nombre", cell: (row) => row.name },
+            {
+              key: "status",
+              header: "Estado",
+              cell: (row) => (
+                <StatusBadge
+                  label={row.isActive ? "Activa" : "Desactivada"}
+                  tone={row.isActive ? "success" : "warning"}
+                />
+              ),
+            },
+            {
+              key: "configurable",
+              header: "Configurable",
+              cell: (row) => (row.isConfigurable ? "Sí" : "No"),
+            },
+          ]}
+        />
+      </DataCard>
 
-      <section className="space-y-3">
-        <h2 className="font-[family-name:var(--font-display)] text-2xl text-[var(--ink)]">
-          Compatibilidad de gestión
-        </h2>
+      <DataCard className="space-y-3">
+        <SectionHeader title="Compatibilidad de gestión" />
         <DataTable
           rows={compatibility}
           getRowId={(row) => row.id}
@@ -72,7 +73,7 @@ export default async function NetworksAdminPage() {
             },
           ]}
         />
-      </section>
+      </DataCard>
     </div>
   );
 }

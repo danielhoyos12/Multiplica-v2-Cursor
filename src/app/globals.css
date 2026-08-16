@@ -136,3 +136,19 @@ h3,
     transform: translateY(0);
   }
 }
+
+@media print {
+  aside,
+  nav[aria-label="Navegación inferior"] {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+}

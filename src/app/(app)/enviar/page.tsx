@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DataCard, KpiCard, SectionHeader, StatGroup } from "@/components/dashboard";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { hasPermission } from "@/modules/authorization";
@@ -41,105 +43,103 @@ export default async function EnviarPage() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Kpi label="Aptos" value={counts.eligible} />
-        <Kpi label="En proceso" value={counts.inProgress} />
-        <Kpi label="Completados" value={counts.completed} />
-        <Kpi label="Ungidos / eligible" value={counts.ungidos} />
-        <Kpi label="Activados (Phase 4)" value={counts.activados} />
-      </div>
+      <StatGroup columns={4} aria-label="Resumen Enviar" className="lg:grid-cols-5">
+        <KpiCard label="Aptos" value={counts.eligible} hint="Apto ≠ líder activo" />
+        <KpiCard label="En proceso" value={counts.inProgress} />
+        <KpiCard label="Completados" value={counts.completed} />
+        <KpiCard label="Ungidos / eligible" value={counts.ungidos} hint="Ungido ≠ activo" />
+        <KpiCard label="Activados (Phase 4)" value={counts.activados} />
+      </StatGroup>
 
       <p className="text-sm text-[var(--muted)]">
         Formación completa → Enviado → Ungido/apto → Activado como líder (Fase 4).
       </p>
 
-      <ul className="space-y-2">
-        {people.map((p) => (
-          <li
-            key={p.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm"
-          >
-            <div>
-              <Link href={`/ganar/${p.personId}`} className="font-medium underline">
-                {p.fullName}
-              </Link>
-              <p className="text-[var(--muted)]">
-                Enviar: {p.statusLabel} · Liderazgo: {p.leadershipStatus}
-                {p.leadershipActive ? " (activo)" : ""}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge
-                label={p.statusLabel}
-                tone={p.status === "completed" ? "success" : "warning"}
-              />
-              {canManage && p.status === "eligible" ? (
-                <form
-                  action={async () => {
-                    "use server";
-                    await startSendAction({ personId: p.personId });
-                  }}
-                >
-                  <button
-                    type="submit"
-                    className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-xs"
-                  >
-                    Iniciar
-                  </button>
-                </form>
-              ) : null}
-              {canComplete && p.status !== "completed" ? (
-                <form
-                  action={async () => {
-                    "use server";
-                    await completeSendAction({
-                      personId: p.personId,
-                      markEligible: true,
-                    });
-                  }}
-                >
-                  <button
-                    type="submit"
-                    className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-2 py-1 text-xs text-white"
-                  >
-                    Completar + Ungir
-                  </button>
-                </form>
-              ) : null}
-              {canComplete && p.status !== "completed" ? (
-                <form
-                  action={async () => {
-                    "use server";
-                    await completeSendAction({
-                      personId: p.personId,
-                      markEligible: false,
-                    });
-                  }}
-                >
-                  <button
-                    type="submit"
-                    className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-xs"
-                  >
-                    Solo completar
-                  </button>
-                </form>
-              ) : null}
-            </div>
-          </li>
-        ))}
+      <DataCard className="space-y-3">
+        <SectionHeader title="Personas en Enviar" />
         {people.length === 0 ? (
-          <p className="text-sm text-[var(--muted)]">Sin personas en Enviar en tu alcance.</p>
-        ) : null}
-      </ul>
-    </div>
-  );
-}
-
-function Kpi({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</p>
-      <p className="mt-2 text-2xl font-medium">{value}</p>
+          <EmptyState
+            title="Sin personas"
+            description="No hay personas en Enviar en tu alcance."
+          />
+        ) : (
+          <ul className="space-y-2">
+            {people.map((p) => (
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--paper-100)]/40 px-4 py-3 text-sm"
+              >
+                <div>
+                  <Link href={`/ganar/${p.personId}`} className="font-medium underline">
+                    {p.fullName}
+                  </Link>
+                  <p className="text-[var(--muted)]">
+                    Enviar: {p.statusLabel} · Liderazgo: {p.leadershipStatus}
+                    {p.leadershipActive ? " (activo)" : ""}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    label={p.statusLabel}
+                    tone={p.status === "completed" ? "success" : "warning"}
+                  />
+                  {canManage && p.status === "eligible" ? (
+                    <form
+                      action={async () => {
+                        "use server";
+                        await startSendAction({ personId: p.personId });
+                      }}
+                    >
+                      <button
+                        type="submit"
+                        className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-xs"
+                      >
+                        Iniciar
+                      </button>
+                    </form>
+                  ) : null}
+                  {canComplete && p.status !== "completed" ? (
+                    <form
+                      action={async () => {
+                        "use server";
+                        await completeSendAction({
+                          personId: p.personId,
+                          markEligible: true,
+                        });
+                      }}
+                    >
+                      <button
+                        type="submit"
+                        className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-2 py-1 text-xs text-white"
+                      >
+                        Completar + Ungir
+                      </button>
+                    </form>
+                  ) : null}
+                  {canComplete && p.status !== "completed" ? (
+                    <form
+                      action={async () => {
+                        "use server";
+                        await completeSendAction({
+                          personId: p.personId,
+                          markEligible: false,
+                        });
+                      }}
+                    >
+                      <button
+                        type="submit"
+                        className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-xs"
+                      >
+                        Solo completar
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DataCard>
     </div>
   );
 }

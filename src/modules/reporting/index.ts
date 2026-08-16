@@ -10,8 +10,17 @@ export {
 export { getExecutiveDashboard, type ExecutiveDashboard } from "./dashboard";
 export { computePastoralAlerts, type PastoralAlert, type AlertSeverity } from "./alerts";
 export { runIntegrityChecks, type IntegrityReport } from "./integrity";
-export { runReport, exportReportCsv, type ReportType, type ReportPage } from "./reports";
+export {
+  runReport,
+  exportReportCsv,
+  exportReportXlsx,
+  exportReportPrintHtml,
+  type ReportType,
+  type ReportPage,
+} from "./reports";
 export { rowsToCsv, sanitizeCsvCell, stripSensitiveFields } from "./csv";
+export { rowsToXlsxBuffer } from "./xlsx";
+export { rowsToPrintHtml } from "./print-html";
 export { getPersonMetrics } from "./metrics-persons";
 export { getLadderMetrics } from "./metrics-ladder";
 export { getLeadershipMetrics, listDirectNodeCards } from "./metrics-leadership";

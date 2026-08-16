@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
+import { DataCard, KpiCard, StatGroup } from "@/components/dashboard";
 import { CellFilters } from "@/components/cells/filters";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -65,7 +66,7 @@ export default async function CelulasPage({ searchParams }: { searchParams: Sear
           canCreate ? (
             <Link
               href="/celulas/nueva"
-              className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm font-medium text-white"
+              className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm font-medium text-white"
             >
               Nueva célula
             </Link>
@@ -73,20 +74,20 @@ export default async function CelulasPage({ searchParams }: { searchParams: Sear
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Stat label="Visibles" value={result.stats.total} />
-        <Stat label="Activas" value={result.stats.active} />
-        <Stat label="Evangelísticas" value={result.stats.evangelistic} />
-        <Stat label="De 12" value={result.stats.twelve} />
-        <Stat
+      <StatGroup columns={4} aria-label="Resumen células" className="lg:grid-cols-5">
+        <KpiCard label="Visibles" value={result.stats.total} />
+        <KpiCard label="Activas" value={result.stats.active} />
+        <KpiCard label="Evangelísticas" value={result.stats.evangelistic} />
+        <KpiCard label="De 12" value={result.stats.twelve} />
+        <KpiCard
           label="Asist. reciente"
           value={
             result.stats.recentAttendanceAvg === null
-              ? "—"
+              ? "Sin datos"
               : `${result.stats.recentAttendanceAvg}%`
           }
         />
-      </div>
+      </StatGroup>
 
       <Suspense fallback={null}>
         <CellFilters
@@ -102,20 +103,23 @@ export default async function CelulasPage({ searchParams }: { searchParams: Sear
           description="Crea la primera célula evangelística de tu Ministerio."
           action={
             canCreate ? (
-              <Link href="/celulas/nueva" className="text-sm font-medium underline">
+              <Link
+                href="/celulas/nueva"
+                className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm font-medium text-white"
+              >
                 Nueva célula
               </Link>
             ) : null
           }
         />
       ) : (
-        <div className="space-y-3">
+        <DataCard className="space-y-3">
           <ul className="space-y-3">
             {result.rows.map((row) => (
               <li key={row.id}>
                 <Link
                   href={`/celulas/${row.id}`}
-                  className="block rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 transition-colors hover:bg-[var(--surface-soft)]"
+                  className="block rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--paper-100)]/40 p-4 transition-colors hover:bg-[var(--surface-soft)]"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -143,20 +147,10 @@ export default async function CelulasPage({ searchParams }: { searchParams: Sear
             page={result.page}
             pageSize={result.pageSize}
             total={result.total}
-            queryBase={buildQuery(sp, 0).replace(/([?&])page=\d+&?/, "$1").replace(/[?&]$/, "")}
             sp={sp}
           />
-        </div>
+        </DataCard>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</p>
-      <p className="mt-2 font-[family-name:var(--font-display)] text-3xl">{value}</p>
     </div>
   );
 }

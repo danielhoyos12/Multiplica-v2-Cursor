@@ -102,7 +102,7 @@ export default async function CellDetailPage({ params }: { params: Params }) {
             {canAttendance ? (
               <Link
                 href={`/celulas/${id}/asistencia?date=${today}`}
-                className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm font-medium text-white"
+                className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm font-medium text-white"
               >
                 Registrar asistencia
               </Link>
@@ -119,7 +119,9 @@ export default async function CellDetailPage({ params }: { params: Params }) {
         />
         {detail.cell.type === "evangelistic" ? (
           <StatusBadge
-            label={progress.ready ? "READY_FOR_TWELVE_CONVERSION" : progress.label}
+            label={
+              progress.ready ? "Listo para Célula de 12" : progress.label
+            }
             tone={progress.ready ? "success" : "warning"}
           />
         ) : null}

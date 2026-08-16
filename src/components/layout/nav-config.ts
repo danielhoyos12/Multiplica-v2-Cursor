@@ -2,6 +2,8 @@ export type NavLeaf = {
   id: string;
   label: string;
   href: string;
+  /** Nested operational items (visual only; routes unchanged). */
+  children?: NavLeaf[];
 };
 
 export type NavStep = {
@@ -20,7 +22,10 @@ export type NavSecondaryGroup = {
   items: NavLeaf[];
 };
 
-/** Escalera del Éxito — visual/semantic only; routes unchanged. */
+/**
+ * Escalera del Éxito — semantic/visual hierarchy.
+ * Routes unchanged. No “Resumen” leaf under Enviar (04 → /enviar).
+ */
 export const ESCALERA_STEPS: NavStep[] = [
   {
     id: "ganar",
@@ -65,22 +70,36 @@ export const ESCALERA_STEPS: NavStep[] = [
     href: "/enviar",
     icon: "enviar",
     children: [
-      { id: "enviar-resumen", label: "Resumen / Enviar", href: "/enviar" },
       { id: "celulas", label: "Células", href: "/celulas" },
-      { id: "liderazgo", label: "Liderazgo", href: "/liderazgo" },
+      {
+        id: "liderazgo",
+        label: "Liderazgo",
+        href: "/liderazgo",
+        children: [
+          {
+            id: "transferencias",
+            label: "Transferencias",
+            href: "/transferencias",
+          },
+        ],
+      },
     ],
   },
 ];
 
+/**
+ * 05 Reportes — management tool, NOT a doctrinal Escalera step.
+ */
+export const MANAGEMENT_NAV: NavLeaf & { number: string; kind: "tool" } = {
+  id: "reportes",
+  number: "05",
+  label: "Reportes",
+  href: "/reportes",
+  kind: "tool",
+};
+
+/** Admin + Legacy only — Transferencias/Reportes moved out of Operación. */
 export const SECONDARY_GROUPS: NavSecondaryGroup[] = [
-  {
-    id: "operacion",
-    label: "Operación",
-    items: [
-      { id: "transferencias", label: "Transferencias", href: "/transferencias" },
-      { id: "reportes", label: "Reportes", href: "/reportes" },
-    ],
-  },
   {
     id: "admin",
     label: "Admin",
@@ -103,9 +122,14 @@ export function pathMatches(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function leafMatches(pathname: string, leaf: NavLeaf): boolean {
+  if (pathMatches(pathname, leaf.href)) return true;
+  return (leaf.children ?? []).some((c) => leafMatches(pathname, c));
+}
+
 export function isStepActive(pathname: string, step: NavStep): boolean {
   if (pathMatches(pathname, step.href)) return true;
-  return step.children.some((c) => pathMatches(pathname, c.href));
+  return step.children.some((c) => leafMatches(pathname, c));
 }
 
 export function findActiveStepId(pathname: string): string | null {
@@ -113,4 +137,19 @@ export function findActiveStepId(pathname: string): string | null {
     if (isStepActive(pathname, step)) return step.id;
   }
   return null;
+}
+
+/** Flatten leaves including nested children (for dock sheets). */
+export function flattenNavLeaves(
+  leaves: NavLeaf[],
+  depth = 0,
+): Array<NavLeaf & { depth: number }> {
+  const out: Array<NavLeaf & { depth: number }> = [];
+  for (const leaf of leaves) {
+    out.push({ ...leaf, depth });
+    if (leaf.children?.length) {
+      out.push(...flattenNavLeaves(leaf.children, depth + 1));
+    }
+  }
+  return out;
 }

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DataCard, SectionHeader } from "@/components/dashboard";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { isSuperadmin } from "@/modules/authorization";
@@ -43,31 +45,37 @@ export default async function SystemHealthPage() {
       </p>
 
       {report.violations.length === 0 ? (
-        <p className="text-sm text-[var(--muted)]">Sin violaciones detectadas.</p>
+        <EmptyState
+          title="Sin violaciones"
+          description="Sin violaciones detectadas en este chequeo."
+        />
       ) : (
-        <ul className="space-y-3">
-          {report.violations.map((v) => (
-            <li
-              key={v.code}
-              className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 text-sm"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusBadge
-                  label={v.severity}
-                  tone={v.severity === "critical" ? "warning" : "brand"}
-                />
-                <span className="font-medium">{v.title}</span>
-                <span className="text-[var(--muted)]">×{v.count}</span>
-              </div>
-              <p className="mt-2 font-mono text-xs text-[var(--muted)]">{v.code}</p>
-              {v.sampleIds.length ? (
-                <p className="mt-2 break-all text-xs text-[var(--muted)]">
-                  samples: {v.sampleIds.join(", ")}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <DataCard className="space-y-3">
+          <SectionHeader title="Violaciones" />
+          <ul className="space-y-3">
+            {report.violations.map((v) => (
+              <li
+                key={v.code}
+                className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--paper-100)]/40 p-4 text-sm"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    label={v.severity}
+                    tone={v.severity === "critical" ? "warning" : "brand"}
+                  />
+                  <span className="font-medium">{v.title}</span>
+                  <span className="text-[var(--muted)]">×{v.count}</span>
+                </div>
+                <p className="mt-2 font-mono text-xs text-[var(--muted)]">{v.code}</p>
+                {v.sampleIds.length ? (
+                  <p className="mt-2 break-all text-xs text-[var(--muted)]">
+                    samples: {v.sampleIds.join(", ")}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </DataCard>
       )}
     </div>
   );

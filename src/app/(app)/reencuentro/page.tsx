@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DataCard, KpiCard, SectionHeader, StatGroup } from "@/components/dashboard";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { hasPermission } from "@/modules/authorization";
@@ -38,7 +40,7 @@ export default async function ReencuentroPage() {
         actions={
           <div className="flex gap-3">
             <Link href="/destino" className="text-sm underline">
-              Destino
+              Capacitación Destino
             </Link>
             <Link href="/escuela-ministerial" className="text-sm underline">
               Escuela Ministerial
@@ -47,100 +49,110 @@ export default async function ReencuentroPage() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="Elegibles" value={counts.eligible} />
-        <Kpi label="Inscritos / en curso" value={counts.enrolled} />
-        <Kpi label="Completados" value={counts.completed} />
-        <Kpi label="Pendientes" value={counts.pending} />
-      </div>
+      <StatGroup columns={4} aria-label="Resumen Re-Encuentro">
+        <KpiCard
+          label="Elegibles"
+          value={counts.eligible}
+          hint="Elegible ≠ activo como líder"
+        />
+        <KpiCard label="Inscritos / en curso" value={counts.enrolled} />
+        <KpiCard label="Completados" value={counts.completed} />
+        <KpiCard label="Pendientes" value={counts.pending} />
+      </StatGroup>
 
       {canManageCycles ? (
-        <form
-          action={async (formData) => {
-            "use server";
-            await createReencuentroEventAction({
-              name: String(formData.get("name") ?? ""),
-              startDate: String(formData.get("startDate") ?? ""),
-              endDate: String(formData.get("endDate") ?? ""),
-              ministryId: String(formData.get("ministryId") ?? "") || null,
-            });
-          }}
-          className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4"
-        >
-          <h2 className="font-medium">Crear evento</h2>
-          <input
-            name="name"
-            required
-            placeholder="Ej. Re-Encuentro Agosto 2026"
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input
-              type="date"
-              name="startDate"
-              required
-              className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-            />
-            <input
-              type="date"
-              name="endDate"
-              required
-              className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-            />
-          </div>
-          <button
-            type="submit"
-            className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm text-white"
+        <DataCard className="space-y-3">
+          <SectionHeader title="Crear evento" description="Nuevo evento de Re-Encuentro." />
+          <form
+            action={async (formData) => {
+              "use server";
+              await createReencuentroEventAction({
+                name: String(formData.get("name") ?? ""),
+                startDate: String(formData.get("startDate") ?? ""),
+                endDate: String(formData.get("endDate") ?? ""),
+                ministryId: String(formData.get("ministryId") ?? "") || null,
+              });
+            }}
+            className="space-y-3"
           >
-            Crear evento
-          </button>
-        </form>
+            <input
+              name="name"
+              required
+              placeholder="Ej. Re-Encuentro Agosto 2026"
+              className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+            />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input
+                type="date"
+                name="startDate"
+                required
+                className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+              />
+              <input
+                type="date"
+                name="endDate"
+                required
+                className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+              />
+            </div>
+            <button
+              type="submit"
+              className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm text-white"
+            >
+              Crear evento
+            </button>
+          </form>
+        </DataCard>
       ) : null}
 
-      <section className="space-y-2">
-        <h2 className="font-medium">Eventos</h2>
-        <ul className="space-y-2">
-          {events.map((ev) => (
-            <li
-              key={ev.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
-            >
-              <div>
-                <Link href={`/reencuentro/${ev.id}`} className="font-medium underline">
-                  {ev.name}
-                </Link>
-                <p className="text-sm text-[var(--muted)]">
-                  {String(ev.startDate)} → {String(ev.endDate)}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <StatusBadge label={ev.status} tone="brand" />
-                {canManageCycles && ev.status === "planned" ? (
-                  <form
-                    action={async () => {
-                      "use server";
-                      await activateReencuentroEventAction(ev.id);
-                    }}
-                  >
-                    <button
-                      type="submit"
-                      className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-xs"
+      <DataCard className="space-y-3">
+        <SectionHeader title="Eventos" />
+        {events.length === 0 ? (
+          <EmptyState title="Sin eventos" description="Aún no hay eventos de Re-Encuentro." />
+        ) : (
+          <ul className="space-y-2">
+            {events.map((ev) => (
+              <li
+                key={ev.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--paper-100)]/40 px-4 py-3"
+              >
+                <div>
+                  <Link href={`/reencuentro/${ev.id}`} className="font-medium underline">
+                    {ev.name}
+                  </Link>
+                  <p className="text-sm text-[var(--muted)]">
+                    {String(ev.startDate)} → {String(ev.endDate)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusBadge label={ev.status} tone="brand" />
+                  {canManageCycles && ev.status === "planned" ? (
+                    <form
+                      action={async () => {
+                        "use server";
+                        await activateReencuentroEventAction(ev.id);
+                      }}
                     >
-                      Activar
-                    </button>
-                  </form>
-                ) : null}
-              </div>
-            </li>
-          ))}
-          {events.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">Sin eventos.</p>
-          ) : null}
-        </ul>
-      </section>
+                      <button
+                        type="submit"
+                        className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-xs"
+                      >
+                        Activar
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DataCard>
 
-      <section className="space-y-2">
-        <h2 className="font-medium">Aptos</h2>
+      <DataCard className="space-y-3">
+        <SectionHeader
+          title="Aptos"
+          description="Personas elegibles. Elegible ≠ inscrito ni líder activo."
+        />
         <ul className="space-y-1 text-sm">
           {aptos.slice(0, 12).map((p) => (
             <li key={p.personId} className="flex justify-between gap-2">
@@ -154,16 +166,7 @@ export default async function ReencuentroPage() {
             <li className="text-[var(--muted)]">Nadie apto en tu alcance.</li>
           ) : null}
         </ul>
-      </section>
-    </div>
-  );
-}
-
-function Kpi({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</p>
-      <p className="mt-2 text-2xl font-medium">{value}</p>
+      </DataCard>
     </div>
   );
 }
