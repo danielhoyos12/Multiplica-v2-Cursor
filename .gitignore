@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Convex local backend state (anonymous / self-hosted data)
+.convex/
+
 # vercel
 .vercel
 
