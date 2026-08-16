@@ -37,6 +37,7 @@ export function ConfirmDialog({
 
   useEffect(() => {
     if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
     const focusables = panel?.querySelectorAll<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
@@ -47,10 +48,30 @@ export function ConfirmDialog({
       if (e.key === "Escape") {
         e.preventDefault();
         onCancel();
+        return;
+      }
+      if (e.key !== "Tab" || !panel) return;
+      const nodes = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute("disabled"));
+      if (nodes.length === 0) return;
+      const first = nodes[0]!;
+      const last = nodes[nodes.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
       }
     }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus?.();
+    };
   }, [open, onCancel]);
 
   if (!open) {
