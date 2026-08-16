@@ -2,6 +2,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Archivo, Inter } from "next/font/google";
 
+import { ConvexClientProvider } from "@/components/convex/convex-client-provider";
+
 import "./globals.css";
 
 const inter = Inter({
@@ -41,7 +43,9 @@ export default function RootLayout({
       className={`${inter.variable} ${archivo.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
-        <ClerkProvider>{children}</ClerkProvider>
+        <ClerkProvider>
+          <ConvexClientProvider>{children}</ConvexClientProvider>
+        </ClerkProvider>
       </body>
     </html>
   );

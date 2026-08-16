@@ -2,14 +2,12 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 /**
- * MULTIPLICA Convex schema — FULL_CUTOVER phase 0.
+ * MULTIPLICA Convex schema — primary data plane (Supabase removed).
  *
- * Foundation tables mirror the pastoral domain (formerly Drizzle/Postgres).
- * Postgres remains source of truth for live pastoral data until each domain
- * phase cuts over. See docs/convex-full-cutover-plan.md.
+ * Foundation + pastoral tables. Interim non-Supabase Postgres may still
+ * back unmigrated Drizzle modules; prefer Convex. See docs/supabase-removal.md.
  *
- * IDs: Convex document ids. During dual-run, `legacyPostgresId` (optional)
- * stores the former UUID for migration/import.
+ * IDs: Convex document ids. `legacyPostgresId` optional for import.
  */
 
 const timestamps = {
@@ -158,4 +156,79 @@ export default defineSchema({
     .index("by_role", ["roleId"])
     .index("by_ministry", ["ministryId"])
     .index("by_network", ["networkId"]),
+
+  cells: defineTable({
+    code: v.optional(v.string()),
+    name: v.string(),
+    type: v.union(v.literal("evangelistic"), v.literal("twelve")),
+    ministryId: v.id("ministries"),
+    networkId: v.id("networks"),
+    responsiblePersonId: v.optional(v.id("persons")),
+    responsibleUserId: v.optional(v.id("users")),
+    dayOfWeek: v.optional(
+      v.union(
+        v.literal("monday"),
+        v.literal("tuesday"),
+        v.literal("wednesday"),
+        v.literal("thursday"),
+        v.literal("friday"),
+        v.literal("saturday"),
+        v.literal("sunday"),
+      ),
+    ),
+    startTime: v.optional(v.string()),
+    timezone: v.string(),
+    address: v.optional(v.string()),
+    districtId: v.optional(v.id("districts")),
+    status: v.union(
+      v.literal("active"),
+      v.literal("inactive"),
+      v.literal("closed"),
+    ),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  })
+    .index("by_ministry", ["ministryId"])
+    .index("by_network", ["networkId"])
+    .index("by_responsiblePersonId", ["responsiblePersonId"])
+    .index("by_status", ["status"]),
+
+  cellMemberships: defineTable({
+    cellId: v.id("cells"),
+    personId: v.id("persons"),
+    status: v.union(
+      v.literal("active"),
+      v.literal("left"),
+      v.literal("transferred"),
+    ),
+    role: v.union(v.literal("member"), v.literal("twelve_team")),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  })
+    .index("by_cell", ["cellId"])
+    .index("by_person", ["personId"])
+    .index("by_cell_person", ["cellId", "personId"]),
+
+  personLeadership: defineTable({
+    personId: v.id("persons"),
+    status: v.union(
+      v.literal("none"),
+      v.literal("eligible"),
+      v.literal("active"),
+      v.literal("inactive"),
+    ),
+    ministryId: v.id("ministries"),
+    networkId: v.id("networks"),
+    directLeaderPersonId: v.optional(v.id("persons")),
+    primaryCellId: v.optional(v.id("cells")),
+    humanLeaderCode: v.optional(v.string()),
+    isMinistryRoot: v.boolean(),
+    legacyPostgresId: legacyId,
+    ...timestamps,
+  })
+    .index("by_person", ["personId"])
+    .index("by_status", ["status"])
+    .index("by_ministry", ["ministryId"])
+    .index("by_directLeader", ["directLeaderPersonId"])
+    .index("by_humanLeaderCode", ["humanLeaderCode"]),
 });
