@@ -71,6 +71,51 @@ describe("csv sanitization", () => {
   });
 });
 
+describe("xlsx + print exporters", () => {
+  it("builds xlsx buffer with headers and rows", async () => {
+    const { rowsToXlsxBuffer } = await import("./xlsx");
+    const buf = await rowsToXlsxBuffer({
+      reportTitle: "Personas",
+      headers: ["nombre", "estado"],
+      rows: [{ nombre: "Ana", estado: "activa" }],
+      meta: {
+        scopeMode: "ministry",
+        roleView: "leader",
+        generatedAt: "2026-08-16T00:00:00.000Z",
+        ministryId: null,
+        networkId: null,
+        rootPersonId: null,
+      },
+    });
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(buf.byteLength).toBeGreaterThan(100);
+    // zip/xlsx signature
+    expect(buf[0]).toBe(0x50);
+    expect(buf[1]).toBe(0x4b);
+  });
+
+  it("builds print html with brand and empty-safe table", async () => {
+    const { rowsToPrintHtml } = await import("./print-html");
+    const html = rowsToPrintHtml({
+      reportTitle: "Células",
+      headers: ["nombre"],
+      rows: [],
+      meta: {
+        scopeMode: "global",
+        roleView: "superadmin",
+        generatedAt: "2026-08-16T00:00:00.000Z",
+        ministryId: null,
+        networkId: null,
+        rootPersonId: null,
+      },
+    });
+    expect(html).toContain("MULTIPLICA");
+    expect(html).toContain("Células");
+    expect(html).toContain("window.print");
+    expect(html).not.toContain("NO_DATA");
+  });
+});
+
 describe("reporting thresholds documented", () => {
   it("exposes conservative defaults", () => {
     expect(ReportingThresholds.formationStalledDays).toBe(30);

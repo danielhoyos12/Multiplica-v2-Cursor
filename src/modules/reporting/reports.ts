@@ -377,19 +377,99 @@ export async function exportReportCsv(
   type: ReportType,
   filters: ScopeFilters = {},
 ): Promise<{ csv: string; rowCount: number }> {
+  const payload = await loadExportRows(actorUserId, type, filters);
+  const csv = rowsToCsv(payload.headers, payload.rows);
+  await auditExport(actorUserId, type, filters, payload.rows.length, "csv");
+  return { csv, rowCount: payload.rows.length };
+}
+
+export async function exportReportXlsx(
+  actorUserId: string,
+  type: ReportType,
+  filters: ScopeFilters = {},
+): Promise<{ buffer: Buffer; rowCount: number; filename: string }> {
+  const payload = await loadExportRows(actorUserId, type, filters);
+  const { rowsToXlsxBuffer } = await import("./xlsx");
+  const buffer = await rowsToXlsxBuffer({
+    reportTitle: REPORT_LABELS[type],
+    headers: payload.headers,
+    rows: payload.rows,
+    meta: payload.meta,
+  });
+  await auditExport(actorUserId, type, filters, payload.rows.length, "xlsx");
+  return {
+    buffer,
+    rowCount: payload.rows.length,
+    filename: `multiplica-${type}.xlsx`,
+  };
+}
+
+export async function exportReportPrintHtml(
+  actorUserId: string,
+  type: ReportType,
+  filters: ScopeFilters = {},
+): Promise<{ html: string; rowCount: number }> {
+  const payload = await loadExportRows(actorUserId, type, filters);
+  const { rowsToPrintHtml } = await import("./print-html");
+  const html = rowsToPrintHtml({
+    reportTitle: REPORT_LABELS[type],
+    headers: payload.headers,
+    rows: payload.rows,
+    meta: payload.meta,
+  });
+  await auditExport(actorUserId, type, filters, payload.rows.length, "print");
+  return { html, rowCount: payload.rows.length };
+}
+
+const REPORT_LABELS: Record<ReportType, string> = {
+  persons: "Personas",
+  cells: "Células",
+  leadership: "Liderazgo",
+  formation: "Formación",
+  transfers: "Transferencias",
+};
+
+async function loadExportRows(
+  actorUserId: string,
+  type: ReportType,
+  filters: ScopeFilters,
+) {
   const scope = await resolveDashboardScope(actorUserId, filters);
   await assertReportsAccess(scope, true);
 
-  // Export up to 2000 rows with same scope
   const page = await runReport(actorUserId, type, {
     ...filters,
     page: 1,
     pageSize: 2000,
   });
   const headers =
-    page.rows.length > 0 ? Object.keys(page.rows[0]!) : ["empty"];
-  const csv = rowsToCsv(headers, page.rows);
+    page.rows.length > 0 ? Object.keys(page.rows[0]!) : ["mensaje"];
+  const rows =
+    page.rows.length > 0
+      ? page.rows
+      : [{ mensaje: "Sin datos en el alcance actual" }];
 
+  return {
+    headers,
+    rows,
+    meta: {
+      scopeMode: scope.mode,
+      roleView: scope.roleView,
+      ministryId: filters.ministryId ?? null,
+      networkId: filters.networkId ?? null,
+      rootPersonId: filters.rootPersonId ?? null,
+      generatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function auditExport(
+  actorUserId: string,
+  type: ReportType,
+  filters: ScopeFilters,
+  rowCount: number,
+  format: string,
+) {
   await writeAuditLog({
     actorUserId,
     action: "report.exported",
@@ -397,14 +477,13 @@ export async function exportReportCsv(
     entityId: null,
     metadata: {
       report_type: type,
+      format,
       filters: {
         ministryId: filters.ministryId ?? null,
         networkId: filters.networkId ?? null,
         rootPersonId: filters.rootPersonId ?? null,
       },
-      row_count: page.rows.length,
+      row_count: rowCount,
     },
   });
-
-  return { csv, rowCount: page.rows.length };
 }

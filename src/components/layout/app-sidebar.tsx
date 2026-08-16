@@ -7,10 +7,12 @@ import { useEffect, useId, useState } from "react";
 import { BrandMark } from "@/components/layout/brand-mark";
 import {
   ESCALERA_STEPS,
+  MANAGEMENT_NAV,
   SECONDARY_GROUPS,
   findActiveStepId,
   isStepActive,
   pathMatches,
+  type NavLeaf,
   type NavStep,
 } from "@/components/layout/nav-config";
 import {
@@ -156,7 +158,12 @@ export function AppSidebar({ userEmail, signOutAction }: Props) {
                             : "text-[#F3F0E8]/90 hover:bg-white/10",
                         )}
                         aria-expanded={open}
-                        onClick={() => setOpenStep(open ? null : step.id)}
+                        onClick={() => {
+                          if (step.id === "enviar" && !open) {
+                            /* expand; group header also links via children Abrir */
+                          }
+                          setOpenStep(open ? null : step.id);
+                        }}
                       >
                         <StepGlyph name={step.icon} className="size-5 shrink-0" />
                         <span className="min-w-0 flex-1">
@@ -176,25 +183,33 @@ export function AppSidebar({ userEmail, signOutAction }: Props) {
                       </button>
                       {open ? (
                         <ul className="mb-2 ml-4 space-y-0.5 border-l border-white/15 py-1 pl-3">
-                          {step.children.map((child) => {
-                            const childActive = pathMatches(pathname, child.href);
-                            return (
-                              <li key={child.id}>
-                                <Link
-                                  href={child.href}
-                                  onClick={() => setExpanded(false)}
-                                  className={cn(
-                                    "block rounded-[var(--radius-sm)] px-2.5 py-2 text-sm transition-colors",
-                                    childActive
-                                      ? "bg-white/12 font-medium text-white"
-                                      : "text-[#F3F0E8]/75 hover:bg-white/10 hover:text-white",
-                                  )}
-                                >
-                                  {child.label}
-                                </Link>
-                              </li>
-                            );
-                          })}
+                          {step.children.map((child) => (
+                            <NavLeafItem
+                              key={child.id}
+                              leaf={child}
+                              pathname={pathname}
+                              onNavigate={() => setExpanded(false)}
+                            />
+                          ))}
+                          {step.id === "enviar" ? (
+                            <li>
+                              <Link
+                                href="/enviar"
+                                onClick={() => setExpanded(false)}
+                                className={cn(
+                                  "mt-1 block rounded-[var(--radius-sm)] px-2.5 py-2 text-xs transition-colors",
+                                  pathMatches(pathname, "/enviar") &&
+                                    !pathMatches(pathname, "/celulas") &&
+                                    !pathMatches(pathname, "/liderazgo") &&
+                                    !pathMatches(pathname, "/transferencias")
+                                    ? "bg-white/12 font-medium text-white"
+                                    : "text-[#F3F0E8]/55 hover:bg-white/10 hover:text-white",
+                                )}
+                              >
+                                Ver resumen de envío
+                              </Link>
+                            </li>
+                          ) : null}
                         </ul>
                       ) : null}
                     </div>
@@ -203,6 +218,29 @@ export function AppSidebar({ userEmail, signOutAction }: Props) {
               </div>
 
               <div className="mt-6 space-y-4 border-t border-white/10 pt-4">
+                <div>
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#F3F0E8]/40">
+                    Gestión
+                  </p>
+                  <Link
+                    href={MANAGEMENT_NAV.href}
+                    onClick={() => setExpanded(false)}
+                    className={cn(
+                      "flex items-center gap-2 rounded-[var(--radius-md)] px-3 py-2.5 text-sm transition-colors",
+                      pathMatches(pathname, MANAGEMENT_NAV.href)
+                        ? "bg-[var(--cobalt)] font-medium text-white"
+                        : "text-[#F3F0E8]/70 hover:bg-white/10 hover:text-white",
+                    )}
+                  >
+                    <span className="text-[10px] font-semibold tracking-[0.14em] opacity-70">
+                      {MANAGEMENT_NAV.number}
+                    </span>
+                    <span>{MANAGEMENT_NAV.label}</span>
+                    <span className="ml-auto text-[10px] uppercase tracking-wide opacity-50">
+                      Herramienta
+                    </span>
+                  </Link>
+                </div>
                 {SECONDARY_GROUPS.map((group) => (
                   <div key={group.id}>
                     <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#F3F0E8]/40">
@@ -255,6 +293,50 @@ export function AppSidebar({ userEmail, signOutAction }: Props) {
         </div>
       ) : null}
     </>
+  );
+}
+
+function NavLeafItem({
+  leaf,
+  pathname,
+  onNavigate,
+  depth = 0,
+}: {
+  leaf: NavLeaf;
+  pathname: string;
+  onNavigate: () => void;
+  depth?: number;
+}) {
+  const childActive = pathMatches(pathname, leaf.href);
+  return (
+    <li>
+      <Link
+        href={leaf.href}
+        onClick={onNavigate}
+        className={cn(
+          "block rounded-[var(--radius-sm)] px-2.5 py-2 text-sm transition-colors",
+          depth > 0 && "ml-3 border-l border-white/10 pl-3 text-xs",
+          childActive
+            ? "bg-white/12 font-medium text-white"
+            : "text-[#F3F0E8]/75 hover:bg-white/10 hover:text-white",
+        )}
+      >
+        {leaf.label}
+      </Link>
+      {leaf.children?.length ? (
+        <ul className="space-y-0.5">
+          {leaf.children.map((c) => (
+            <NavLeafItem
+              key={c.id}
+              leaf={c}
+              pathname={pathname}
+              onNavigate={onNavigate}
+              depth={depth + 1}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </li>
   );
 }
 
