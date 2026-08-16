@@ -139,7 +139,7 @@ export function DashboardBoard({
           <KpiCard
             label="Discipular"
             value={funnelCount(dash, "discipular")}
-            hint="Destino + Re-Encuentro + EM (activos en etapa)"
+            hint="Capacitación Destino + Re-Encuentro + Escuela Ministerial (activos en etapa)"
           />
           <KpiCard
             label="Enviar"

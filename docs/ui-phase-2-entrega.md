@@ -85,8 +85,12 @@ Neo Editorial aplicado a `/dashboard` y harness `/ui-preview`, envolviendo métr
 
 ## 5. Escalera visual
 
-- 01 Ganar · 02 Consolidar (Pre / Encuentro / Post) · 03 Discipular (Destino / Re-Encuentro / EM) · 04 Enviar
+- 01 Ganar
+- 02 Consolidar → Pre-Encuentro · Encuentro · Post-Encuentro
+- 03 Discipular → Capacitación Destino · Re-Encuentro · Escuela Ministerial
+- 04 Enviar → Resumen / Enviar · Células · Liderazgo (contexto operativo)
 - Células y Liderazgo bajo Enviar como **contexto operativo** (borde dashed, copy explícito: no son pasos de la Escalera)
+- Nombre visible oficial: **Capacitación Destino** (nunca abreviar a “Destino”). Ruta `/destino` sin cambios.
 
 ---
 
