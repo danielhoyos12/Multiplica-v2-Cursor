@@ -97,6 +97,12 @@ export function LoginForm() {
           ¿Olvidaste tu contraseña?
         </Link>
       </p>
+      <p className="text-center text-sm text-[var(--muted)]">
+        ¿No tienes cuenta?{" "}
+        <Link href="/sign-up" className="underline text-[var(--ink)]">
+          Crear cuenta
+        </Link>
+      </p>
     </form>
   );
 }

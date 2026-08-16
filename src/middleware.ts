@@ -25,7 +25,11 @@ const isProtectedRoute = createRouteMatcher([
   "/cuenta(.*)",
 ]);
 
-const isAuthRoute = createRouteMatcher(["/login(.*)", "/recuperar(.*)"]);
+const isAuthRoute = createRouteMatcher([
+  "/login(.*)",
+  "/sign-up(.*)",
+  "/recuperar(.*)",
+]);
 
 export default clerkMiddleware(async (auth, request: NextRequest) => {
   const requestHeaders = new Headers(request.headers);

@@ -35,7 +35,7 @@ export function getPublicEnv(): PublicEnv {
         NEXT_PUBLIC_CONVEX_URL: "http://127.0.0.1:3210",
         NEXT_PUBLIC_APP_URL: "http://localhost:3000",
         NEXT_PUBLIC_CLERK_SIGN_IN_URL: "/login",
-        NEXT_PUBLIC_CLERK_SIGN_UP_URL: "/login",
+        NEXT_PUBLIC_CLERK_SIGN_UP_URL: "/sign-up",
       };
     }
 
