@@ -1,7 +1,11 @@
+import { setDefaultResultOrder } from "node:dns";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
 import * as schema from "./schema";
+
+// Prefer IPv4 before any pool connection (cloud/CI often lack IPv6 routes).
+setDefaultResultOrder("ipv4first");
 
 let client: ReturnType<typeof postgres> | null = null;
 let dbInstance: ReturnType<typeof drizzle<typeof schema>> | null = null;
@@ -22,6 +26,7 @@ export function getDb() {
     client = postgres(databaseUrl, {
       max: 10,
       prepare: false,
+      connect_timeout: 20,
     });
     dbInstance = drizzle(client, { schema });
   }

@@ -11,6 +11,7 @@ import {
   flattenNavLeaves,
   isStepActive,
   pathMatches,
+  type NavSecondaryGroup,
 } from "@/components/layout/nav-config";
 import {
   IconHome,
@@ -25,13 +26,18 @@ type SheetId = "ruta" | "mas" | null;
 type Props = {
   userEmail?: string | null;
   signOutAction?: () => Promise<void>;
+  secondaryGroups?: NavSecondaryGroup[];
 };
 
 /**
  * Dock Phase 3: Inicio · Personas · Ruta · Reportes · Más
  * Células/Liderazgo/Transferencias via Ruta → 04 Enviar.
  */
-export function BottomDock({ userEmail, signOutAction }: Props) {
+export function BottomDock({
+  userEmail,
+  signOutAction,
+  secondaryGroups = SECONDARY_GROUPS,
+}: Props) {
   const pathname = usePathname();
   const [sheet, setSheet] = useState<SheetId>(null);
   const [sheetForPath, setSheetForPath] = useState(pathname);
@@ -80,6 +86,7 @@ export function BottomDock({ userEmail, signOutAction }: Props) {
               <MasSheet
                 userEmail={userEmail}
                 signOutAction={signOutAction}
+                secondaryGroups={secondaryGroups}
                 onNavigate={() => setSheet(null)}
               />
             ) : null}
@@ -235,10 +242,12 @@ function MasSheet({
   onNavigate,
   userEmail,
   signOutAction,
+  secondaryGroups,
 }: {
   onNavigate: () => void;
   userEmail?: string | null;
   signOutAction?: () => Promise<void>;
+  secondaryGroups: NavSecondaryGroup[];
 }) {
   const pathname = usePathname();
   return (
@@ -246,7 +255,7 @@ function MasSheet({
       <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--ink)]">
         Más
       </h2>
-      {SECONDARY_GROUPS.map((group) => (
+      {secondaryGroups.map((group) => (
         <div key={group.id}>
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
             {group.label}

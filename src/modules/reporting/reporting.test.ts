@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DomainErrorCode } from "@/lib/errors";
 import { ROLE_PERMISSION_MAP } from "@/db/seeds/permissions";
-import { canMutate, type AuthContext } from "@/modules/authorization/policy";
+import { canMutate, hasPermission, type AuthContext } from "@/modules/authorization/policy";
 import {
   formatPctChange,
   pctChange,
@@ -147,8 +147,19 @@ describe("reporting permissions", () => {
   });
 
   it("domain error codes exist", () => {
+    expect(DomainErrorCode.REPORT_EXPORT_DENIED).toBeTruthy();
+    expect(DomainErrorCode.REPORT_ACCESS_DENIED).toBeTruthy();
     expect(DomainErrorCode.DASHBOARD_ACCESS_DENIED).toBe("DASHBOARD_ACCESS_DENIED");
-    expect(DomainErrorCode.REPORT_EXPORT_DENIED).toBe("REPORT_EXPORT_DENIED");
+  });
+
+  it("export gate must not treat dashboard.read as reports.export", () => {
+    const staff = actor({
+      roleCodes: ["staff"],
+      permissionCodes: ROLE_PERMISSION_MAP.staff,
+      ministryIds: ["m1"],
+    });
+    expect(hasPermission(staff, "dashboard.read")).toBe(true);
+    expect(hasPermission(staff, "reports.export")).toBe(false);
   });
 });
 

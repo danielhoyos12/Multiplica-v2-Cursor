@@ -3,10 +3,16 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { filterSecondaryGroups } from "@/components/layout/nav-config";
 import { getDb } from "@/db/client";
 import { users } from "@/db/schema";
 import { hasSupabasePublicConfig } from "@/lib/env";
 import { isPasswordChangeAllowedPath } from "@/lib/safe-redirect";
+import {
+  hasPermission,
+  isSuperadmin,
+  loadAuthContext,
+} from "@/modules/authorization";
 import { ensureAppUserProfile } from "@/modules/organization";
 import { signOut } from "@/server/actions/auth";
 import { getSessionUser } from "@/server/auth";
@@ -55,8 +61,22 @@ export default async function AuthenticatedLayout({
     redirect("/cuenta/cambiar-password");
   }
 
+  const auth = await loadAuthContext(user.id);
+  const secondaryGroups = filterSecondaryGroups({
+    canReadMinistries:
+      hasPermission(auth, "ministry.read") ||
+      hasPermission(auth, "ministry.manage"),
+    canReadNetworks: hasPermission(auth, "network.read"),
+    canReadUsers: hasPermission(auth, "users.read"),
+    canViewSystemHealth: isSuperadmin(auth),
+  });
+
   return (
-    <AppShell userEmail={user.email} signOutAction={signOut}>
+    <AppShell
+      userEmail={user.email}
+      signOutAction={signOut}
+      secondaryGroups={secondaryGroups}
+    >
       {profile?.mustChangePassword ? (
         <div
           role="status"
