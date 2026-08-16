@@ -7,7 +7,8 @@
 | Estado | **UI PHASE 3 READY** — pendiente aprobación humana |
 | Branch | `cursor/ui-phase-3-operational-surfaces-a3cc` |
 | Base | `main` (post PR #14) |
-| PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/NEW |
+| PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/15 |
+| Commit | `612df53` (docs) · `9840651` (nav/exports) · `8e7b7c8` (superficies) |
 | Merge | **NO** |
 | Producción | **NO** |
 
