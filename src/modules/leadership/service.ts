@@ -26,7 +26,7 @@ import {
   type AuthContext,
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
-import { createServiceRoleClient } from "@/server/supabase/admin";
+import { clerkClient } from "@clerk/nextjs/server";
 
 import { generateTemporaryPassword } from "./credentials";
 import { buildUsernameBase, nextUsernameCandidate } from "./username";
@@ -460,8 +460,9 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
     `${username}@multiplica.local`;
   const temporaryPassword = generateTemporaryPassword();
 
-  // Credential provisioning outside DB transaction (Auth), then DB work.
-  let authUserId: string | null = null;
+  // Credential provisioning outside DB transaction (Clerk), then DB work.
+  let appUserId: string | null = null;
+  let clerkUserId: string | null = null;
   let provisionedNew = false;
   const [existingUser] = await db
     .select()
@@ -470,9 +471,10 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
     .limit(1);
 
   try {
-    const admin = createServiceRoleClient();
+    const client = await clerkClient();
     if (existingUser) {
-      authUserId = existingUser.id;
+      appUserId = existingUser.id;
+      clerkUserId = existingUser.clerkUserId;
       await db
         .update(users)
         .set({
@@ -483,43 +485,42 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
         })
         .where(eq(users.id, existingUser.id));
     } else {
-      const created = await admin.auth.admin.createUser({
-        email,
+      const created = await client.users.createUser({
+        emailAddress: [email],
         password: temporaryPassword,
-        email_confirm: true,
-        user_metadata: {
+        skipPasswordChecks: true,
+        skipPasswordRequirement: false,
+        publicMetadata: {
+          mustChangePassword: true,
           username,
-          must_change_password: true,
-          person_id: input.personId,
+          personId: input.personId,
         },
       });
-      if (!created.data.user) {
-        throw new DomainError(
-          DomainErrorCode.CREDENTIAL_PROVISION_FAILED,
-          created.error?.message ?? "No se pudo crear usuario Auth.",
-        );
-      }
-      authUserId = created.data.user.id;
+      clerkUserId = created.id;
       provisionedNew = true;
-      await db.insert(users).values({
-        id: authUserId,
-        personId: input.personId,
-        email,
-        username,
-        displayName: formatFullName(person.firstName, person.lastName),
-        mustChangePassword: true,
-        isActive: true,
-      });
+      const [inserted] = await db
+        .insert(users)
+        .values({
+          clerkUserId,
+          personId: input.personId,
+          email,
+          username,
+          displayName: formatFullName(person.firstName, person.lastName),
+          mustChangePassword: true,
+          isActive: true,
+        })
+        .returning({ id: users.id });
+      appUserId = inserted.id;
     }
 
     const [leaderRole] = await db.select().from(roles).where(eq(roles.code, "leader")).limit(1);
-    if (leaderRole && authUserId) {
+    if (leaderRole && appUserId) {
       const [existingAssign] = await db
         .select()
         .from(userRoleAssignments)
         .where(
           and(
-            eq(userRoleAssignments.userId, authUserId),
+            eq(userRoleAssignments.userId, appUserId),
             eq(userRoleAssignments.roleId, leaderRole.id),
             isNull(userRoleAssignments.endsAt),
           ),
@@ -527,7 +528,7 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
         .limit(1);
       if (!existingAssign) {
         await db.insert(userRoleAssignments).values({
-          userId: authUserId,
+          userId: appUserId,
           roleId: leaderRole.id,
           ministryId: org.ministryId,
           networkId: org.networkId,
@@ -545,7 +546,7 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
           ministryId: org.ministryId!,
           networkId: org.networkId!,
           responsiblePersonId: input.personId,
-          responsibleUserId: authUserId,
+          responsibleUserId: appUserId,
           dayOfWeek: input.cell.dayOfWeek,
           startTime: input.cell.startTime,
           timezone: "America/Lima",
@@ -632,10 +633,11 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
       actorUserId,
       action: "leader.credentials_provisioned",
       entityType: "user",
-      entityId: authUserId,
+      entityId: appUserId,
       metadata: {
         personId: input.personId,
         username,
+        clerkUserId,
         provisionedNew,
         // Never include password
       },
@@ -644,7 +646,7 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
       actorUserId,
       action: "leader.role_assigned",
       entityType: "user",
-      entityId: authUserId,
+      entityId: appUserId,
       metadata: { role: "leader", ministryId: org.ministryId },
     });
 
@@ -657,13 +659,13 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
       mustChangePassword: provisionedNew,
     };
   } catch (error) {
-    if (provisionedNew && authUserId) {
+    if (provisionedNew && clerkUserId && appUserId) {
       try {
-        const admin = createServiceRoleClient();
-        await admin.auth.admin.deleteUser(authUserId);
-        await db.delete(users).where(eq(users.id, authUserId));
+        const client = await clerkClient();
+        await client.users.deleteUser(clerkUserId);
+        await db.delete(users).where(eq(users.id, appUserId));
       } catch {
-        // best-effort rollback of auth user
+        // best-effort rollback of Clerk user
       }
     }
     if (error instanceof DomainError) throw error;

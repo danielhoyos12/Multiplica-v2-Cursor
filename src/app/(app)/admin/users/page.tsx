@@ -28,7 +28,7 @@ export default async function UsersAdminPage() {
     <div className="space-y-8">
       <PageHeader
         title="Usuarios y roles"
-        description="Perfiles vinculados a auth.users. Asignaciones con scope global / ministry / network / tree."
+        description="Perfiles vinculados a Clerk. Asignaciones con scope global / ministry / network / tree."
       />
 
       <DataCard>

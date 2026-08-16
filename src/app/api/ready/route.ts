@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getDb } from "@/db/client";
-import { hasDatabaseUrl, hasSupabasePublicConfig } from "@/lib/env";
+import { hasClerkPublicConfig, hasDatabaseUrl } from "@/lib/env";
 import { sql } from "drizzle-orm";
 
 /**
@@ -10,7 +10,7 @@ import { sql } from "drizzle-orm";
  */
 export async function GET() {
   const checks = {
-    publicConfig: hasSupabasePublicConfig(),
+    publicConfig: hasClerkPublicConfig(),
     databaseConfigured: hasDatabaseUrl(),
     databaseReachable: false,
   };
