@@ -4,8 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import { ErrorState } from "@/components/ui/error-state";
-import { createClient } from "@/server/supabase/client";
-import { clearMustChangePasswordAction } from "@/modules/leadership/password-actions";
+import { setNewPasswordAction } from "@/modules/leadership/password-actions";
 
 function passwordPolicyError(password: string): string | null {
   if (password.length < 10) {
@@ -47,19 +46,9 @@ export function ChangePasswordForm() {
     }
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { error: updateError } = await supabase.auth.updateUser({
-        password,
-        data: { must_change_password: false },
-      });
-      if (updateError) {
-        setError("No se pudo actualizar la contraseña. Intenta de nuevo o contacta soporte.");
-        setLoading(false);
-        return;
-      }
-      const cleared = await clearMustChangePasswordAction();
-      if (!cleared.ok) {
-        setError(cleared.error);
+      const result = await setNewPasswordAction(password);
+      if (!result.ok) {
+        setError(result.error);
         setLoading(false);
         return;
       }
