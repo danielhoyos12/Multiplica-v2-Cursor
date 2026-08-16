@@ -5,7 +5,8 @@
 | --- | --- |
 | Branch | `cursor/hotfix-recovery-password-gate-runtime-a3cc` |
 | Base | `staging` (post PR #18 @ `e5b0426`) |
-| PR | (actualizar) |
+| PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/19 |
+| Commits | `857c9b5` fix(auth): stop mutating cookies in AuthenticatedLayout render |
 | Follow-up de | PR #18 |
 | Merge | **NO** |
 | Producción | **NO** |
@@ -68,7 +69,12 @@ exitosamente autenticado (Auth logs PASS; falla en Next render).
 
 ## Gates
 
-(actualizar)
+| Gate | Resultado |
+| --- | --- |
+| lint | **PASS** |
+| typecheck | **PASS** |
+| test | **PASS** — 161 |
+| build | **PASS** |
 
 ---
 
