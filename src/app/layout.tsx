@@ -32,6 +32,17 @@ export const metadata: Metadata = {
   applicationName: "MULTIPLICA",
 };
 
+function resolveConvexUrlForProvider(): string | undefined {
+  if (process.env.NEXT_PUBLIC_CONVEX_URL) {
+    return process.env.NEXT_PUBLIC_CONVEX_URL;
+  }
+  // Keep ConvexProvider in the tree during `npm run build` prerender.
+  if (process.env.MULTIPLICA_ALLOW_PLACEHOLDER_ENV === "1") {
+    return "http://127.0.0.1:3210";
+  }
+  return undefined;
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -44,7 +55,9 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col">
         <ClerkProvider>
-          <ConvexClientProvider>{children}</ConvexClientProvider>
+          <ConvexClientProvider convexUrl={resolveConvexUrlForProvider()}>
+            {children}
+          </ConvexClientProvider>
         </ClerkProvider>
       </body>
     </html>

@@ -3,9 +3,12 @@ import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Convex local dev" };
 
+/** Avoid static prerender — Convex hooks need the client provider at runtime. */
+export const dynamic = "force-dynamic";
+
 /**
  * Public local-dev smoke surface for Convex.
- * Provider lives in ./layout.tsx. Not part of pastoral Escalera.
+ * Provider lives in root layout. Not part of pastoral Escalera.
  */
 export default function ConvexDevPage() {
   return (

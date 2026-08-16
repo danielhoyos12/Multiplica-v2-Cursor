@@ -4,7 +4,15 @@ import { useMutation, useQuery } from "convex/react";
 
 import { api } from "../../../convex/_generated/api";
 
-export function ConvexHealthPanel() {
+function ConvexUnavailable({ reason }: { reason: string }) {
+  return (
+    <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">
+      {reason}
+    </div>
+  );
+}
+
+function ConvexHealthPanelConnected() {
   const ping = useQuery(api.health.ping);
   const recent = useQuery(api.health.listRecent);
   const recordCheck = useMutation(api.health.recordCheck);
@@ -44,7 +52,10 @@ export function ConvexHealthPanel() {
         ) : (
           <ul className="space-y-1 text-sm">
             {recent.map((row) => (
-              <li key={row._id} className="flex justify-between gap-2 border-b border-[var(--border)] py-1">
+              <li
+                key={row._id}
+                className="flex justify-between gap-2 border-b border-[var(--border)] py-1"
+              >
                 <span>{row.label}</span>
                 <span className="text-[var(--muted)]">
                   {new Date(row.createdAt).toLocaleTimeString()}
@@ -56,4 +67,18 @@ export function ConvexHealthPanel() {
       </section>
     </div>
   );
+}
+
+/**
+ * Local-dev smoke panel. Hooks only run when Convex URL is configured so
+ * Next prerender/build does not throw outside ConvexProvider.
+ */
+export function ConvexHealthPanel() {
+  if (!process.env.NEXT_PUBLIC_CONVEX_URL) {
+    return (
+      <ConvexUnavailable reason="NEXT_PUBLIC_CONVEX_URL no está configurada. Arranca `npm run convex:dev` o define la URL de Convex." />
+    );
+  }
+
+  return <ConvexHealthPanelConnected />;
 }
