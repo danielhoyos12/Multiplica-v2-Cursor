@@ -1,8 +1,15 @@
-# Brand assets
+# Brand assets — MULTIPLICA Brand Kit oficial
 
-Place official MULTIPLICA Brand Kit files here:
+Fuente: archivos adjuntos oficiales (UI Phase 1 cierre).
 
-- `m-mark.svg` — monogram M (do not recreate; replace the temporary stand-in)
-- optional wordmark SVG if provided by the kit
+| Archivo interno | Fuente oficial | Uso |
+| --- | --- | --- |
+| `m-mark.svg` | `MULTIPLICA-M.svg` | Monograma M tinta (fondos claros) |
+| `m-mark-negative.svg` | Geometría de `MULTIPLICA-M.svg`, fill blanco | Monograma sobre Ink / sidebar |
+| `wordmark-negative.svg` | `MULTIPLICA-negative.svg` | Wordmark con placa Ink (asset de kit) |
+| `wordmark-negative-glyph.svg` | Paths de `MULTIPLICA-negative.svg` sin placa | Wordmark blanco sobre sidebar Ink |
+| `wordmark-positive.svg` | Paths de `MULTIPLICA-negative.svg`, fill tinta | Wordmark sobre Rice/Surface |
+| `app-icon.svg` | `MULTIPLICA-app-icon.svg` | Icono de aplicación |
+| `wordmark-negative-source.svg` | `MULTIPLICA-negative-source.svg` | Referencia (text-based); no usar en UI |
 
-The app references `/brand/m-mark.svg` from `BrandMark`.
+No reinterpretar ni redibujar el monograma.

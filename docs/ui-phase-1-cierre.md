@@ -1,244 +1,126 @@
-# MULTIPLICA — UI Refresh Phase 1 · Reporte de cierre
+# MULTIPLICA — UI Refresh Phase 1 · Reporte de cierre FINAL
 
-**Neo Editorial + navegación por Escalera del Éxito**
+**Neo Editorial + navegación Escalera + Brand Kit oficial**
 
 | Campo | Valor |
 | --- | --- |
-| Estado | **CODE COMPLETE** — pendiente aprobación humana |
+| Estado | **UI PHASE 1 CLOSED (técnico)** — pendiente aprobación humana de merge |
 | Branch | `cursor/ui-neo-editorial-navigation-a3cc` |
-| Base | `main` (incluye Fase 10 mergeada) |
+| Base | `main` (Fase 10 mergeada) |
 | PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/13 |
-| Commit | `fcb7a17` (+ commit de este reporte) |
 | Fecha | 2026-08-16 |
-| Alcance | Solo UI shell / tokens / navegación |
+| Alcance | Solo UI shell / branding / tokens / navegación semántica |
+
+---
+
+## Checklist de cierre Brand Kit (obligatorio)
+
+| Criterio | Estado |
+| --- | --- |
+| Brand Kit oficial integrado | **PASS** |
+| Stand-in tipográfico eliminado | **PASS** |
+| Monograma oficial integrado | **PASS** |
+| Wordmark oficial integrado | **PASS** |
+| Tokens contrastados con Design System oficial | **PASS** |
+| Tipografía contrastada con Design System | **PASS** |
 
 ---
 
 ## 1. Resumen ejecutivo
 
-Se aplicó de forma progresiva la identidad visual **Neo Editorial** sobre el monolito Next.js existente, sin reconstruir el sistema y sin tocar dominio pastoral.
+UI Refresh Phase 1 queda cerrada con:
 
-Entregado:
+1. Identidad **oficial** MULTIPLICA (monograma + wordmark)
+2. Tokens alineados a `tokens.json` / `tokens.css` del Design System adjunto
+3. Archivo + Inter
+4. Floating Sidebar (≥1180) + Bottom Dock (&lt;1180)
+5. Navegación Escalera 01–04 + Operación / Admin / Legacy
+6. Rutas y dominio intactos
+7. Quality gates PASS
 
-1. Tokens oficiales Neo Editorial
-2. Tipografía Archivo + Inter
-3. Canvas Rice Paper (`#F3F0E8`)
-4. Floating Sidebar desktop (≥1180px)
-5. Bottom Dock tablet/móvil (&lt;1180px)
-6. Navegación semántica por Escalera del Éxito (01–04)
-7. Operación / Admin / Legacy preservados
-8. Rutas existentes intactas
-9. Cero cambios DB / migraciones / RLS / authz / services
-
-**No merge. No producción.** Esperar aprobación humana.
+**No merge. No producción. Phase 2 no iniciada.**
 
 ---
 
-## 2. Principio de no-regresión
+## 2. Assets oficiales incorporados
 
-| Restricción | Cumplido |
-| --- | --- |
-| No reconstruir arquitectura | Sí |
-| No cambiar rutas pastorales | Sí |
-| No cambiar DB / migraciones / RLS | Sí |
-| No cambiar authz / permisos / servicios | Sí |
-| No eliminar funcionalidad | Sí |
-| No rediseñar dashboard interno (Phase 2) | Sí |
-| No inventar rutas de Consolidar | Sí (`/proceso`) |
+Fuentes adjuntas en Cursor → copiados a `public/brand/`:
 
----
-
-## 3. Branch y working tree (pre-cambio)
-
-Al inicio de la fase:
-
-1. `main` actualizado (Fase 10 integrada)
-2. Working tree limpio (salvo `AGENTS.md` / `CLAUDE.md` no trackeados)
-3. Branch creada: `cursor/ui-neo-editorial-navigation-a3cc`
-
-Archivos identificados como gobernadores visuales:
-
-- `src/app/globals.css` — tokens
-- `src/app/layout.tsx` — fuentes
-- `src/components/layout/app-shell.tsx`
-- `src/components/layout/app-sidebar.tsx`
-- `src/components/layout/brand-mark.tsx`
-
----
-
-## 4. Archivos modificados
-
-| Archivo | Cambio |
-| --- | --- |
-| `src/app/globals.css` | Tokens Neo Editorial, radii, shadows, motion, focus, reduced-motion |
-| `src/app/layout.tsx` | Manrope/Fraunces → **Inter** / **Archivo** |
-| `src/components/layout/app-shell.tsx` | Canvas rice; rail gutter fijo; dock padding; sin gradientes verdes |
-| `src/components/layout/app-sidebar.tsx` | Floating sidebar ink + overlay expandido Escalera |
-| `src/components/layout/brand-mark.tsx` | Mark + wordmark; variante inverse |
-| `src/app/(auth)/login/page.tsx` | Fondo rice; sin gradiente verde |
-| `src/app/(auth)/recuperar/page.tsx` | Fondo rice + display font |
-| `src/app/(public)/ganar/registro/page.tsx` | Fondo rice (sin radial verde) |
-
----
-
-## 5. Archivos nuevos
-
-| Archivo | Propósito |
-| --- | --- |
-| `src/components/layout/bottom-dock.tsx` | Dock 5 ítems + sheets Ruta/Equipos/Más |
-| `src/components/layout/nav-config.ts` | Modelo Escalera + secundarios (solo rutas existentes) |
-| `src/components/layout/nav-icons.tsx` | Iconografía SVG inline (sin dependencia pesada) |
-| `public/brand/m-mark.svg` | Slot Brand Kit (stand-in tipográfico temporal) |
-| `public/brand/README.md` | Instrucciones para reemplazar mark oficial |
-| `src/app/ui-preview/page.tsx` | Harness visual (solo `development` / `MULTIPLICA_UI_PREVIEW=1`) |
-| `scripts/ui-phase1-screenshots.mjs` | Capturas Playwright multi-viewport |
-| `docs/ui-phase-1-cierre.md` | Este reporte |
-
----
-
-## 6. Tokens implementados
-
-| Token | Valor |
-| --- | --- |
-| Ink | `#111111` |
-| Ink secondary | `#292927` |
-| Muted | `#5F5F5A` |
-| Rice Paper / page-bg | `#F3F0E8` |
-| Surface | `#FFFFFF` |
-| Border | `#D4D2CA` |
-| Vermilion | `#E33B24` |
-| Vermilion dark | `#C92E1B` |
-| Cobalt | `#3157FF` |
-| Cobalt dark | `#2343D6` |
-| Success | `#176B52` |
-| Warning | `#9A5B00` |
-| Radius sm/md/lg/pill | 6 / 10 / 16 / 999 |
-| Shadow float | `0 12px 36px rgba(17,17,17,.14)` |
-| Shadow card | `0 1px 0 rgba(17,17,17,.08)` |
-| Focus | Cobalt 2px + offset 3px |
-| Motion | 120ms / 200ms · `cubic-bezier(.2,.8,.2,1)` |
-| Sidebar | 72 / 272 · inset 16px |
-| Dock | 64px + `safe-area-inset-bottom` |
-| Content max | 1440px |
-| Desktop breakpoint | 1180px |
-| Touch min | 44px |
-
-Compatibilidad: `--brand` / `--brand-ink` / `--brand-soft` aliasan a cobalto/ink para no romper páginas existentes.
-
----
-
-## 7. Tipografía
-
-| Rol | Antes | Ahora |
+| Asset interno | Archivo fuente oficial | Contexto de uso |
 | --- | --- | --- |
-| Display / headings | Fraunces | **Archivo** (`--font-display`) |
-| UI / body | Manrope | **Inter** (`--font-sans`) |
+| `m-mark.svg` | **`MULTIPLICA-M.svg`** (`MULTIPLICA-M_e9c4.svg`) | Monograma tinta — login / fondos claros |
+| `m-mark-negative.svg` | Geometría idéntica de **`MULTIPLICA-M.svg`**, fill `#FFFFFF` (derivado por sustitución de color únicamente) | Monograma sobre sidebar Ink (rail colapsado) |
+| `wordmark-negative.svg` | **`MULTIPLICA-negative.svg`** (`MULTIPLICA-negative_c9b7.svg`) | Asset de kit completo (placa Ink + wordmark) |
+| `wordmark-negative-glyph.svg` | **`MULTIPLICA-negative.svg`** sin placa de fondo (paths oficiales intactos) | Wordmark blanco en sidebar expandido |
+| `wordmark-positive.svg` | **`MULTIPLICA-negative.svg`** sin placa + fills tinta (paths oficiales intactos) | Wordmark en login / superficies claras |
+| `app-icon.svg` | **`MULTIPLICA-app-icon.svg`** | Icono de aplicación (reservado; no cableado a favicon en esta fase) |
+| `tokens.json` | `tokens_e799.json` | Referencia Design System |
+| `tokens.reference.css` | `tokens_22c4.css` | Referencia CSS kit |
 
-Fuente: `next/font/google`.
+**Nota:** No se adjuntó un archivo separado `MULTIPLICA-master.svg`. El wordmark maestro se tomó de la geometría oficial de `MULTIPLICA-negative.svg` (paths vectorizados), en variantes positiva/negativa.
 
----
-
-## 8. Brand assets
-
-- Ruta estable: `/brand/m-mark.svg`
-- **Warning:** el Brand Kit oficial no estaba en el repositorio.
-- El SVG actual es un **stand-in tipográfico (letra M)** — no una reinterpretación del monograma aprobado.
-- Acción humana: reemplazar `public/brand/m-mark.svg` por el SVG oficial sin cambiar el path.
-
----
-
-## 9. Navegación Escalera del Éxito
-
-Organización **solo visual/semántica**. Rutas existentes.
-
-### 01 Ganar
-- Personas → `/ganar`
-
-### 02 Consolidar
-- Pre-Encuentro → `/proceso`
-- Encuentro → `/proceso`
-- Post-Encuentro → `/proceso`
-
-*(Sin rutas nuevas; el visualizador existente es la entrada.)*
-
-### 03 Discipular
-- Capacitación Destino → `/destino` *(copy exacto, no “Destino”)*
-- Re-Encuentro → `/reencuentro`
-- Escuela Ministerial → `/escuela-ministerial`
-
-### 04 Enviar
-- Resumen / Enviar → `/enviar`
-- Células → `/celulas`
-- Liderazgo → `/liderazgo`
-
-*(Submódulos operativos; no pasos secuenciales. Dominio: Enviar ≠ liderazgo activo.)*
-
-### Secundaria
-- **Operación:** Transferencias, Reportes  
-- **Admin:** Ministerios, Redes, Usuarios, System Health  
-- **Legacy:** UDV  
+**Prohibido cumplido:** no se redibujó ni reinterpretó el monograma; solo se usó la geometría oficial.
 
 ---
 
-## 10. Desktop ≥1180 — Floating Sidebar
+## 3. BrandMark — mapeo de variantes
 
-- Fondo ink `#111111`
-- Separación viewport 16px · radius 16px
-- Colapsado 72px · expandido 272px
-- Expand = **overlay** (backdrop); **no** desplaza main
-- Activo: cobalto + blanco
-- Acento atención: vermellón (dot en rail)
-- Tooltips en colapsado
-- Perfil / logout anclados abajo del panel expandido
-- Logo → `/dashboard`
+`src/components/layout/brand-mark.tsx`
 
-Main mantiene gutter constante:  
-`pl = sidebar-collapsed + inset×2`
-
----
-
-## 11. Tablet / móvil &lt;1180 — Bottom Dock
-
-Máximo 5 destinos:
-
-| Ítem | Destino |
+| Prop | Asset |
 | --- | --- |
-| Inicio | `/dashboard` |
-| Personas | `/ganar` |
-| Ruta | Sheet Escalera 01–04 |
-| Equipos | Sheet Células / Liderazgo / Resumen Enviar |
-| Más | Sheet Operación / Admin / Legacy + logout |
+| `compact` + light | `m-mark.svg` |
+| `compact` + `inverse` | `m-mark-negative.svg` |
+| full + light | `wordmark-positive.svg` |
+| full + `inverse` | `wordmark-negative-glyph.svg` |
 
-- Altura visual 64px + `env(safe-area-inset-bottom)`
-- Activo cobalto
-- Touch ≥44px
-- Un solo dock; subnavegación vía bottom sheet
+Sidebar: compact monograma en rail; wordmark negativo en panel expandido.  
+Login: wordmark positivo.
 
 ---
 
-## 12. AppShell
+## 4. Diferencias tokens (antes → oficial) y corrección
 
-- Canvas Rice Paper
-- Content `max-width: 1440px`
-- Padding inferior para no tapar acciones con el dock
-- Gradientes verdes del shell **eliminados**
-- Children / auth wiring del layout de app **sin cambios**
+Comparación `globals.css` Phase 1 vs `tokens_e799.json` / `tokens_22c4.css` / `components_8821.md`:
 
----
-
-## 13. Rutas verificadas (compatibilidad)
-
-Siguen existiendo y responden en build:
-
-`/dashboard` · `/ganar` · `/celulas` · `/liderazgo` · `/proceso` · `/destino` · `/reencuentro` · `/escuela-ministerial` · `/enviar` · `/transferencias` · `/reportes` · `/admin/ministries` · `/admin/networks` · `/admin/users` · `/admin/system-health` · `/udv` · `/login` · `/recuperar` · `/ganar/registro`
-
-Harness opcional: `/ui-preview` (solo development).
-
-Sin redirects nuevos. Sin cambios de permisos ni role scope.
+| Ítem | Phase 1 previa | Design System oficial | Acción |
+| --- | --- | --- | --- |
+| Ink / Rice / Cobalt / Vermilion / Border / radii / shadows / layout / breakpoints | Ya correctos | Idénticos | Sin cambio |
+| `--success-soft` | `#e6f4ef` | `#DDF3EA` | **Corregido** |
+| `--warning-soft` | `#fff3dc` | `#FFF0CE` | **Corregido** |
+| Soft vermilion / cobalt | color-mix / aproximados | `#FBE4DF` / `#E4E9FF` | **Corregido** (`--vermilion-soft`, `--cobalt-soft`, `--brand-soft`) |
+| `--concrete` / `--paper-100` | Ausentes | `#B8B8B2` / `#E9E5DA` | **Añadidos** |
+| `--motion-slow` | Ausente | `320ms` | **Añadido** |
+| Focus | outline 2px + offset 3px | `components.md` = igual; CSS kit también define halo box-shadow | **Se mantiene outline** (accesibilidad documentada) |
+| Semantic primary action | `--brand` → cobalt | primary = vermilion; selected = cobalt | **Documentado:** nav/selected sigue cobalt; vermilion = `--accent` (Phase 2 botones) |
+| Tipografía | Archivo + Inter | Archivo + Inter | **PASS** |
 
 ---
 
-## 14. Quality gates
+## 5. Navegación (sin cambios de dominio)
+
+```
+01 GANAR → Personas (/ganar)
+02 CONSOLIDAR → Pre / Encuentro / Post (/proceso)
+03 DISCIPULAR → Capacitación Destino (/destino), Re-Encuentro, Escuela Ministerial
+04 ENVIAR → Resumen (/enviar), Células, Liderazgo
++ Operación / Admin / Legacy
+```
+
+Dock: Inicio · Personas · Ruta · Equipos · Más
+
+---
+
+## 6. Archivos tocados en este cierre Brand Kit
+
+- `public/brand/*` (assets oficiales + README + tokens de referencia)
+- `src/components/layout/brand-mark.tsx`
+- `src/app/globals.css` (alineación soft tokens)
+- `docs/ui-phase-1-cierre.md` (este documento)
+
+---
+
+## 7. Quality gates
 
 | Gate | Resultado |
 | --- | --- |
@@ -249,105 +131,42 @@ Sin redirects nuevos. Sin cambios de permisos ni role scope.
 
 ---
 
-## 15. Responsive / screenshots
+## 8. Responsive / screenshots
 
-Capturas en `/opt/cursor/artifacts/screenshots/`:
+Re-validar y regenerar tras Brand Kit:
 
-| Archivo | Viewport / escena |
+1440 · 1180 · 1024 · 834 · 430 · 390 · 360  
+Incluye logos sin deformación / clipping.
+
+---
+
+## 9. Warnings reales restantes (post Brand Kit)
+
+1. Favicon / `app-icon.svg` no cableados a `app/icon` (fuera de scope mínimo; asset disponible en `public/brand/app-icon.svg`).
+2. Botones primary del Design System (vermilion) no se aplican globalmente a todos los botones existentes — deuda **Phase 2**.
+3. `/ui-preview` solo development.
+4. Dashboard / tablas / forms pastorales **no** rediseñados (Phase 2).
+
+**Eliminado de warnings:** Brand Kit ausente · stand-in tipográfico · reemplazo futuro del monograma.
+
+---
+
+## 10. Confirmaciones de no-regresión
+
+| Ítem | Confirmado |
 | --- | --- |
-| `login-1440.png` | Login desktop |
-| `login-390.png` | Login móvil |
-| `registro-430.png` | Formulario público GANAR |
-| `shell-1440.png` | Sidebar colapsado |
-| `shell-expanded-1440.png` | Sidebar expandido Escalera |
-| `shell-1180.png` | Boundary desktop |
-| `shell-1024.png` | iPad landscape-ish |
-| `shell-834.png` | iPad portrait |
-| `shell-430.png` | Mobile + dock |
-| `shell-360.png` | Mobile estrecho |
-| `shell-ruta-sheet-430.png` | Sheet Ruta pastoral |
-| `shell-equipos-sheet-430.png` | Sheet Equipos |
-| `shell-iphone-mas.png` | Sheet Más (iPhone 13) |
-
-Revisiones hechas:
-
-- Sin scroll horizontal evidente en harness
-- Overlay sidebar no desplaza main
-- Dock no tapa el contenido (padding inferior)
-- Active route / sheets / logout visibles en preview
-- `prefers-reduced-motion` respetado en CSS global
+| Cero cambios DB / migraciones | Sí |
+| Cero cambios RLS | Sí |
+| Cero cambios auth / authz / roles | Sí |
+| Cero cambios domain services / workflows | Sí |
+| Rutas pastorales intactas | Sí |
+| Phase 2 NO iniciada | Sí |
+| No merge / no prod | Sí |
 
 ---
 
-## 16. Criterios de aceptación Phase 1
+## 11. Acciones humanas pendientes
 
-| # | Criterio | Estado |
-| --- | --- | --- |
-| 1 | Tokens Neo Editorial | PASS |
-| 2 | Archivo + Inter | PASS |
-| 3 | Brand assets path oficial | PASS (stand-in documentado) |
-| 4 | Canvas Rice Paper | PASS |
-| 5 | Floating Sidebar desktop | PASS |
-| 6 | Overlay sin layout shift | PASS |
-| 7 | Bottom Dock tablet/mobile | PASS |
-| 8 | Safe area móvil | PASS |
-| 9 | Nav Escalera 01–04 copy correcto | PASS |
-| 10 | Secundarios preservados | PASS |
-| 11 | Rutas existentes | PASS |
-| 12 | Sin cambio dominio | PASS |
-| 13 | Sin migración | PASS |
-| 14 | Sin cambio RLS | PASS |
-| 15 | Sin cambio datos | PASS |
-
----
-
-## 17. Warnings
-
-1. **Brand Kit SVG oficial ausente** en repo → stand-in tipográfico en `public/brand/m-mark.svg`.
-2. `/ui-preview` es harness de desarrollo; no usar en producción.
-3. Ítems de Consolidar (Pre/Enc/Post) apuntan todos a `/proceso` a propósito (sin rutas separadas).
-4. Páginas internas (KPIs, tablas, forms) heredan tokens/fuentes pero **no** están rediseñadas.
-
----
-
-## 18. Deuda Phase 2 (explícita)
-
-No hacer todavía (fuera de Phase 1):
-
-- Dashboard Neo Editorial completo (KPIs, densidad, charts)
-- Rediseño de tablas / cards / empty states de módulos
-- Formularios Ganar / células / liderazgo / transferencias / reportes
-- Sustitución del mark tipográfico por SVG Brand Kit oficial
-- Refinar iconografía / badges de atención reales (conteos)
-- Auditar contraste WCAG página por página post-rediseño de contenido
-- Quitar o restringir más `/ui-preview` si se prefiere cero harness en main
-
----
-
-## 19. FigJam / Figma notes
-
-Cambios visuales a reflejar en design ops:
-
-- Floating ink sidebar + overlay expand
-- Bottom dock 5 slots + sheets
-- Labels Escalera (Capacitación Destino exacto)
-- Login/registro sin verde
-- Tipografía Archivo/Inter
-
----
-
-## 20. Acciones humanas pendientes
-
-1. Revisar PR #13 y screenshots
-2. Entregar SVG oficial del monograma M → `public/brand/m-mark.svg`
-3. Aprobar merge (humano)
-4. Autorizar Phase 2 (dashboard / superficies internas)
-
----
-
-## 21. Conclusión
-
-**UI Phase 1 = PASS técnico**  
-**Readiness visual shell = listo para revisión humana**  
-**Phase 2 = no iniciado**  
-**Producción = no autorizada por este agente**
+1. Revisar PR #13 + screenshots con Brand Kit oficial
+2. Aprobar merge
+3. Autorizar Phase 2 (dashboard / superficies internas) cuando corresponda

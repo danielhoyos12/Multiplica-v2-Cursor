@@ -1,33 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  /* Neo Editorial — official tokens */
+  /* Neo Editorial — aligned to official tokens_e799.json / tokens_22c4.css */
   --ink: #111111;
   --ink-secondary: #292927;
   --muted: #5f5f5a;
   --rice: #f3f0e8;
   --page-bg: #f3f0e8;
+  --paper-100: #e9e5da;
   --surface: #ffffff;
-  --surface-soft: #f7f5ef;
+  --surface-soft: #e9e5da;
   --border: #d4d2ca;
+  --concrete: #b8b8b2;
   --cobalt: #3157ff;
   --cobalt-dark: #2343d6;
+  --cobalt-soft: #e4e9ff;
   --vermilion: #e33b24;
   --vermilion-dark: #c92e1b;
+  --vermilion-soft: #fbe4df;
   --success: #176b52;
-  --success-soft: #e6f4ef;
+  --success-soft: #ddf3ea;
   --success-border: #9dcebd;
   --warning: #9a5b00;
-  --warning-soft: #fff3dc;
+  --warning-soft: #fff0ce;
   --warning-border: #e6c48a;
   --danger: #c92e1b;
-  --danger-soft: #fdecea;
+  --danger-soft: #fbe4df;
   --danger-border: #f0b4aa;
 
-  /* Compat aliases used across existing pages */
+  /*
+   * Compat aliases:
+   * --brand / selected / nav active → cobalt (semantic.action.selected)
+   * --accent → vermilion (semantic.action.primary / attention)
+   * Primary button vermilion is Design System; nav selection stays cobalt.
+   */
   --brand: var(--cobalt);
   --brand-ink: var(--ink);
-  --brand-soft: color-mix(in srgb, var(--cobalt) 12%, white);
+  --brand-soft: var(--cobalt-soft);
   --brand-border: color-mix(in srgb, var(--cobalt) 30%, white);
   --accent: var(--vermilion);
 
@@ -44,6 +53,7 @@
   --focus-ring: var(--cobalt);
   --motion-fast: 120ms;
   --motion-base: 200ms;
+  --motion-slow: 320ms;
   --ease-editorial: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   --sidebar-collapsed: 72px;
@@ -52,6 +62,7 @@
   --dock-height: 64px;
   --content-max: 1440px;
   --touch-min: 44px;
+  --bp-tablet: 768px;
   --bp-desktop: 1180px;
 
   --background: var(--page-bg);

@@ -3,18 +3,33 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 
 type BrandMarkProps = {
+  /** Monogram only (sidebar rail) */
   compact?: boolean;
-  /** Dark rail (ink sidebar) — rice/light glyph */
+  /** Ink / dark surface — use official negative assets */
   inverse?: boolean;
+  /** Prefer full official wordmark when not compact */
+  showWordmark?: boolean;
   className?: string;
 };
 
 /**
- * Brand mark uses /public/brand/m-mark.svg (official Brand Kit drop-in path).
- * Until the kit file is provided, the SVG is a typographic M stand-in only.
+ * Official MULTIPLICA Brand Kit assets (no typographic stand-in).
+ *
+ * - Monogram light: `/brand/m-mark.svg` ← MULTIPLICA-M.svg
+ * - Monogram dark: `/brand/m-mark-negative.svg` ← same geometry, white fill
+ * - Wordmark light: `/brand/wordmark-positive.svg` ← paths from MULTIPLICA-negative.svg
+ * - Wordmark dark: `/brand/wordmark-negative-glyph.svg` ← MULTIPLICA-negative.svg without plate
  */
-export function BrandMark({ compact = false, inverse = false, className }: BrandMarkProps) {
-  const ink = inverse ? "#F3F0E8" : "#111111";
+export function BrandMark({
+  compact = false,
+  inverse = false,
+  showWordmark = !compact,
+  className,
+}: BrandMarkProps) {
+  const monogramSrc = inverse ? "/brand/m-mark-negative.svg" : "/brand/m-mark.svg";
+  const wordmarkSrc = inverse
+    ? "/brand/wordmark-negative-glyph.svg"
+    : "/brand/wordmark-positive.svg";
 
   return (
     <Link
@@ -22,29 +37,33 @@ export function BrandMark({ compact = false, inverse = false, className }: Brand
       className={cn("group inline-flex items-center gap-2.5", className)}
       aria-label="MULTIPLICA — Inicio"
     >
-      <span
-        className={cn(
-          "relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-[10px]",
-          inverse ? "bg-[rgba(243,240,232,0.12)] text-[#F3F0E8]" : "bg-[var(--ink)] text-[#F3F0E8]",
-        )}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/brand/m-mark.svg" alt="" width={22} height={22} className="opacity-95" />
-      </span>
-      {!compact ? (
-        <span className="flex min-w-0 flex-col leading-none">
-          <span
-            className="font-[family-name:var(--font-display)] text-[1.05rem] font-bold tracking-tight"
-            style={{ color: ink }}
-          >
-            MULTIPLICA
-          </span>
-          <span
-            className="mt-1 text-[0.62rem] font-medium uppercase tracking-[0.16em]"
-            style={{ color: inverse ? "rgba(243,240,232,0.62)" : "var(--muted)" }}
-          >
-            Visión G12
-          </span>
+      {showWordmark && !compact ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={wordmarkSrc}
+          alt="MULTIPLICA"
+          height={28}
+          width={156}
+          className="h-7 w-auto max-w-[11.5rem] object-contain object-left"
+        />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={monogramSrc}
+          alt=""
+          width={28}
+          height={28}
+          className="size-7 object-contain"
+        />
+      )}
+      {!showWordmark && !compact ? (
+        <span
+          className={cn(
+            "font-[family-name:var(--font-display)] text-[1.05rem] font-bold tracking-tight",
+            inverse ? "text-[#F3F0E8]" : "text-[var(--ink)]",
+          )}
+        >
+          MULTIPLICA
         </span>
       ) : null}
     </Link>

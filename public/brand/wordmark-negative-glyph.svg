@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="1000"
+   height="180"
+   viewBox="0 0 1000 180"
+   role="img"
+   aria-labelledby="title desc"
+   version="1.1"
+   id="svg19"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <title
+     id="title">MULTIPLICA — wordmark negativo (glifo)</title>
+  <desc
+     id="desc">Wordmark blanco para composición sobre Ink.</desc>
+  <defs
+     id="defs11">
+    <mask
+       id="m-cut">
+      <rect
+         width="140"
+         height="140"
+         fill="white"
+         id="rect6" />
+      <path
+         d="M-6 39 L55 96"
+         fill="none"
+         stroke="black"
+         stroke-width="9"
+         stroke-linecap="square"
+         id="path8" />
+    </mask>
+  </defs>
+  <g
+     transform="translate(22,20)"
+     id="g17">
+    <path
+       mask="url(#m-cut)"
+       fill="#ffffff"
+       d="M 0,140 V 0 H 30 L 70,40 110,0 h 30 V 140 H 110 V 43 L 70,82 30,43 v 97 z"
+       id="path13" />
+    <g
+       aria-label="ULTIPLICA"
+       id="text15"
+       style="font-weight:700;font-size:156px;font-family:'Nimbus Sans Narrow', 'Arial Narrow', sans-serif;letter-spacing:1;fill:#ffffff">
+      <path
+         d="m 241.304,23.992 h -19.5 V 97.78 c 0,14.04 -6.24,21.372 -17.784,21.372 -11.076,0 -17.316,-8.112 -17.316,-22.464 V 23.992 h -19.5 v 74.256 c 0,25.896 13.26,40.716 36.816,40.716 24.336,0 37.284,-14.664 37.284,-42.12 z"
+         id="path23" />
+      <path
+         d="m 280.21215,23.992 h -19.188 V 136 h 64.896 v -20.28 h -45.708 z"
+         id="path25" />
+      <path
+         d="m 368.2601,43.804 h 27.768 V 23.992 h -74.724 v 19.812 h 27.768 V 136 h 19.188 z"
+         id="path27" />
+      <path
+         d="m 426.66798,23.992 h -19.188 V 136 h 19.188 z"
+         id="path29" />
+      <path
+         d="m 464.7961,95.44 h 21.996 c 17.784,0 29.328,-14.508 29.328,-36.66 0,-21.216 -11.232,-34.788 -28.548,-34.788 h -41.964 V 136 h 19.188 z m 0,-19.188 V 43.18 h 15.288 c 12.012,0 16.848,4.524 16.848,16.068 0,11.544 -4.68,17.004 -14.352,17.004 z"
+         id="path31" />
+      <path
+         d="m 549.25636,23.992 h -19.188 V 136 h 64.896 v -20.28 h -45.708 z"
+         id="path33" />
+      <path
+         d="m 626.85228,23.992 h -19.188 V 136 h 19.188 z"
+         id="path35" />
+      <path
+         d="m 723.63636,60.652 c -0.936,-8.892 -2.34,-13.572 -5.772,-19.812 -7.02,-12.792 -19.032,-19.812 -33.54,-19.812 -26.208,0 -42.588,22.776 -42.588,59.28 0,36.348 15.912,58.656 42.12,58.656 12.168,0 22.464,-4.992 29.484,-14.508 5.304,-7.176 7.8,-13.728 10.296,-26.832 h -19.188 c -1.404,6.24 -2.34,9.048 -4.368,12.324 -3.744,5.772 -9.204,8.736 -16.068,8.736 -14.196,0 -22.776,-14.352 -22.776,-38.22 0,-24.804 8.58,-39.156 23.556,-39.156 6.396,0 11.856,2.808 15.132,7.488 2.028,3.276 3.12,5.772 4.524,11.856 z"
+         id="path37" />
+      <path
+         d="m 755.52442,112.912 h 33.852 l 5.928,23.088 h 20.904 l -32.448,-112.008 h -22.152 L 728.84842,136 h 20.28 z m 17.004,-64.116 11.544,44.928 h -23.4 z"
+         id="path39" />
+    </g>
+  </g>
+</svg>

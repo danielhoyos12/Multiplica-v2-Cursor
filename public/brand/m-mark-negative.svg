@@ -10,7 +10,7 @@
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
   <title
-     id="title">MULTIPLICA — M maestra</title>
+     id="title">MULTIPLICA — M maestra (negativo)</title>
   <desc
      id="desc">La misma M personalizada que inicia el wordmark.</desc>
   <defs
@@ -34,7 +34,7 @@
   <path
      transform="translate(10 10)"
      mask="url(#m-cut)"
-     fill="#111111"
+     fill="#FFFFFF"
      d="M0 140V0h30l40 40 40-40h30v140h-30V43L70 82 30 43v97z"
      id="path11" />
 </svg>
