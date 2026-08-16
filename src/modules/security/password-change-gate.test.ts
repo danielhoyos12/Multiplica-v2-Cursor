@@ -8,20 +8,25 @@ import {
 import { isPasswordChangeAllowedPath } from "@/lib/safe-redirect";
 
 describe("password change gate", () => {
-  it("reads must_change_password from user_metadata", () => {
+  it("reads mustChangePassword from Clerk publicMetadata", () => {
+    expect(
+      authUserRequiresPasswordChange({
+        publicMetadata: { mustChangePassword: true },
+      }),
+    ).toBe(true);
+    expect(
+      authUserRequiresPasswordChange({
+        publicMetadata: { mustChangePassword: false },
+      }),
+    ).toBe(false);
+  });
+
+  it("reads must_change_password from legacy metadata shapes", () => {
     expect(
       authUserRequiresPasswordChange({
         user_metadata: { must_change_password: true },
       }),
     ).toBe(true);
-    expect(
-      authUserRequiresPasswordChange({
-        user_metadata: { must_change_password: false },
-      }),
-    ).toBe(false);
-  });
-
-  it("reads must_change_password from app_metadata", () => {
     expect(
       authUserRequiresPasswordChange({
         app_metadata: { must_change_password: true },
@@ -39,19 +44,19 @@ describe("password change gate", () => {
   it("combines cookie and metadata", () => {
     expect(
       sessionRequiresPasswordChange({
-        user: { user_metadata: {} },
+        user: { publicMetadata: {} },
         cookieValue: "1",
       }),
     ).toBe(true);
     expect(
       sessionRequiresPasswordChange({
-        user: { user_metadata: { must_change_password: true } },
+        user: { publicMetadata: { mustChangePassword: true } },
         cookieValue: undefined,
       }),
     ).toBe(true);
     expect(
       sessionRequiresPasswordChange({
-        user: { user_metadata: {} },
+        user: { publicMetadata: {} },
         cookieValue: undefined,
       }),
     ).toBe(false);

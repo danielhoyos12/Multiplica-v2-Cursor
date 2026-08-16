@@ -15,11 +15,11 @@ GANAR
 | --- | --- |
 | Web | Next.js App Router + TypeScript + Tailwind |
 | Backend | Modular monolith (server actions + domain modules) |
-| Database | PostgreSQL (Supabase) |
-| Authn | Supabase Auth |
+| Database | PostgreSQL (Supabase host OK) + Drizzle |
+| Authn | **Clerk** |
 | Authz | Domain policies + RLS deny-by-default |
-| ORM | Drizzle + versioned SQL migrations `0000`–`0010` |
-| Deploy | Vercel + Supabase (recommended) |
+| ORM | Drizzle + versioned SQL migrations `0000`–`0011` |
+| Deploy | Vercel + Clerk + Postgres (recommended) |
 
 ## Modules (implemented)
 
@@ -33,16 +33,18 @@ src/components/   # UI
 src/modules/      # domain services + actions
 src/db/           # schema, migrations, seeds, rls/
 src/lib/          # env, errors, redirects, prod-guard
-src/server/       # supabase session/admin helpers
+src/server/       # auth session helpers (Clerk)
 docs/             # architecture, security, ops, phase cierres
 e2e/              # Playwright smoke
 ```
 
+Auth cutover notes: [`docs/clerk-auth-cutover.md`](./clerk-auth-cutover.md).
+
 ## Server / client
 
-- Browser: anon key only (`NEXT_PUBLIC_*`).
-- Server Components / Actions: cookie session.
-- Privileged: service role server-only (`@/server/supabase/admin`).
+- Browser: Clerk publishable key (`NEXT_PUBLIC_CLERK_*`).
+- Server Components / Actions: Clerk session (`auth()` / `currentUser()`).
+- Privileged Auth ops: Clerk Backend API (`clerkClient`, secret key).
 - SQL: Drizzle via `DATABASE_URL` after domain authorization.
 
 ## Auth hardening (Phase 10)

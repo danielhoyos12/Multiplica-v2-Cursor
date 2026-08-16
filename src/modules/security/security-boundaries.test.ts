@@ -76,12 +76,12 @@ describe("user-facing errors", () => {
 describe("env public/server boundary (static)", () => {
   it("public schema keys are only NEXT_PUBLIC_*", () => {
     const publicKeys = [
-      "NEXT_PUBLIC_SUPABASE_URL",
-      "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
       "NEXT_PUBLIC_APP_URL",
+      "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
     ];
     expect(publicKeys.every((k) => k.startsWith("NEXT_PUBLIC_"))).toBe(true);
-    expect("SUPABASE_SERVICE_ROLE_KEY".startsWith("NEXT_PUBLIC_")).toBe(false);
+    expect("CLERK_SECRET_KEY".startsWith("NEXT_PUBLIC_")).toBe(false);
     expect("DATABASE_URL".startsWith("NEXT_PUBLIC_")).toBe(false);
   });
 });
