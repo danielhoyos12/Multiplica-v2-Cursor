@@ -72,7 +72,7 @@ export function ConfirmDialog({
             type="button"
             className={cn(
               "rounded-[var(--radius-sm)] px-3 py-2 text-sm text-white",
-              tone === "danger" ? "bg-[var(--danger)]" : "bg-[var(--brand)]",
+              tone === "danger" ? "bg-[var(--danger)]" : "bg-[var(--vermilion)]",
             )}
             onClick={onConfirm}
           >

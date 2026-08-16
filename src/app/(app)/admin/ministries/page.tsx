@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DataCard } from "@/components/dashboard";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { DataTable } from "@/components/ui/data-table";
@@ -25,12 +26,12 @@ export default async function MinistriesAdminPage() {
     <div className="space-y-8">
       <PageHeader
         title="Ministerios Generales"
-        description="Raíces organizacionales configurables. No están hardcodeados; el Superadmin los administra."
+        description="Raíces organizacionales configurables. No son hardcodeados; el Superadmin los administra."
         actions={
           canManage ? (
             <Link
               href="/admin/ministries/new"
-              className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm font-medium text-white"
+              className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm font-medium text-white"
             >
               Nuevo ministerio
             </Link>
@@ -46,7 +47,7 @@ export default async function MinistriesAdminPage() {
             canManage ? (
               <Link
                 href="/admin/ministries/new"
-                className="text-sm font-medium text-[var(--brand-ink)] underline"
+                className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm font-medium text-white"
               >
                 Crear el primero
               </Link>
@@ -54,46 +55,48 @@ export default async function MinistriesAdminPage() {
           }
         />
       ) : (
-        <DataTable
-          rows={rows}
-          getRowId={(row) => row.id}
-          columns={[
-            {
-              key: "code",
-              header: "Código",
-              cell: (row) => (
-                <Link
-                  href={`/admin/ministries/${row.id}`}
-                  className="font-medium text-[var(--brand-ink)] underline-offset-2 hover:underline"
-                >
-                  {row.code}
-                </Link>
-              ),
-            },
-            { key: "name", header: "Nombre", cell: (row) => row.name },
-            {
-              key: "status",
-              header: "Estado",
-              cell: (row) => (
-                <StatusBadge
-                  label={row.isActive ? "Activo" : "Inactivo"}
-                  tone={row.isActive ? "success" : "warning"}
-                />
-              ),
-            },
-            {
-              key: "responsible",
-              header: "Líder General",
-              cell: (row) =>
-                row.responsibleDisplayName || row.responsibleEmail || "—",
-            },
-            {
-              key: "sort",
-              header: "Orden",
-              cell: (row) => row.sortOrder,
-            },
-          ]}
-        />
+        <DataCard>
+          <DataTable
+            rows={rows}
+            getRowId={(row) => row.id}
+            columns={[
+              {
+                key: "code",
+                header: "Código",
+                cell: (row) => (
+                  <Link
+                    href={`/admin/ministries/${row.id}`}
+                    className="font-medium text-[var(--brand-ink)] underline-offset-2 hover:underline"
+                  >
+                    {row.code}
+                  </Link>
+                ),
+              },
+              { key: "name", header: "Nombre", cell: (row) => row.name },
+              {
+                key: "status",
+                header: "Estado",
+                cell: (row) => (
+                  <StatusBadge
+                    label={row.isActive ? "Activo" : "Inactivo"}
+                    tone={row.isActive ? "success" : "warning"}
+                  />
+                ),
+              },
+              {
+                key: "responsible",
+                header: "Líder General",
+                cell: (row) =>
+                  row.responsibleDisplayName || row.responsibleEmail || "—",
+              },
+              {
+                key: "sort",
+                header: "Orden",
+                cell: (row) => row.sortOrder,
+              },
+            ]}
+          />
+        </DataCard>
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
+import { DataCard, KpiCard, StatGroup } from "@/components/dashboard";
 import { GanarFilters } from "@/components/ganar/filters";
 import { DataTable } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -65,7 +66,7 @@ export default async function GanarPage({ searchParams }: { searchParams: Search
             {canWrite ? (
               <Link
                 href="/ganar/nueva"
-                className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm font-medium text-white"
+                className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm font-medium text-white"
               >
                 Agregar persona
               </Link>
@@ -81,12 +82,14 @@ export default async function GanarPage({ searchParams }: { searchParams: Search
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Personas visibles" value={result.stats.total} />
-        <Stat label="Esta semana" value={result.stats.week} />
-        <Stat label="Este mes" value={result.stats.month} />
-        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted)]">Por Red</p>
+      <StatGroup columns={4} aria-label="Resumen GANAR">
+        <KpiCard label="Personas visibles" value={result.stats.total} />
+        <KpiCard label="Esta semana" value={result.stats.week} />
+        <KpiCard label="Este mes" value={result.stats.month} />
+        <DataCard padding="sm" className="flex flex-col justify-center">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--muted)]">
+            Por Red
+          </p>
           <ul className="mt-2 space-y-1 text-sm">
             {byNetworkLabel.length === 0 ? (
               <li className="text-[var(--muted)]">Sin datos</li>
@@ -94,13 +97,15 @@ export default async function GanarPage({ searchParams }: { searchParams: Search
               byNetworkLabel.map((n) => (
                 <li key={n.name} className="flex justify-between gap-2">
                   <span>{n.name}</span>
-                  <span className="font-medium">{n.count}</span>
+                  <span className="font-[family-name:var(--font-display)] tabular-nums font-medium">
+                    {n.count}
+                  </span>
                 </li>
               ))
             )}
           </ul>
-        </div>
-      </div>
+        </DataCard>
+      </StatGroup>
 
       <Suspense fallback={null}>
         <GanarFilters
@@ -117,14 +122,17 @@ export default async function GanarPage({ searchParams }: { searchParams: Search
           description="Registra la primera persona desde el formulario interno o comparte el link público."
           action={
             canWrite ? (
-              <Link href="/ganar/nueva" className="text-sm font-medium underline">
+              <Link
+                href="/ganar/nueva"
+                className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm font-medium text-white"
+              >
                 Agregar persona
               </Link>
             ) : null
           }
         />
       ) : (
-        <div className="space-y-3">
+        <DataCard className="space-y-3">
           <p className="text-sm text-[var(--muted)]">
             {result.total} resultado{result.total === 1 ? "" : "s"} · página {result.page}
           </p>
@@ -184,19 +192,8 @@ export default async function GanarPage({ searchParams }: { searchParams: Search
             total={result.total}
             sp={sp}
           />
-        </div>
+        </DataCard>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</p>
-      <p className="mt-2 font-[family-name:var(--font-display)] text-3xl text-[var(--ink)]">
-        {value}
-      </p>
     </div>
   );
 }

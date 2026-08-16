@@ -112,7 +112,7 @@ export function TransferRequestForm({ networks, ministries }: Props) {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm text-white disabled:opacity-60"
+        className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm text-white disabled:opacity-60"
       >
         {pending ? "Creando…" : "Crear solicitud"}
       </button>

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { DataCard, SectionHeader } from "@/components/dashboard";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -30,37 +31,39 @@ export default async function UsersAdminPage() {
         description="Perfiles vinculados a auth.users. Asignaciones con scope global / ministry / network / tree."
       />
 
-      <DataTable
-        rows={users}
-        getRowId={(row) => row.id}
-        emptyMessage="No hay usuarios de aplicación todavía."
-        columns={[
-          {
-            key: "name",
-            header: "Nombre",
-            cell: (row) => row.displayName || "—",
-          },
-          { key: "email", header: "Correo", cell: (row) => row.email },
-          {
-            key: "status",
-            header: "Estado",
-            cell: (row) => (
-              <StatusBadge
-                label={row.isActive ? "Activo" : "Inactivo"}
-                tone={row.isActive ? "success" : "warning"}
-              />
-            ),
-          },
-          {
-            key: "person",
-            header: "person_id",
-            cell: (row) => (row.personId ? "vinculado" : "—"),
-          },
-        ]}
-      />
+      <DataCard>
+        <DataTable
+          rows={users}
+          getRowId={(row) => row.id}
+          emptyMessage="No hay usuarios de aplicación todavía."
+          columns={[
+            {
+              key: "name",
+              header: "Nombre",
+              cell: (row) => row.displayName || "—",
+            },
+            { key: "email", header: "Correo", cell: (row) => row.email },
+            {
+              key: "status",
+              header: "Estado",
+              cell: (row) => (
+                <StatusBadge
+                  label={row.isActive ? "Activo" : "Inactivo"}
+                  tone={row.isActive ? "success" : "warning"}
+                />
+              ),
+            },
+            {
+              key: "person",
+              header: "person_id",
+              cell: (row) => (row.personId ? "vinculado" : "—"),
+            },
+          ]}
+        />
+      </DataCard>
 
-      <section className="space-y-3">
-        <h2 className="font-[family-name:var(--font-display)] text-2xl">Asignaciones</h2>
+      <DataCard className="space-y-3">
+        <SectionHeader title="Asignaciones" />
         <DataTable
           rows={assignments}
           getRowId={(row) => row.id}
@@ -85,7 +88,7 @@ export default async function UsersAdminPage() {
             },
           ]}
         />
-      </section>
+      </DataCard>
     </div>
   );
 }

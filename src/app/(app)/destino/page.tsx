@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DataCard, KpiCard, SectionHeader, StatGroup } from "@/components/dashboard";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { hasPermission } from "@/modules/authorization";
@@ -56,101 +58,112 @@ export default async function DestinoPage({ searchParams }: { searchParams: Sear
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Kpi label="Nivel 1 (curso/apto)" value={counts.n1InProgress} />
-        <Kpi label="Nivel 2 (curso/apto)" value={counts.n2InProgress} />
-        <Kpi label="Nivel 3 (curso/apto)" value={counts.n3InProgress} />
-        <Kpi label="Aptos Nivel 1" value={counts.aptosN1} />
-        <Kpi label="Aptos Nivel 2" value={counts.aptosN2} />
-        <Kpi label="Aptos Nivel 3" value={counts.aptosN3} />
-        <Kpi label="Pendientes requisito pastoral" value={counts.pendingPastoral} />
-        <Kpi label="Graduados N1" value={counts.n1Completed} />
-        <Kpi label="Graduados N2/N3" value={counts.n2Completed + counts.n3Completed} />
-      </div>
+      <StatGroup columns={3} aria-label="Resumen Capacitación Destino">
+        <KpiCard label="Nivel 1 (curso/apto)" value={counts.n1InProgress} />
+        <KpiCard label="Nivel 2 (curso/apto)" value={counts.n2InProgress} />
+        <KpiCard label="Nivel 3 (curso/apto)" value={counts.n3InProgress} />
+        <KpiCard label="Aptos Nivel 1" value={counts.aptosN1} />
+        <KpiCard label="Aptos Nivel 2" value={counts.aptosN2} />
+        <KpiCard label="Aptos Nivel 3" value={counts.aptosN3} />
+        <KpiCard label="Pendientes requisito pastoral" value={counts.pendingPastoral} />
+        <KpiCard label="Graduados N1" value={counts.n1Completed} />
+        <KpiCard label="Graduados N2/N3" value={counts.n2Completed + counts.n3Completed} />
+      </StatGroup>
 
-      <form className="flex flex-wrap gap-2 text-sm">
-        <select
-          name="nivel"
-          defaultValue={levelFilter ? String(levelFilter) : ""}
-          className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
-        >
-          <option value="">Todos los niveles</option>
-          <option value="1">Nivel 1</option>
-          <option value="2">Nivel 2</option>
-          <option value="3">Nivel 3</option>
-        </select>
-        <button
-          type="submit"
-          className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-white"
-        >
-          Filtrar
-        </button>
-      </form>
-
-      {canManageCycles ? (
-        <form
-          action={async (formData) => {
-            "use server";
-            await createDestinoCycleAction({
-              level: Number(formData.get("level")) as 1 | 2 | 3,
-              name: String(formData.get("name") ?? ""),
-              startDate: String(formData.get("startDate") ?? ""),
-              endDate: String(formData.get("endDate") ?? ""),
-              ministryId: String(formData.get("ministryId") ?? "") || null,
-            });
-          }}
-          className="space-y-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4"
-        >
-          <h2 className="font-medium">Crear ciclo Destino</h2>
+      <DataCard className="space-y-4">
+        <SectionHeader title="Filtrar ciclos" />
+        <form className="flex flex-wrap gap-2 text-sm">
           <select
-            name="level"
-            required
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-            defaultValue="1"
+            name="nivel"
+            defaultValue={levelFilter ? String(levelFilter) : ""}
+            className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
           >
+            <option value="">Todos los niveles</option>
             <option value="1">Nivel 1</option>
             <option value="2">Nivel 2</option>
             <option value="3">Nivel 3</option>
           </select>
-          <input
-            name="name"
-            required
-            placeholder="Ej. Destino N1 Agosto–Octubre 2026"
-            className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-          />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input
-              type="date"
-              name="startDate"
-              required
-              className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-            />
-            <input
-              type="date"
-              name="endDate"
-              required
-              className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-            />
-          </div>
           <button
             type="submit"
-            className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-3 py-2 text-sm text-white"
+            className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-white"
           >
-            Crear ciclo
+            Filtrar
           </button>
         </form>
+      </DataCard>
+
+      {canManageCycles ? (
+        <DataCard className="space-y-3">
+          <SectionHeader
+            title="Crear ciclo de Capacitación Destino"
+            description="Define nivel, nombre y fechas del ciclo."
+          />
+          <form
+            action={async (formData) => {
+              "use server";
+              await createDestinoCycleAction({
+                level: Number(formData.get("level")) as 1 | 2 | 3,
+                name: String(formData.get("name") ?? ""),
+                startDate: String(formData.get("startDate") ?? ""),
+                endDate: String(formData.get("endDate") ?? ""),
+                ministryId: String(formData.get("ministryId") ?? "") || null,
+              });
+            }}
+            className="space-y-3"
+          >
+            <select
+              name="level"
+              required
+              className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+              defaultValue="1"
+            >
+              <option value="1">Nivel 1</option>
+              <option value="2">Nivel 2</option>
+              <option value="3">Nivel 3</option>
+            </select>
+            <input
+              name="name"
+              required
+              placeholder="Ej. Capacitación Destino N1 Agosto–Octubre 2026"
+              className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+            />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input
+                type="date"
+                name="startDate"
+                required
+                className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+              />
+              <input
+                type="date"
+                name="endDate"
+                required
+                className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+              />
+            </div>
+            <button
+              type="submit"
+              className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm text-white"
+            >
+              Crear ciclo
+            </button>
+          </form>
+        </DataCard>
       ) : null}
 
-      <section className="space-y-2">
-        <h2 className="font-medium">Ciclos</h2>
-        <ul className="space-y-2">
-          {cycles.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">Sin ciclos Destino.</p>
-          ) : (
-            cycles.map((cycle) => (
+      <DataCard className="space-y-3">
+        <SectionHeader title="Ciclos" description="Ciclos de Capacitación Destino en tu alcance." />
+        {cycles.length === 0 ? (
+          <EmptyState
+            title="Sin ciclos"
+            description="Aún no hay ciclos de Capacitación Destino."
+          />
+        ) : (
+          <ul className="space-y-2">
+            {cycles.map((cycle) => (
               <li
                 key={cycle.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--paper-100)]/40 px-4 py-3"
               >
                 <div>
                   <Link href={`/destino/${cycle.id}`} className="font-medium underline">
@@ -179,17 +192,17 @@ export default async function DestinoPage({ searchParams }: { searchParams: Sear
                   ) : null}
                 </div>
               </li>
-            ))
-          )}
-        </ul>
-      </section>
+            ))}
+          </ul>
+        )}
+      </DataCard>
 
       {canEnroll ? (
-        <section className="space-y-2">
-          <h2 className="font-medium">Aptos Nivel 1 (muestra)</h2>
-          <p className="text-sm text-[var(--muted)]">
-            UDV completada y Nivel 1 no formalizado. Inscribe desde el ciclo activo.
-          </p>
+        <DataCard className="space-y-3">
+          <SectionHeader
+            title="Aptos Nivel 1 (muestra)"
+            description="Consolidar completado y Nivel 1 no formalizado. Inscribe desde el ciclo activo. Apto ≠ líder activo."
+          />
           <ul className="space-y-1 text-sm">
             {aptosN1.slice(0, 12).map((p) => (
               <li key={p.personId} className="flex justify-between gap-2">
@@ -203,17 +216,8 @@ export default async function DestinoPage({ searchParams }: { searchParams: Sear
               <li className="text-[var(--muted)]">Nadie apto en tu alcance.</li>
             ) : null}
           </ul>
-        </section>
+        </DataCard>
       ) : null}
-    </div>
-  );
-}
-
-function Kpi({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</p>
-      <p className="mt-2 text-2xl font-medium">{value}</p>
     </div>
   );
 }
