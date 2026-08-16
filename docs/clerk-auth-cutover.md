@@ -20,7 +20,7 @@
 | Password gate | DB `must_change_password` + Clerk `publicMetadata` + cookie |
 | Convex client | `ConvexProviderWithClerk` + Clerk `useAuth` |
 | Convex server | `CLERK_JWT_ISSUER_DOMAIN` in `auth.config.ts` |
-| Env | `NEXT_PUBLIC_CLERK_*`, `CLERK_SECRET_KEY`, `CLERK_JWT_ISSUER_DOMAIN` |
+| Env | `NEXT_PUBLIC_CLERK_*` (incl. `SIGN_IN_URL=/login`, `SIGN_UP_URL=/sign-up`), `CLERK_SECRET_KEY`, `CLERK_JWT_ISSUER_DOMAIN` |
 
 ## Identidad
 
