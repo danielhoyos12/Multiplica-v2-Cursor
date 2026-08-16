@@ -4,11 +4,11 @@
 
 | Campo | Valor |
 | --- | --- |
-| Estado | **UI PHASE 2 READY** — pendiente aprobación humana |
+| Estado | **UI PHASE 2 READY** — copy “Capacitación Destino” corregido; pendiente aprobación humana |
 | Branch | `cursor/ui-phase-2-dashboard-neo-editorial-a3cc` |
 | Base | `main` (post PR #13) |
 | PR | https://github.com/danielhoyos12/Multiplica-v2-Cursor/pull/14 |
-| Commit | `01bffc4` (HEAD) · `54ae1ea` (implementación) |
+| Commit | `3432b35` (copy Capacitación Destino) · `54ae1ea` (implementación) |
 | Merge | **NO** |
 | Producción | **NO** |
 
@@ -126,6 +126,12 @@ Focus visible, labels reales, charts con valores textuales, `prefers-reduced-mot
 | build | PASS |
 
 Warnings build: middleware→proxy deprecation (preexistente). Sin `@ts-ignore`.
+
+### Corrección copy (pre-aprobación)
+
+- Hint KPI Discipular y docs Escalera: abreviatura “Destino” → **Capacitación Destino**
+- LadderVisualizer ya usaba el nombre oficial
+- Ruta `/destino` sin cambios
 
 ---
 
