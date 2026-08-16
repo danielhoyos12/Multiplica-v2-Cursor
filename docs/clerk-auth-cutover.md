@@ -3,10 +3,9 @@
 | Campo | Valor |
 | --- | --- |
 | Fecha | 2026-08-16 |
-| Branch | `cursor/clerk-auth-a3cc` |
-| Antes | Supabase Auth (`@supabase/ssr`) |
-| Ahora | **Clerk** (`@clerk/nextjs`) |
-| Data plane | Postgres + Drizzle sin cambios pastorales |
+| Auth | **Clerk** (`@clerk/nextjs`) |
+| Data plane | **Convex** (+ optional interim non-Supabase Postgres) |
+| Convex bridge | `convex/auth.config.ts` + `ConvexProviderWithClerk` |
 
 ---
 
@@ -16,16 +15,27 @@
 | --- | --- |
 | Middleware | `clerkMiddleware` + password-gate cookie |
 | Login / recuperar | `useSignIn` (Clerk) |
-| Session | `auth()` / `currentUser()` → `users` via `clerk_user_id` |
+| Session | `auth()` / `currentUser()` → app `users` via `clerk_user_id` |
 | Leadership provision | `clerkClient().users.createUser` |
 | Password gate | DB `must_change_password` + Clerk `publicMetadata` + cookie |
-| Env | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` |
+| Convex client | `ConvexProviderWithClerk` + Clerk `useAuth` |
+| Convex server | `CLERK_JWT_ISSUER_DOMAIN` in `auth.config.ts` |
+| Env | `NEXT_PUBLIC_CLERK_*`, `CLERK_SECRET_KEY`, `CLERK_JWT_ISSUER_DOMAIN` |
 
 ## Identidad
 
-- `users.id` = UUID interno (FKs / authz)
+- App `users.id` = UUID interno (FKs / authz en módulos Drizzle interim)
 - `users.clerk_user_id` = Clerk `user_…` (unique)
-- Migración: `0011_clerk_user_id.sql`
+- Convex `users.authSubject` = Clerk subject when profiles live in Convex
+- Migración legacy: `0011_clerk_user_id.sql`
+
+## Convex + Clerk setup
+
+1. Clerk Dashboard → JWT Templates → New → **Convex** (name must be `convex`).
+2. Set Convex deployment env: `CLERK_JWT_ISSUER_DOMAIN=https://<instance>.clerk.accounts.dev`
+3. App already wraps with `ClerkProvider` → `ConvexClientProvider` (`ConvexProviderWithClerk`).
+
+For Vercel previews: set `CLERK_JWT_ISSUER_DOMAIN` once on the Convex **Preview/Dev** deployment defaults (not per Vercel preview). Vercel still needs Clerk Next keys + `CONVEX_DEPLOY_KEY` / `NEXT_PUBLIC_CONVEX_URL`.
 
 ## CLI setup (linked app)
 
@@ -38,12 +48,8 @@ clerk init --app app_3I0zc3YzaXVrDXUXSnaqXDfwzjj
 clerk doctor
 ```
 
-`clerk init` writes keys into the project env. Middleware matcher includes `/__clerk/:path*`.
+Middleware matcher includes `/__clerk/:path*`.
 
-Usuarios legacy de Supabase Auth **no** inician sesión hasta recrearlos en Clerk (o link por email al primer login vía `ensureAppUserProfile`).
+## Fuera de alcance histórico
 
-## Fuera de alcance (aún)
-
-- Reescribir scripts `verify-phase*` / `provision-e2e-users` (siguen usando cliente Supabase para RLS PostgREST)
-- Quitar paquetes `@supabase/*` del lockfile
-- Migrar data pastoral a Convex
+Supabase Auth/SDK removed — see [`supabase-removal.md`](./supabase-removal.md). Pastoral modules still migrating off interim Drizzle: [`convex-full-cutover-plan.md`](./convex-full-cutover-plan.md).

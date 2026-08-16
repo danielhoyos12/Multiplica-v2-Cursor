@@ -12,7 +12,7 @@ export default function ConvexDevPage() {
     <div className="mx-auto min-h-screen max-w-2xl space-y-8 bg-[var(--rice)] px-4 py-10 text-[var(--ink)]">
       <PageHeader
         title="Convex local"
-        description="Spike de desarrollo local. MULTIPLICA pastoral sigue en Supabase."
+        description="Smoke local de Convex. Auth de la app: Clerk + JWT template convex."
       />
       <ConvexHealthPanel />
     </div>

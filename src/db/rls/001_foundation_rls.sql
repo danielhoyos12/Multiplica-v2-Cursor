@@ -17,7 +17,7 @@ ALTER TABLE user_role_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE person_organization_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 
--- Force RLS for table owners as well (defense in depth on Supabase)
+-- Force RLS for table owners as well (defense in depth on interim Postgres)
 ALTER TABLE districts FORCE ROW LEVEL SECURITY;
 ALTER TABLE ministries FORCE ROW LEVEL SECURITY;
 ALTER TABLE networks FORCE ROW LEVEL SECURITY;

@@ -9,21 +9,21 @@
 | `UAT_READY` | Human UAT checklist PASS on staging |
 | `PRODUCTION_APPROVED` | Explicit human approval only |
 
-## Current (Phase 5 UI preprod)
+## Current
 
-**CODE_READY** + **PREPROD_VALIDATED_ON_DEV** + **STAGING_PENDING** + **NO-GO PRODUCTION**
+**CODE_READY** + stack cutover to **Clerk + Convex** in progress · **STAGING_PENDING** · **NO-GO PRODUCTION**
 
-Rationale: Phase 5 authenticated E2E + export security + visual QA ran against `multiplica-dev` / local Next; critical export authz bypass fixed. Dedicated staging project, human UAT, and production env still required before GO.
-
-See [ui-phase-5-preprod-readiness.md](./ui-phase-5-preprod-readiness.md).
+See [supabase-removal.md](./supabase-removal.md) and [clerk-auth-cutover.md](./clerk-auth-cutover.md).
 
 ## Blockers to STAGING_READY
 
-- Create separate Supabase staging project
-- Configure Vercel env + Auth redirect URLs + SMTP
-- Deploy, migrate, RLS, seed, run UAT smoke
+- Configure Vercel env: Clerk keys, `NEXT_PUBLIC_CONVEX_URL`, Convex deploy key
+- Set `CLERK_JWT_ISSUER_DOMAIN` on Convex staging/preview defaults
+- Clerk JWT template named `convex`
+- Deploy, smoke, run UAT
 
 ## Never
 
 - Auto-set `PRODUCTION_APPROVED` from Cursor
 - Deploy production without owner approval
+- Point `DATABASE_URL` at Supabase hosts

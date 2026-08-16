@@ -1,6 +1,6 @@
 /**
  * Prefer IPv4 DNS results first.
- * Avoids intermittent ENETUNREACH against IPv6-only paths to Postgres/Supabase
+ * Avoids intermittent ENETUNREACH against IPv6-only paths to Postgres hosts
  * from some cloud agent / CI networks.
  */
 export async function register() {

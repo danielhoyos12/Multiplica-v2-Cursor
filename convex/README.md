@@ -1,9 +1,9 @@
 # Convex — MULTIPLICA
 
-**Target backend:** Convex (typed queries/mutations + realtime).  
-**Current live pastoral data:** still Supabase Postgres + Drizzle until each cutover phase.
+**Backend:** Convex (typed queries/mutations + realtime).  
+**Auth:** Clerk JWTs via `convex/auth.config.ts` + `ConvexProviderWithClerk`.
 
-Plan: [`docs/convex-full-cutover-plan.md`](../docs/convex-full-cutover-plan.md)
+Plan: [`docs/convex-full-cutover-plan.md`](../docs/convex-full-cutover-plan.md) · Removal: [`docs/supabase-removal.md`](../docs/supabase-removal.md)
 
 ## Local anonymous backend
 
@@ -13,15 +13,16 @@ npm run dev
 # smoke: http://localhost:3000/convex-dev
 ```
 
-No Convex cloud account required for anonymous mode.
+No Convex cloud account required for anonymous mode. For Clerk-authenticated Convex calls against a cloud deployment, set `CLERK_JWT_ISSUER_DOMAIN` on that deployment and create a Clerk JWT template named `convex`.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `schema.ts` | Phase 0 foundation tables + `healthChecks` smoke |
+| `auth.config.ts` | Clerk JWT issuer (`CLERK_JWT_ISSUER_DOMAIN`) |
+| `schema.ts` | Foundation + pastoral tables |
 | `health.ts` | Local connectivity smoke |
-| `foundation.ts` | Catalog list stubs (empty until seed/phase 1) |
+| `foundation.ts` | Catalog list stubs |
 | `_generated/` | Committed Convex codegen |
 
 ## Dual-run reminder

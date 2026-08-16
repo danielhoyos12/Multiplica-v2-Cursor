@@ -33,7 +33,7 @@ FILES=(
 )
 
 if ! command -v psql >/dev/null 2>&1; then
-  echo "psql not found. Apply these files manually in the Supabase SQL editor:"
+  echo "psql not found. Install psql or apply these SQL files manually against interim (non-Supabase) Postgres:"
   for f in "${FILES[@]}"; do
     echo "  - $f"
   done

@@ -2,21 +2,27 @@
 
 ## Scope
 
-Applies to Supabase Postgres used by MULTIPLICA. Do not promise capabilities beyond the current Supabase plan.
+Primary data plane is **Convex**. Optional interim Postgres (non-Supabase) may still hold unmigrated pastoral modules — back up both when used.
 
-## Supabase backups
+## Convex
 
-- Confirm PITR / daily backups available on the project plan before production.
-- Document the actual retention window from the Supabase dashboard for **staging** and **production** projects separately.
-- `multiplica-dev` is development only — not a production backup source of truth.
+- Use Convex Dashboard backups / export for the deployment that backs staging and production.
+- Document retention and restore owners offline (not in git secrets).
+- Local anonymous Convex has no durable cloud backup — treat as disposable.
+
+## Interim Postgres (if still used)
+
+- Confirm PITR / daily backups on the host (e.g. Neon) before production use.
+- Document retention for **staging** and **production** separately.
+- Never point `DATABASE_URL` at `*.supabase.co` (runtime rejects it).
 
 ## Before critical operations
 
-1. Snapshot or verify recent backup exists.
-2. Record `APP_ENV`, project ref, migration version, and git SHA.
+1. Snapshot or verify recent backup exists (Convex + interim DB if any).
+2. Record `APP_ENV`, Convex deployment, migration version (if Postgres), and git SHA.
 3. Prefer forward-compatible migrations; avoid destructive DDL without restore plan.
 
-## Manual dump (dev/staging)
+## Manual dump (interim Postgres only)
 
 ```bash
 # Password redacted in logs — do not paste full DATABASE_URL into tickets
@@ -35,10 +41,10 @@ Then run `CRITICAL_FAIL=1 npm run verify:invariants` (never against production f
 
 | Env | RPO (data loss tolerance) | RTO (restore target) |
 | --- | --- | --- |
-| Staging | Last backup / dump | Hours |
-| Production | Per Supabase plan PITR | Defined by ops owner |
+| Staging | Last Convex / DB backup | Hours |
+| Production | Per Convex + DB plan | Defined by ops owner |
 
 ## What not to do
 
-- Do not restore over `multiplica-dev` destructively during Phase 10 drills if other work depends on it.
+- Do not restore over shared shared-dev databases destructively during release drills if other work depends on them.
 - Do not run verify fixture scripts against production (`prod-guard`).

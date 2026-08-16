@@ -89,8 +89,8 @@ export default defineSchema({
     .index("by_active", ["isActive"]),
 
   /**
-   * App profile. During dual-run, `authSubject` = Supabase `auth.users.id`.
-   * After auth cutover (phase 10), may map to Convex Auth subject.
+   * App profile. `authSubject` = Clerk user id (`user_…`) / Convex identity subject.
+   * Prefer `identity.tokenIdentifier` for ownership checks when using ctx.auth.
    */
   users: defineTable({
     authSubject: v.string(),

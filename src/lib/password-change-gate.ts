@@ -6,7 +6,7 @@
 export const MUST_CHANGE_PASSWORD_COOKIE = "multiplica_pcg";
 
 export type AuthUserLike = {
-  /** Legacy Supabase-shaped metadata (tests / transitional). */
+  /** Legacy Auth-shaped metadata (tests / transitional). */
   user_metadata?: Record<string, unknown> | null;
   app_metadata?: Record<string, unknown> | null;
   /** Clerk publicMetadata */
