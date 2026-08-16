@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 
 import { DataCard, SectionHeader } from "@/components/dashboard";
+import { TransferConfirmButton } from "@/components/transfers/transfer-confirm-button";
 import { TransferRequestForm } from "@/components/transfers/transfer-request-form";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -128,48 +129,39 @@ export default async function TransferenciasPage({
                 <div className="flex flex-wrap gap-2">
                   {canApprove && (r.status === "pending" || r.status === "draft") ? (
                     <>
-                      <form
+                      <TransferConfirmButton
+                        kind="approve"
+                        personName={r.fullName}
+                        transferType={r.transferType}
+                        reason={r.reason}
                         action={async () => {
                           "use server";
                           await approveTransferAction(r.id);
                         }}
-                      >
-                        <button
-                          type="submit"
-                          className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-2 py-1 text-xs text-white"
-                        >
-                          Aprobar
-                        </button>
-                      </form>
-                      <form
+                      />
+                      <TransferConfirmButton
+                        kind="reject"
+                        personName={r.fullName}
+                        transferType={r.transferType}
+                        reason={r.reason}
                         action={async () => {
                           "use server";
                           await rejectTransferAction(r.id, "Rechazado desde UI");
                         }}
-                      >
-                        <button
-                          type="submit"
-                          className="rounded-[var(--radius-sm)] border border-[var(--border)] px-2 py-1 text-xs"
-                        >
-                          Rechazar
-                        </button>
-                      </form>
+                      />
                     </>
                   ) : null}
                   {canExecute && r.status === "approved" ? (
-                    <form
+                    <TransferConfirmButton
+                      kind="execute"
+                      personName={r.fullName}
+                      transferType={r.transferType}
+                      reason={r.reason}
                       action={async () => {
                         "use server";
                         await executeTransferAction(r.id);
                       }}
-                    >
-                      <button
-                        type="submit"
-                        className="rounded-[var(--radius-sm)] border border-[var(--danger-border)] bg-[var(--danger-soft)] px-2 py-1 text-xs text-[var(--danger)]"
-                      >
-                        Ejecutar (confirmado)
-                      </button>
-                    </form>
+                    />
                   ) : null}
                 </div>
               </li>

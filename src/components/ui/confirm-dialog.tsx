@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
 
@@ -16,6 +16,10 @@ type ConfirmDialogProps = {
   children?: ReactNode;
 };
 
+/**
+ * Desktop: centered dialog. Mobile: bottom-aligned (sheet-like).
+ * Escape + basic focus trap.
+ */
 export function ConfirmDialog({
   open,
   title,
@@ -29,6 +33,25 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const panel = panelRef.current;
+    const focusables = panel?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    focusables?.[0]?.focus();
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
 
   if (!open) {
     return null;
@@ -41,11 +64,12 @@ export function ConfirmDialog({
       onClick={onCancel}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
-        className="w-full max-w-md rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]"
+        className="w-full max-w-md rounded-t-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-float)] sm:rounded-[var(--radius)]"
         onClick={(event) => event.stopPropagation()}
       >
         <h2
@@ -63,7 +87,7 @@ export function ConfirmDialog({
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
-            className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm text-[var(--ink)]"
+            className="neo-touch rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm text-[var(--ink)]"
             onClick={onCancel}
           >
             {cancelLabel}
@@ -71,7 +95,7 @@ export function ConfirmDialog({
           <button
             type="button"
             className={cn(
-              "rounded-[var(--radius-sm)] px-3 py-2 text-sm text-white",
+              "neo-touch rounded-[var(--radius-sm)] px-3 py-2 text-sm text-white",
               tone === "danger" ? "bg-[var(--danger)]" : "bg-[var(--vermilion)]",
             )}
             onClick={onConfirm}
