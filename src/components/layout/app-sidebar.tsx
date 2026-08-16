@@ -13,6 +13,7 @@ import {
   isStepActive,
   pathMatches,
   type NavLeaf,
+  type NavSecondaryGroup,
   type NavStep,
 } from "@/components/layout/nav-config";
 import {
@@ -28,9 +29,14 @@ import { cn } from "@/lib/cn";
 type Props = {
   userEmail?: string | null;
   signOutAction?: () => Promise<void>;
+  secondaryGroups?: NavSecondaryGroup[];
 };
 
-export function AppSidebar({ userEmail, signOutAction }: Props) {
+export function AppSidebar({
+  userEmail,
+  signOutAction,
+  secondaryGroups = SECONDARY_GROUPS,
+}: Props) {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(false);
   const activeStep = findActiveStepId(pathname);
@@ -241,7 +247,7 @@ export function AppSidebar({ userEmail, signOutAction }: Props) {
                     </span>
                   </Link>
                 </div>
-                {SECONDARY_GROUPS.map((group) => (
+                {secondaryGroups.map((group) => (
                   <div key={group.id}>
                     <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#F3F0E8]/40">
                       {group.label}

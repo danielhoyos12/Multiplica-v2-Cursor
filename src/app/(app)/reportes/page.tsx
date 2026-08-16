@@ -52,8 +52,7 @@ export default async function ReportesPage({
   });
 
   const headers = report.rows[0] ? Object.keys(report.rows[0]) : [];
-  const canExport =
-    hasPermission(auth, "reports.export") || hasPermission(auth, "dashboard.read");
+  const canExport = hasPermission(auth, "reports.export");
   const totalPages = Math.max(1, Math.ceil(report.total / report.pageSize));
 
   function hrefFor(next: { tipo?: string; page?: string }) {

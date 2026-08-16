@@ -39,16 +39,24 @@ export type ReportPage = {
 };
 
 async function assertReportsAccess(scope: DashboardScope, exportMode = false) {
-  const perm = exportMode ? "reports.export" : "reports.read";
+  if (exportMode) {
+    // Export is a privileged action — never substitute dashboard.read / persons.read.
+    if (!hasPermission(scope.actor, "reports.export")) {
+      throw new DomainError(
+        DomainErrorCode.REPORT_EXPORT_DENIED,
+        "Sin permiso de exportación de reportes.",
+      );
+    }
+    return;
+  }
+
   if (
-    !hasPermission(scope.actor, perm) &&
+    !hasPermission(scope.actor, "reports.read") &&
     !hasPermission(scope.actor, "dashboard.read") &&
     !hasPermission(scope.actor, "persons.read")
   ) {
     throw new DomainError(
-      exportMode
-        ? DomainErrorCode.REPORT_EXPORT_DENIED
-        : DomainErrorCode.REPORT_ACCESS_DENIED,
+      DomainErrorCode.REPORT_ACCESS_DENIED,
       "Sin permiso de reportes.",
     );
   }

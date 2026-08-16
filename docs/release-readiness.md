@@ -9,11 +9,13 @@
 | `UAT_READY` | Human UAT checklist PASS on staging |
 | `PRODUCTION_APPROVED` | Explicit human approval only |
 
-## Current (Phase 10)
+## Current (Phase 5 UI preprod)
 
-**CODE_READY** + **STAGING_PENDING**
+**CODE_READY** + **PREPROD_VALIDATED_ON_DEV** + **STAGING_PENDING** + **NO-GO PRODUCTION**
 
-Rationale: code hardening, CI, verify scripts, and docs shipped; Vercel/Supabase staging project not provisioned in this agent run.
+Rationale: Phase 5 authenticated E2E + export security + visual QA ran against `multiplica-dev` / local Next; critical export authz bypass fixed. Dedicated staging project, human UAT, and production env still required before GO.
+
+See [ui-phase-5-preprod-readiness.md](./ui-phase-5-preprod-readiness.md).
 
 ## Blockers to STAGING_READY
 

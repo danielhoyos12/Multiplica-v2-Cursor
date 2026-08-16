@@ -117,6 +117,33 @@ export const SECONDARY_GROUPS: NavSecondaryGroup[] = [
   },
 ];
 
+/** Permission flags used to hide Admin links the page would redirect away from. */
+export type SecondaryNavAccess = {
+  canReadMinistries: boolean;
+  canReadNetworks: boolean;
+  canReadUsers: boolean;
+  canViewSystemHealth: boolean;
+};
+
+export function filterSecondaryGroups(
+  access: SecondaryNavAccess,
+  groups: NavSecondaryGroup[] = SECONDARY_GROUPS,
+): NavSecondaryGroup[] {
+  return groups
+    .map((group) => {
+      if (group.id !== "admin") return group;
+      const items = group.items.filter((item) => {
+        if (item.id === "ministries") return access.canReadMinistries;
+        if (item.id === "networks") return access.canReadNetworks;
+        if (item.id === "users") return access.canReadUsers;
+        if (item.id === "health") return access.canViewSystemHealth;
+        return false;
+      });
+      return { ...group, items };
+    })
+    .filter((group) => group.items.length > 0);
+}
+
 export function pathMatches(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/dashboard" || pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
