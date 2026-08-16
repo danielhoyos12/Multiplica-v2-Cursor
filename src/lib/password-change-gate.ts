@@ -1,19 +1,25 @@
 /**
  * Password-change / recovery navigation gate helpers.
- * Source of truth: users.must_change_password (+ synced Auth user_metadata).
+ * Source of truth: users.must_change_password (+ optional Clerk publicMetadata).
  */
 
 export const MUST_CHANGE_PASSWORD_COOKIE = "multiplica_pcg";
 
 export type AuthUserLike = {
+  /** Legacy Supabase-shaped metadata (tests / transitional). */
   user_metadata?: Record<string, unknown> | null;
   app_metadata?: Record<string, unknown> | null;
+  /** Clerk publicMetadata */
+  publicMetadata?: Record<string, unknown> | null;
 };
 
 /** True when Auth metadata marks forced password change (middleware-safe). */
-export function authUserRequiresPasswordChange(user: AuthUserLike | null | undefined): boolean {
+export function authUserRequiresPasswordChange(
+  user: AuthUserLike | null | undefined,
+): boolean {
   if (!user) return false;
   return (
+    user.publicMetadata?.mustChangePassword === true ||
     user.user_metadata?.must_change_password === true ||
     user.app_metadata?.must_change_password === true
   );
