@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { ClerkAuthControls } from "@/components/auth/clerk-auth-controls";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { BottomDock } from "@/components/layout/bottom-dock";
 import type { NavSecondaryGroup } from "@/components/layout/nav-config";
@@ -26,6 +27,9 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className="min-h-screen bg-[var(--rice)] text-[var(--ink)]">
+      <div className="fixed top-3 right-3 z-40 hidden min-[1180px]:block">
+        <ClerkAuthControls />
+      </div>
       <AppSidebar
         userEmail={userEmail}
         signOutAction={signOutAction}

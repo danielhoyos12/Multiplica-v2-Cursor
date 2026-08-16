@@ -27,12 +27,18 @@
 - `users.clerk_user_id` = Clerk `user_…` (unique)
 - Migración: `0011_clerk_user_id.sql`
 
-## Setup local
+## CLI setup (linked app)
 
-1. Crear app en [Clerk](https://dashboard.clerk.com)
-2. Copiar keys a `.env.local`
-3. `npm run db:migrate` (aplica `0011`)
-4. `npm run dev`
+Target Clerk application: `app_3I0zc3YzaXVrDXUXSnaqXDfwzjj`
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"   # if clerk installed with npm --prefix ~/.local
+clerk auth login
+clerk init --app app_3I0zc3YzaXVrDXUXSnaqXDfwzjj
+clerk doctor
+```
+
+`clerk init` writes keys into the project env. Middleware matcher includes `/__clerk/:path*`.
 
 Usuarios legacy de Supabase Auth **no** inician sesión hasta recrearlos en Clerk (o link por email al primer login vía `ensureAppUserProfile`).
 

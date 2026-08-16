@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 
 import { BrandMark } from "@/components/layout/brand-mark";
+import { ClerkAuthControls } from "@/components/auth/clerk-auth-controls";
 import {
   ESCALERA_STEPS,
   MANAGEMENT_NAV,
@@ -279,6 +280,9 @@ export function AppSidebar({
             </div>
 
             <div className="border-t border-white/10 px-4 py-3">
+              <div className="mb-2">
+                <ClerkAuthControls appearance="dark" />
+              </div>
               {userEmail ? (
                 <p className="truncate text-xs text-[#F3F0E8]/55" title={userEmail}>
                   {userEmail}
