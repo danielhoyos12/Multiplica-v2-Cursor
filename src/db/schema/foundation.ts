@@ -128,13 +128,15 @@ export const persons = pgTable(
 );
 
 /**
- * Application user profile mapped 1:1 to Supabase Auth `auth.users.id`.
- * FK to auth.users is enforced in SQL/RLS docs; Drizzle keeps a stable UUID PK.
+ * Application user profile.
+ * Auth: Clerk (`clerk_user_id`). Internal PK remains UUID for FKs / authz.
  */
 export const users = pgTable(
   "users",
   {
-    id: uuid("id").primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** Clerk user id (`user_…`). Null only for legacy rows pending link. */
+    clerkUserId: text("clerk_user_id"),
     personId: uuid("person_id").references(() => persons.id, {
       onDelete: "set null",
     }),
@@ -148,6 +150,7 @@ export const users = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("users_clerk_user_id_uidx").on(table.clerkUserId),
     uniqueIndex("users_email_uidx").on(table.email),
     uniqueIndex("users_person_id_uidx").on(table.personId),
     uniqueIndex("users_username_uidx").on(table.username),
