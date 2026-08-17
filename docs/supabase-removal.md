@@ -34,16 +34,17 @@
 
 ## Interim Postgres
 
-Legacy Drizzle modules may still call `getDb()` **only** if `DATABASE_URL` points at a **non-Supabase** host (e.g. Neon). Any `*.supabase.co` URL throws at runtime.
+**Pastoral runtime no usa Postgres.** Los módulos bajo `src/modules/*` y `src/app/*` llaman Convex (`getConvexHttpClient`).
 
-Prefer migrating those modules to Convex (`docs/convex-full-cutover-plan.md`).
+`getDb()` / `DATABASE_URL` solo quedan para seed legacy opcional (`src/db/seeds/run.ts`). No configures `*.supabase.co`.
+
+Prefer: `npm run db:seed:convex` + `npm run convex:dev`.
 
 ## Operator checklist
 
 1. `npm run convex:dev` (or cloud Convex deploy)
-2. Clerk keys + JWT template `convex`
-3. Set `CLERK_JWT_ISSUER_DOMAIN` on Convex deployment
-4. Do not set Supabase env vars; do not use Supabase `DATABASE_URL`
-5. `npm run db:migrate` only if using interim non-Supabase Postgres for unmigrated modules
+2. Clerk keys + JWT template `convex` + `CLERK_JWT_ISSUER_DOMAIN`
+3. `npm run db:seed:convex`
+4. Do not set Supabase env vars
 
-**STATUS: SUPABASE PRODUCT REMOVED — CONVEX + CLERK**
+**STATUS: SUPABASE PRODUCT REMOVED — CONVEX + CLERK (PASTORAL CUTOVER)**
