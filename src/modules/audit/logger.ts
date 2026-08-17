@@ -1,5 +1,6 @@
-import { getDb } from "@/db/client";
-import { auditLogs } from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { mapConvexError } from "@/lib/convex-errors";
+import { api, getConvexHttpClient } from "@/server/convex";
 
 const SENSITIVE_KEY_PATTERN =
   /^(password|token|secret|authorization|api[_-]?key|service[_-]?role|prayer[_-]?request|peticion(_de_oracion)?)$/i;
@@ -38,18 +39,21 @@ export type WriteAuditLogInput = {
   requestId?: string | null;
 };
 
+/** Writes an append-only audit row via `convex/audit.ts` `write`. */
 export async function writeAuditLog(input: WriteAuditLogInput) {
-  const db = getDb();
+  const client = getConvexHttpClient();
 
-  await db.insert(auditLogs).values({
-    actorUserId: input.actorUserId ?? null,
-    action: input.action,
-    entityType: input.entityType,
-    entityId: input.entityId ?? null,
-    beforeData: sanitizeAuditPayload(input.beforeData),
-    afterData: sanitizeAuditPayload(input.afterData),
-    reason: input.reason ?? null,
-    metadata: input.metadata ?? {},
-    requestId: input.requestId ?? null,
-  });
+  await client
+    .mutation(api.audit.write, {
+      actorUserId: input.actorUserId ? (input.actorUserId as Id<"users">) : null,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId ?? null,
+      beforeData: sanitizeAuditPayload(input.beforeData),
+      afterData: sanitizeAuditPayload(input.afterData),
+      reason: input.reason ?? null,
+      metadata: input.metadata ?? {},
+      requestId: input.requestId ?? null,
+    })
+    .catch(mapConvexError);
 }

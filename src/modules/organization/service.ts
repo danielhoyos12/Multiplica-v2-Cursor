@@ -1,15 +1,8 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
-import { getDb } from "@/db/client";
-import {
-  ministries,
-  networks,
-  roles,
-  userRoleAssignments,
-  users,
-} from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
+import { mapConvexError } from "@/lib/convex-errors";
 import { isValidHumanCode } from "@/lib/human-codes";
 import { writeAuditLog } from "@/modules/audit";
 import {
@@ -20,6 +13,7 @@ import {
   loadAuthContext,
   type AuthContext,
 } from "@/modules/authorization";
+import { api, getConvexHttpClient } from "@/server/convex";
 
 export const ministryInputSchema = z.object({
   code: z
@@ -35,31 +29,89 @@ export const ministryInputSchema = z.object({
 
 export type MinistryInput = z.infer<typeof ministryInputSchema>;
 
+type MinistryDoc = {
+  _id: Id<"ministries">;
+  code: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  responsibleUserId?: Id<"users">;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type UserDoc = {
+  _id: Id<"users">;
+  email: string;
+  displayName?: string;
+  authSubject: string;
+  isActive: boolean;
+  mustChangePassword: boolean;
+  personId?: Id<"persons">;
+  createdAt: number;
+  updatedAt: number;
+};
+
 async function requireActor(userId: string): Promise<AuthContext> {
   return loadAuthContext(userId);
+}
+
+function toMinistryDetail(ministry: MinistryDoc) {
+  return {
+    id: ministry._id as string,
+    code: ministry.code,
+    name: ministry.name,
+    sortOrder: ministry.sortOrder,
+    isActive: ministry.isActive,
+    responsibleUserId: (ministry.responsibleUserId as string | undefined) ?? null,
+    createdAt: new Date(ministry.createdAt),
+    updatedAt: new Date(ministry.updatedAt),
+  };
+}
+
+function toMinistryRow(
+  ministry: MinistryDoc,
+  usersById: Map<string, UserDoc>,
+) {
+  const responsible = ministry.responsibleUserId
+    ? usersById.get(ministry.responsibleUserId as string)
+    : undefined;
+
+  return {
+    ...toMinistryDetail(ministry),
+    responsibleEmail: responsible?.email ?? null,
+    responsibleDisplayName: responsible?.displayName ?? null,
+  };
+}
+
+function toAppUser(user: UserDoc) {
+  return {
+    id: user._id as string,
+    email: user.email,
+    displayName: user.displayName ?? null,
+    /** Clerk `user_…` id / Convex identity subject. */
+    clerkUserId: user.authSubject,
+    authSubject: user.authSubject,
+    isActive: user.isActive,
+    mustChangePassword: user.mustChangePassword,
+    personId: (user.personId as string | undefined) ?? null,
+    createdAt: new Date(user.createdAt),
+    updatedAt: new Date(user.updatedAt),
+  };
 }
 
 export async function listMinistriesForActor(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   assertCanView(actor, { type: "ministry" });
 
-  const db = getDb();
-  const rows = await db
-    .select({
-      id: ministries.id,
-      code: ministries.code,
-      name: ministries.name,
-      isActive: ministries.isActive,
-      sortOrder: ministries.sortOrder,
-      responsibleUserId: ministries.responsibleUserId,
-      responsibleEmail: users.email,
-      responsibleDisplayName: users.displayName,
-      createdAt: ministries.createdAt,
-      updatedAt: ministries.updatedAt,
-    })
-    .from(ministries)
-    .leftJoin(users, eq(ministries.responsibleUserId, users.id))
-    .orderBy(asc(ministries.sortOrder), asc(ministries.code));
+  const client = getConvexHttpClient();
+  const [ministries, users] = await Promise.all([
+    client.query(api.organization.listMinistries, {}),
+    client.query(api.organization.listUsers, {}),
+  ]);
+
+  const usersById = new Map(users.map((user) => [user._id as string, user]));
+  const rows = ministries.map((ministry) => toMinistryRow(ministry, usersById));
 
   if (isSuperadmin(actor)) {
     return rows;
@@ -72,17 +124,15 @@ export async function getMinistryForActor(actorUserId: string, ministryId: strin
   const actor = await requireActor(actorUserId);
   assertCanView(actor, { type: "ministry", id: ministryId });
 
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(ministries)
-    .where(eq(ministries.id, ministryId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const ministry = await client.query(api.organization.getMinistry, {
+    ministryId: ministryId as Id<"ministries">,
+  });
 
-  if (!row) {
+  if (!ministry) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ministerio no encontrado.");
   }
-  return row;
+  return toMinistryDetail(ministry);
 }
 
 export async function createMinistry(actorUserId: string, input: MinistryInput) {
@@ -94,35 +144,27 @@ export async function createMinistry(actorUserId: string, input: MinistryInput) 
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "Código humano inválido.");
   }
 
-  const db = getDb();
-  const existing = await db
-    .select({ id: ministries.id })
-    .from(ministries)
-    .where(eq(ministries.code, parsed.code))
-    .limit(1);
-  if (existing.length > 0) {
-    throw new DomainError(DomainErrorCode.CONFLICT, "Ya existe un ministerio con ese código.");
-  }
-
-  const [created] = await db
-    .insert(ministries)
-    .values({
+  const client = getConvexHttpClient();
+  const created = await client
+    .mutation(api.organization.createMinistry, {
       code: parsed.code,
       name: parsed.name,
       sortOrder: parsed.sortOrder,
       isActive: parsed.isActive,
     })
-    .returning();
+    .catch(mapConvexError);
+
+  const after = toMinistryDetail(created);
 
   await writeAuditLog({
     actorUserId,
     action: "ministry.create",
     entityType: "ministry",
-    entityId: created.id,
-    afterData: created,
+    entityId: after.id,
+    afterData: after,
   });
 
-  return created;
+  return after;
 }
 
 export async function updateMinistry(
@@ -133,47 +175,39 @@ export async function updateMinistry(
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "ministry.manage", { type: "ministry", id: ministryId });
 
-  const db = getDb();
-  const [before] = await db
-    .select()
-    .from(ministries)
-    .where(eq(ministries.id, ministryId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const before = await client.query(api.organization.getMinistry, {
+    ministryId: ministryId as Id<"ministries">,
+  });
   if (!before) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ministerio no encontrado.");
   }
 
   const parsed = ministryInputSchema.partial().parse(input);
-  if (parsed.code && parsed.code !== before.code) {
-    const clash = await db
-      .select({ id: ministries.id })
-      .from(ministries)
-      .where(eq(ministries.code, parsed.code))
-      .limit(1);
-    if (clash.length > 0) {
-      throw new DomainError(DomainErrorCode.CONFLICT, "Ya existe un ministerio con ese código.");
-    }
-  }
 
-  const [after] = await db
-    .update(ministries)
-    .set({
-      ...parsed,
-      updatedAt: new Date(),
+  const after = await client
+    .mutation(api.organization.updateMinistry, {
+      ministryId: ministryId as Id<"ministries">,
+      code: parsed.code,
+      name: parsed.name,
+      sortOrder: parsed.sortOrder,
+      isActive: parsed.isActive,
     })
-    .where(eq(ministries.id, ministryId))
-    .returning();
+    .catch(mapConvexError);
+
+  const beforeDetail = toMinistryDetail(before);
+  const afterDetail = toMinistryDetail(after);
 
   await writeAuditLog({
     actorUserId,
     action: "ministry.update",
     entityType: "ministry",
     entityId: ministryId,
-    beforeData: before,
-    afterData: after,
+    beforeData: beforeDetail,
+    afterData: afterDetail,
   });
 
-  return after;
+  return afterDetail;
 }
 
 export async function setMinistryActive(
@@ -184,37 +218,40 @@ export async function setMinistryActive(
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "ministry.manage", { type: "ministry", id: ministryId });
 
-  const db = getDb();
-  const [before] = await db
-    .select()
-    .from(ministries)
-    .where(eq(ministries.id, ministryId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const before = await client.query(api.organization.getMinistry, {
+    ministryId: ministryId as Id<"ministries">,
+  });
   if (!before) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ministerio no encontrado.");
   }
 
-  const [after] = await db
-    .update(ministries)
-    .set({ isActive, updatedAt: new Date() })
-    .where(eq(ministries.id, ministryId))
-    .returning();
+  const after = await client
+    .mutation(api.organization.setMinistryActive, {
+      ministryId: ministryId as Id<"ministries">,
+      isActive,
+    })
+    .catch(mapConvexError);
+
+  const beforeDetail = toMinistryDetail(before);
+  const afterDetail = toMinistryDetail(after);
 
   await writeAuditLog({
     actorUserId,
     action: isActive ? "ministry.activate" : "ministry.deactivate",
     entityType: "ministry",
     entityId: ministryId,
-    beforeData: before,
-    afterData: after,
+    beforeData: beforeDetail,
+    afterData: afterDetail,
   });
 
-  return after;
+  return afterDetail;
 }
 
 /**
- * Assigns Líder General: sets ministries.responsible_user_id and ensures an
- * active user_role_assignments row with role leader_general + ministry scope.
+ * Assigns Líder General: sets `ministries.responsibleUserId` and ensures an
+ * active `userRoleAssignments` row with role `leader_general` + ministry
+ * scope (see `convex/organization.ts` `assignMinistryResponsible`).
  */
 export async function assignMinistryResponsible(
   actorUserId: string,
@@ -224,201 +261,114 @@ export async function assignMinistryResponsible(
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "users.assign_roles", { type: "ministry", id: ministryId });
 
-  const db = getDb();
-  const [before] = await db
-    .select()
-    .from(ministries)
-    .where(eq(ministries.id, ministryId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const before = await client.query(api.organization.getMinistry, {
+    ministryId: ministryId as Id<"ministries">,
+  });
   if (!before) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ministerio no encontrado.");
   }
 
-  if (responsibleUserId) {
-    const [targetUser] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, responsibleUserId))
-      .limit(1);
-    if (!targetUser || !targetUser.isActive) {
-      throw new DomainError(DomainErrorCode.NOT_FOUND, "Usuario responsable no encontrado o inactivo.");
-    }
-  }
+  const after = await client
+    .mutation(api.organization.assignMinistryResponsible, {
+      ministryId: ministryId as Id<"ministries">,
+      responsibleUserId: responsibleUserId
+        ? (responsibleUserId as Id<"users">)
+        : null,
+      createdByUserId: actorUserId as Id<"users">,
+    })
+    .catch(mapConvexError);
 
-  const [leaderGeneralRole] = await db
-    .select()
-    .from(roles)
-    .where(eq(roles.code, "leader_general"))
-    .limit(1);
-  if (!leaderGeneralRole) {
-    throw new DomainError(
-      DomainErrorCode.CONFIGURATION_ERROR,
-      "Rol leader_general no está seedado.",
-    );
-  }
-
-  await db.transaction(async (tx) => {
-    // End previous leader_general assignment for this ministry
-    await tx
-      .update(userRoleAssignments)
-      .set({ endsAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(userRoleAssignments.ministryId, ministryId),
-          eq(userRoleAssignments.roleId, leaderGeneralRole.id),
-          isNull(userRoleAssignments.endsAt),
-        ),
-      );
-
-    if (responsibleUserId) {
-      await tx.insert(userRoleAssignments).values({
-        userId: responsibleUserId,
-        roleId: leaderGeneralRole.id,
-        ministryId,
-        createdByUserId: actorUserId,
-      });
-    }
-
-    await tx
-      .update(ministries)
-      .set({
-        responsibleUserId,
-        updatedAt: new Date(),
-      })
-      .where(eq(ministries.id, ministryId));
-  });
-
-  const [after] = await db
-    .select()
-    .from(ministries)
-    .where(eq(ministries.id, ministryId))
-    .limit(1);
+  const beforeDetail = toMinistryDetail(before);
+  const afterDetail = toMinistryDetail(after);
 
   await writeAuditLog({
     actorUserId,
     action: "ministry.assign_leader_general",
     entityType: "ministry",
     entityId: ministryId,
-    beforeData: before,
-    afterData: after,
+    beforeData: beforeDetail,
+    afterData: afterDetail,
     reason: responsibleUserId
       ? "Asignación de Líder General"
       : "Remoción de Líder General",
   });
 
-  return after;
+  return afterDetail;
 }
 
 export async function listNetworksForActor(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   assertCanView(actor, { type: "network" });
 
-  const db = getDb();
-  return db.select().from(networks).orderBy(asc(networks.sortOrder));
+  const client = getConvexHttpClient();
+  const rows = await client.query(api.organization.listNetworks, {});
+
+  return rows.map((row) => ({
+    id: row._id as string,
+    code: row.code,
+    name: row.name,
+    isActive: row.isActive,
+    isConfigurable: row.isConfigurable,
+    sortOrder: row.sortOrder,
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+  }));
 }
 
 export async function listUsersForAdmin(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "users.read", { type: "user" });
 
-  const db = getDb();
-  const rows = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      displayName: users.displayName,
-      isActive: users.isActive,
-      personId: users.personId,
-      createdAt: users.createdAt,
-    })
-    .from(users)
-    .orderBy(asc(users.email));
+  const client = getConvexHttpClient();
+  const rows = await client.query(api.organization.listUsers, {});
 
-  return rows;
+  return rows.map((row) => ({
+    id: row._id as string,
+    email: row.email,
+    displayName: row.displayName ?? null,
+    isActive: row.isActive,
+    personId: (row.personId as string | undefined) ?? null,
+    createdAt: new Date(row.createdAt),
+  }));
 }
 
 export async function listUserRoleAssignments(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "users.read", { type: "user" });
 
-  const db = getDb();
-  return db
-    .select({
-      id: userRoleAssignments.id,
-      userId: userRoleAssignments.userId,
-      roleCode: roles.code,
-      ministryId: userRoleAssignments.ministryId,
-      networkId: userRoleAssignments.networkId,
-      startsAt: userRoleAssignments.startsAt,
-      endsAt: userRoleAssignments.endsAt,
-      userEmail: users.email,
-    })
-    .from(userRoleAssignments)
-    .innerJoin(roles, eq(userRoleAssignments.roleId, roles.id))
-    .innerJoin(users, eq(userRoleAssignments.userId, users.id))
-    .orderBy(asc(users.email));
+  const client = getConvexHttpClient();
+  const rows = await client.query(api.organization.listUserRoleAssignments, {});
+
+  return rows.map((row) => ({
+    id: row._id as string,
+    userId: row.userId as string,
+    roleCode: row.roleCode,
+    ministryId: (row.ministryId as string | undefined) ?? null,
+    networkId: (row.networkId as string | undefined) ?? null,
+    startsAt: new Date(row.startsAt),
+    endsAt: row.endsAt ? new Date(row.endsAt) : null,
+    userEmail: row.userEmail,
+  }));
 }
 
 /**
- * Ensures app `users` row exists for the authenticated Auth user (idempotent).
+ * Ensures the Convex `users` profile exists for the authenticated identity
+ * (idempotent — see `convex/users.ts` `ensureProfile`).
  */
 export async function ensureAppUserProfile(input: {
   clerkUserId: string;
   email: string;
   displayName?: string | null;
 }) {
-  const db = getDb();
-
-  const [byClerk] = await db
-    .select()
-    .from(users)
-    .where(eq(users.clerkUserId, input.clerkUserId))
-    .limit(1);
-  if (byClerk) {
-    if (
-      byClerk.email !== input.email ||
-      (input.displayName && !byClerk.displayName)
-    ) {
-      const [updated] = await db
-        .update(users)
-        .set({
-          email: input.email,
-          displayName: input.displayName ?? byClerk.displayName,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, byClerk.id))
-        .returning();
-      return updated;
-    }
-    return byClerk;
-  }
-
-  const [byEmail] = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, input.email))
-    .limit(1);
-  if (byEmail) {
-    const [linked] = await db
-      .update(users)
-      .set({
-        clerkUserId: input.clerkUserId,
-        displayName: input.displayName ?? byEmail.displayName,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, byEmail.id))
-      .returning();
-    return linked;
-  }
-
-  const [created] = await db
-    .insert(users)
-    .values({
-      clerkUserId: input.clerkUserId,
+  const client = getConvexHttpClient();
+  const profile = await client
+    .mutation(api.users.ensureProfile, {
+      authSubject: input.clerkUserId,
       email: input.email,
-      displayName: input.displayName ?? null,
-      isActive: true,
+      displayName: input.displayName ?? undefined,
     })
-    .returning();
-  return created;
+    .catch(mapConvexError);
+
+  return toAppUser(profile);
 }

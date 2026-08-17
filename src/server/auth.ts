@@ -1,15 +1,14 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
 
-import { getDb } from "@/db/client";
-import { users } from "@/db/schema";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
+import { hasConvexPublicConfig } from "@/lib/env";
 import { ensureAppUserProfile } from "@/modules/organization";
+import { api, getConvexHttpClient } from "@/server/convex";
 
 export type SessionUser = {
-  /** App `users.id` (UUID). */
+  /** Convex `users` document id (`_id`), as a string. */
   id: string;
-  /** Clerk `user_…` id. */
+  /** Clerk `user_…` id — stored as Convex `users.authSubject`. */
   clerkUserId: string;
   email: string | undefined;
 };
@@ -29,19 +28,17 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     return null;
   }
 
-  if (!process.env.DATABASE_URL) {
+  if (!hasConvexPublicConfig()) {
     return null;
   }
 
-  const db = getDb();
-  const [byClerk] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.clerkUserId, userId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const byAuthSubject = await client.query(api.users.getByAuthSubject, {
+    authSubject: userId,
+  });
 
-  if (byClerk) {
-    return { id: byClerk.id, clerkUserId: userId, email };
+  if (byAuthSubject) {
+    return { id: byAuthSubject._id, clerkUserId: userId, email };
   }
 
   const profile = await ensureAppUserProfile({

@@ -1,13 +1,10 @@
 import { auth as clerkAuth } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { filterSecondaryGroups } from "@/components/layout/nav-config";
 import { PasswordGateShell } from "@/components/layout/password-gate-shell";
-import { getDb } from "@/db/client";
-import { users } from "@/db/schema";
 import { hasClerkPublicConfig } from "@/lib/env";
 import { isPasswordChangeAllowedPath } from "@/lib/safe-redirect";
 import {
@@ -18,6 +15,8 @@ import {
 import { ensureAppUserProfile } from "@/modules/organization";
 import { signOut } from "@/server/actions/auth";
 import { getSessionUser } from "@/server/auth";
+import { api, getConvexHttpClient } from "@/server/convex";
+import type { Id } from "../../../convex/_generated/dataModel";
 
 export const dynamic = "force-dynamic";
 
@@ -53,14 +52,9 @@ export default async function AuthenticatedLayout({
     });
   }
 
-  const [profile] = await getDb()
-    .select({
-      mustChangePassword: users.mustChangePassword,
-      isActive: users.isActive,
-    })
-    .from(users)
-    .where(eq(users.id, user.id))
-    .limit(1);
+  const profile = await getConvexHttpClient().query(api.users.getById, {
+    userId: user.id as Id<"users">,
+  });
 
   if (profile && profile.isActive === false) {
     redirect("/login?error=inactive");
