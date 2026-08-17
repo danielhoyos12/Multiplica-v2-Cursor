@@ -20,6 +20,7 @@ import type * as lib_ids from "../lib/ids.js";
 import type * as lib_time from "../lib/time.js";
 import type * as organization from "../organization.js";
 import type * as persons from "../persons.js";
+import type * as reporting from "../reporting.js";
 import type * as seed from "../seed.js";
 import type * as send from "../send.js";
 import type * as transfers from "../transfers.js";
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   "lib/time": typeof lib_time;
   organization: typeof organization;
   persons: typeof persons;
+  reporting: typeof reporting;
   seed: typeof seed;
   send: typeof send;
   transfers: typeof transfers;

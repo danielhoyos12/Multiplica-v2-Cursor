@@ -139,7 +139,7 @@ async function logIntakeEvent(
   });
 }
 
-async function getCurrentOrgForPerson(
+export async function getCurrentOrgForPerson(
   ctx: QueryCtx | MutationCtx,
   personId: Id<"persons">,
 ): Promise<{
