@@ -1,17 +1,5 @@
-import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
-
-import { getDb } from "@/db/client";
-import {
-  cellAttendance,
-  cellAttendanceSessions,
-  cellMemberships,
-  cells,
-  districts,
-  ministries,
-  networks,
-  personOrganizationHistory,
-  persons,
-} from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { mapConvexError } from "@/lib/convex-errors";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
 import {
@@ -26,8 +14,9 @@ import {
   type NetworkCode,
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
+import { api, getConvexHttpClient } from "@/server/convex";
 
-import { formatCellSchedule } from "./schedule";
+import { formatCellSchedule, type DayOfWeek } from "./schedule";
 import {
   createCellInputSchema,
   saveAttendanceInputSchema,
@@ -41,9 +30,14 @@ async function requireActor(userId: string): Promise<AuthContext> {
   return loadAuthContext(userId);
 }
 
+async function listNetworks() {
+  const client = getConvexHttpClient();
+  return client.query(api.organization.listNetworks, {});
+}
+
 async function loadNetwork(networkId: string) {
-  const db = getDb();
-  const [row] = await db.select().from(networks).where(eq(networks.id, networkId)).limit(1);
+  const networks = await listNetworks();
+  const row = networks.find((n) => (n._id as string) === networkId);
   if (!row) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Red no encontrada.");
   }
@@ -51,8 +45,10 @@ async function loadNetwork(networkId: string) {
 }
 
 async function loadMinistry(ministryId: string) {
-  const db = getDb();
-  const [row] = await db.select().from(ministries).where(eq(ministries.id, ministryId)).limit(1);
+  const client = getConvexHttpClient();
+  const row = await client.query(api.organization.getMinistry, {
+    ministryId: ministryId as Id<"ministries">,
+  });
   if (!row || !row.isActive) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ministerio no disponible.");
   }
@@ -60,27 +56,20 @@ async function loadMinistry(ministryId: string) {
 }
 
 async function currentPersonOrg(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-    })
-    .from(personOrganizationHistory)
-    .where(
-      and(
-        eq(personOrganizationHistory.personId, personId),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .orderBy(desc(personOrganizationHistory.effectiveFrom))
-    .limit(1);
-  return row ?? null;
+  const client = getConvexHttpClient();
+  const org = await client.query(api.persons.getCurrentOrg, {
+    personId: personId as Id<"persons">,
+  });
+  if (!org) return null;
+  return {
+    ministryId: (org.ministryId as string | undefined) ?? null,
+    networkId: (org.networkId as string | undefined) ?? null,
+  };
 }
 
 async function getCellOrThrow(cellId: string) {
-  const db = getDb();
-  const [row] = await db.select().from(cells).where(eq(cells.id, cellId)).limit(1);
+  const client = getConvexHttpClient();
+  const row = await client.query(api.cells.getById, { cellId: cellId as Id<"cells"> });
   if (!row) {
     throw new DomainError(DomainErrorCode.CELL_NOT_FOUND, "Célula no encontrada.");
   }
@@ -110,19 +99,13 @@ async function countActiveCellsForResponsible(
   responsiblePersonId: string,
   excludeCellId?: string,
 ) {
-  const db = getDb();
-  const conditions = [
-    eq(cells.responsiblePersonId, responsiblePersonId),
-    sql`${cells.status} <> 'closed'`,
-  ];
-  if (excludeCellId) {
-    conditions.push(sql`${cells.id} <> ${excludeCellId}::uuid`);
-  }
-  const rows = await db
-    .select({ id: cells.id, type: cells.type })
-    .from(cells)
-    .where(and(...conditions));
-  return rows;
+  const client = getConvexHttpClient();
+  const rows = await client.query(api.cells.listByResponsible, {
+    responsiblePersonId: responsiblePersonId as Id<"persons">,
+  });
+  return rows
+    .filter((c) => c.status !== "closed" && (c._id as string) !== excludeCellId)
+    .map((c) => ({ id: c._id as string, type: c.type }));
 }
 
 async function assertResponsibleCapacity(
@@ -166,6 +149,38 @@ async function assertResponsibleNetworkCompat(
   }
 }
 
+function toCellRecord(cell: {
+  _id: Id<"cells">;
+  code?: string;
+  name: string;
+  type: "evangelistic" | "twelve";
+  ministryId: Id<"ministries">;
+  networkId: Id<"networks">;
+  responsiblePersonId?: Id<"persons">;
+  responsibleUserId?: Id<"users">;
+  dayOfWeek?: string;
+  startTime?: string;
+  timezone: string;
+  address?: string;
+  districtId?: Id<"districts">;
+  status: "active" | "inactive" | "closed";
+  openedAt: number;
+  closedAt?: number;
+}) {
+  return {
+    ...cell,
+    id: cell._id as string,
+    code: cell.code ?? null,
+    ministryId: cell.ministryId as string,
+    networkId: cell.networkId as string,
+    responsiblePersonId: (cell.responsiblePersonId as string | undefined) ?? null,
+    districtId: (cell.districtId as string | undefined) ?? null,
+    dayOfWeek: cell.dayOfWeek ?? null,
+    startTime: cell.startTime ?? null,
+    address: cell.address ?? null,
+  };
+}
+
 export async function createCell(actorUserId: string, raw: CreateCellInput) {
   const actor = await requireActor(actorUserId);
   const input = createCellInputSchema.parse(raw);
@@ -200,30 +215,33 @@ export async function createCell(actorUserId: string, raw: CreateCellInput) {
     }
   }
 
-  const db = getDb();
-  const [cell] = await db
-    .insert(cells)
-    .values({
+  const client = getConvexHttpClient();
+  const cell = await client
+    .mutation(api.cells.create, {
       name: input.name.trim(),
-      code: input.code?.trim() ? input.code.trim() : null,
+      code: input.code?.trim() ? input.code.trim() : undefined,
       type: input.type,
-      ministryId: input.ministryId,
-      networkId: input.networkId,
-      responsiblePersonId: input.responsiblePersonId ?? null,
+      ministryId: input.ministryId as Id<"ministries">,
+      networkId: input.networkId as Id<"networks">,
+      responsiblePersonId: input.responsiblePersonId
+        ? (input.responsiblePersonId as Id<"persons">)
+        : undefined,
       dayOfWeek: input.dayOfWeek,
       startTime: input.startTime,
       timezone: input.timezone || "America/Lima",
-      address: input.address?.trim() || null,
-      districtId: input.districtId && input.districtId !== "" ? input.districtId : null,
-      status: "active",
+      address: input.address?.trim() || undefined,
+      districtId:
+        input.districtId && input.districtId !== ""
+          ? (input.districtId as Id<"districts">)
+          : undefined,
     })
-    .returning();
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
     action: "cell.created",
     entityType: "cell",
-    entityId: cell.id,
+    entityId: cell._id,
     afterData: {
       name: cell.name,
       type: cell.type,
@@ -235,7 +253,7 @@ export async function createCell(actorUserId: string, raw: CreateCellInput) {
     metadata: { source: "phase3" },
   });
 
-  return cell;
+  return toCellRecord(cell);
 }
 
 export async function updateCell(
@@ -248,7 +266,7 @@ export async function updateCell(
   assertCanMutate(actor, "cells.update", {
     type: "cell",
     id: cellId,
-    ministryId: cell.ministryId,
+    ministryId: cell.ministryId as string,
   });
 
   if (cell.status === "closed") {
@@ -256,49 +274,53 @@ export async function updateCell(
   }
 
   const input = updateCellInputSchema.parse(raw);
-  const db = getDb();
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
 
-  if (input.name !== undefined) updates.name = input.name.trim();
-  if (input.code !== undefined) updates.code = input.code.trim() ? input.code.trim() : null;
+  let nextNetworkId: string | undefined;
   if (input.networkId !== undefined) {
     const network = await assertNetworkActiveForCapture(input.networkId);
-    updates.networkId = network.id;
-  }
-  if (input.dayOfWeek !== undefined) updates.dayOfWeek = input.dayOfWeek;
-  if (input.startTime !== undefined) updates.startTime = input.startTime;
-  if (input.timezone !== undefined) updates.timezone = input.timezone;
-  if (input.address !== undefined) updates.address = input.address.trim() || null;
-  if (input.districtId !== undefined) {
-    updates.districtId =
-      input.districtId && input.districtId !== "" ? input.districtId : null;
-  }
-  if (input.status !== undefined && input.status !== "closed") {
-    updates.status = input.status;
-  }
-  if (input.responsiblePersonId !== undefined) {
-    const responsibleId = input.responsiblePersonId || null;
-    if (responsibleId) {
-      await assertResponsibleCapacity(responsibleId, cell.type, cellId);
-      const networkId = (updates.networkId as string | undefined) ?? cell.networkId;
-      const network = await loadNetwork(networkId);
-      await assertResponsibleNetworkCompat(responsibleId, network.code as NetworkCode);
-      const org = await currentPersonOrg(responsibleId);
-      if (!org?.ministryId || org.ministryId !== cell.ministryId) {
-        throw new DomainError(
-          DomainErrorCode.CELL_NOT_AUTHORIZED,
-          "El responsable debe pertenecer al mismo Ministerio.",
-        );
-      }
-    }
-    updates.responsiblePersonId = responsibleId;
+    nextNetworkId = network._id as string;
   }
 
-  const [after] = await db
-    .update(cells)
-    .set(updates)
-    .where(eq(cells.id, cellId))
-    .returning();
+  if (input.responsiblePersonId !== undefined && input.responsiblePersonId) {
+    await assertResponsibleCapacity(input.responsiblePersonId, cell.type, cellId);
+    const effectiveNetworkId = nextNetworkId ?? (cell.networkId as string);
+    const network = await loadNetwork(effectiveNetworkId);
+    await assertResponsibleNetworkCompat(input.responsiblePersonId, network.code as NetworkCode);
+    const org = await currentPersonOrg(input.responsiblePersonId);
+    if (!org?.ministryId || org.ministryId !== (cell.ministryId as string)) {
+      throw new DomainError(
+        DomainErrorCode.CELL_NOT_AUTHORIZED,
+        "El responsable debe pertenecer al mismo Ministerio.",
+      );
+    }
+  }
+
+  const client = getConvexHttpClient();
+  const after = await client
+    .mutation(api.cells.update, {
+      cellId: cellId as Id<"cells">,
+      name: input.name !== undefined ? input.name.trim() : undefined,
+      code: input.code !== undefined ? (input.code.trim() ? input.code.trim() : "") : undefined,
+      networkId: input.networkId !== undefined ? (input.networkId as Id<"networks">) : undefined,
+      responsiblePersonId:
+        input.responsiblePersonId !== undefined
+          ? input.responsiblePersonId
+            ? (input.responsiblePersonId as Id<"persons">)
+            : undefined
+          : undefined,
+      dayOfWeek: input.dayOfWeek,
+      startTime: input.startTime,
+      timezone: input.timezone,
+      address: input.address !== undefined ? input.address.trim() || undefined : undefined,
+      districtId:
+        input.districtId !== undefined
+          ? input.districtId && input.districtId !== ""
+            ? (input.districtId as Id<"districts">)
+            : undefined
+          : undefined,
+      status: input.status !== undefined && input.status !== "closed" ? input.status : undefined,
+    })
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
@@ -321,7 +343,7 @@ export async function updateCell(
     },
   });
 
-  return after;
+  return toCellRecord(after);
 }
 
 export async function closeCell(actorUserId: string, cellId: string) {
@@ -330,30 +352,13 @@ export async function closeCell(actorUserId: string, cellId: string) {
   assertCanMutate(actor, "cells.update", {
     type: "cell",
     id: cellId,
-    ministryId: cell.ministryId,
+    ministryId: cell.ministryId as string,
   });
 
-  const db = getDb();
-  const [{ activeMembers }] = await db
-    .select({ activeMembers: count() })
-    .from(cellMemberships)
-    .where(
-      and(eq(cellMemberships.cellId, cellId), eq(cellMemberships.status, "active")),
-    );
-
-  if (Number(activeMembers) > 0) {
-    throw new DomainError(
-      DomainErrorCode.CELL_HAS_ACTIVE_MEMBERS,
-      "No se puede cerrar la célula mientras tenga miembros activos. Reasigna o retira primero.",
-      { activeMembers: Number(activeMembers) },
-    );
-  }
-
-  const [after] = await db
-    .update(cells)
-    .set({ status: "closed", closedAt: new Date(), updatedAt: new Date() })
-    .where(eq(cells.id, cellId))
-    .returning();
+  const client = getConvexHttpClient();
+  const after = await client
+    .mutation(api.cells.close, { cellId: cellId as Id<"cells"> })
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
@@ -363,7 +368,7 @@ export async function closeCell(actorUserId: string, cellId: string) {
     metadata: { ministryId: cell.ministryId },
   });
 
-  return after;
+  return toCellRecord(after);
 }
 
 /** Phase 4: real conversion lives in leadership module. */
@@ -385,98 +390,6 @@ export type CellListFilters = {
   pageSize?: number;
 };
 
-export async function listCellsForActor(actorUserId: string, filters: CellListFilters = {}) {
-  const actor = await requireActor(actorUserId);
-  assertCanMutate(actor, "cells.read", { type: "cell" });
-
-  const page = Math.max(1, filters.page ?? 1);
-  const pageSize = Math.min(50, Math.max(1, filters.pageSize ?? 20));
-  const offset = (page - 1) * pageSize;
-  const db = getDb();
-  const conditions = [];
-
-  if (!isSuperadmin(actor)) {
-    if (actor.ministryIds.length === 0) {
-      return {
-        rows: [],
-        total: 0,
-        page,
-        pageSize,
-        stats: emptyCellStats(),
-      };
-    }
-    conditions.push(
-      sql`${cells.ministryId} in (${sql.join(
-        actor.ministryIds.map((id) => sql`${id}::uuid`),
-        sql`, `,
-      )})`,
-    );
-  }
-
-  if (filters.ministryId) {
-    if (!canAccessMinistry(actor, filters.ministryId) && !isSuperadmin(actor)) {
-      throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Ministerio fuera de alcance.");
-    }
-    conditions.push(eq(cells.ministryId, filters.ministryId));
-  }
-  if (filters.networkId) conditions.push(eq(cells.networkId, filters.networkId));
-  if (filters.status) conditions.push(eq(cells.status, filters.status));
-  if (filters.type) conditions.push(eq(cells.type, filters.type));
-  if (filters.q?.trim()) {
-    const q = `%${filters.q.trim()}%`;
-    conditions.push(or(ilike(cells.name, q), ilike(cells.code, q))!);
-  }
-
-  const whereExpr = conditions.length ? and(...conditions) : undefined;
-
-  const [{ total }] = await db.select({ total: count() }).from(cells).where(whereExpr);
-
-  const rows = await db
-    .select({
-      id: cells.id,
-      code: cells.code,
-      name: cells.name,
-      type: cells.type,
-      status: cells.status,
-      dayOfWeek: cells.dayOfWeek,
-      startTime: cells.startTime,
-      ministryId: cells.ministryId,
-      ministryName: ministries.name,
-      ministryCode: ministries.code,
-      networkId: cells.networkId,
-      networkName: networks.name,
-      responsiblePersonId: cells.responsiblePersonId,
-      responsibleFirstName: persons.firstName,
-      responsibleLastName: persons.lastName,
-      activeMembers: sql<number>`(
-        select count(*)::int from cell_memberships cm
-        where cm.cell_id = cells.id and cm.status = 'active'
-      )`,
-    })
-    .from(cells)
-    .innerJoin(ministries, eq(cells.ministryId, ministries.id))
-    .innerJoin(networks, eq(cells.networkId, networks.id))
-    .leftJoin(persons, eq(cells.responsiblePersonId, persons.id))
-    .where(whereExpr)
-    .orderBy(asc(cells.name))
-    .limit(pageSize)
-    .offset(offset);
-
-  return {
-    rows: rows.map((row) => ({
-      ...row,
-      scheduleLabel: formatCellSchedule(row.dayOfWeek, row.startTime),
-      responsibleName: row.responsibleFirstName
-        ? formatFullName(row.responsibleFirstName, row.responsibleLastName ?? ".")
-        : null,
-    })),
-    total: Number(total),
-    page,
-    pageSize,
-    stats: await computeCellStats(actor),
-  };
-}
-
 function emptyCellStats() {
   return {
     total: 0,
@@ -487,119 +400,177 @@ function emptyCellStats() {
   };
 }
 
-async function computeCellStats(actor: AuthContext) {
-  const db = getDb();
-  const scope =
-    isSuperadmin(actor)
-      ? sql`true`
-      : actor.ministryIds.length === 0
-        ? sql`false`
-        : sql`${cells.ministryId} in (${sql.join(
-            actor.ministryIds.map((id) => sql`${id}::uuid`),
-            sql`, `,
-          )})`;
+type CellRow = {
+  _id: Id<"cells">;
+  code?: string;
+  name: string;
+  type: "evangelistic" | "twelve";
+  status: "active" | "inactive" | "closed";
+  dayOfWeek?: string;
+  startTime?: string;
+  ministryId: Id<"ministries">;
+  networkId: Id<"networks">;
+  responsiblePersonId?: Id<"persons">;
+};
 
-  const [{ total }] = await db.select({ total: count() }).from(cells).where(scope);
-  const [{ active }] = await db
-    .select({ active: count() })
-    .from(cells)
-    .where(and(scope, eq(cells.status, "active")));
-  const [{ evangelistic }] = await db
-    .select({ evangelistic: count() })
-    .from(cells)
-    .where(and(scope, eq(cells.type, "evangelistic")));
-  const [{ twelve }] = await db
-    .select({ twelve: count() })
-    .from(cells)
-    .where(and(scope, eq(cells.type, "twelve")));
+function scopeCells(actor: AuthContext, rows: CellRow[]): CellRow[] {
+  if (isSuperadmin(actor)) return rows;
+  if (actor.ministryIds.length === 0) return [];
+  return rows.filter((c) => actor.ministryIds.includes(c.ministryId as string));
+}
 
-  const avgSource = await db
-    .select({
-      sessionId: cellAttendanceSessions.id,
-      present: sql<number>`count(*) filter (where ${cellAttendance.status} = 'present')`,
-      total: sql<number>`count(${cellAttendance.id})`,
-    })
-    .from(cellAttendanceSessions)
-    .innerJoin(cells, eq(cellAttendanceSessions.cellId, cells.id))
-    .leftJoin(cellAttendance, eq(cellAttendance.sessionId, cellAttendanceSessions.id))
-    .where(scope)
-    .groupBy(cellAttendanceSessions.id, cellAttendanceSessions.sessionDate)
-    .orderBy(desc(cellAttendanceSessions.sessionDate))
-    .limit(20);
+async function computeCellStats(actor: AuthContext, allRows: CellRow[]) {
+  const scoped = scopeCells(actor, allRows);
+  const total = scoped.length;
+  const active = scoped.filter((c) => c.status === "active").length;
+  const evangelistic = scoped.filter((c) => c.type === "evangelistic").length;
+  const twelve = scoped.filter((c) => c.type === "twelve").length;
 
-  const pcts = avgSource
-    .map((row) => {
-      const total = Number(row.total);
-      if (!total) return null;
-      return (Number(row.present) / total) * 100;
-    })
-    .filter((v): v is number => v !== null);
+  let recentAttendanceAvg: number | null = null;
+  if (scoped.length > 0) {
+    const client = getConvexHttpClient();
+    recentAttendanceAvg = await client.query(api.cells.recentAttendanceAvg, {
+      cellIds: scoped.map((c) => c._id),
+      limit: 20,
+    });
+  }
 
-  const recentAttendanceAvg = pcts.length
-    ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length)
-    : null;
+  return { total, active, evangelistic, twelve, recentAttendanceAvg };
+}
+
+export async function listCellsForActor(actorUserId: string, filters: CellListFilters = {}) {
+  const actor = await requireActor(actorUserId);
+  assertCanMutate(actor, "cells.read", { type: "cell" });
+
+  const page = Math.max(1, filters.page ?? 1);
+  const pageSize = Math.min(50, Math.max(1, filters.pageSize ?? 20));
+  const offset = (page - 1) * pageSize;
+
+  const client = getConvexHttpClient();
+  const allRows = await client.query(api.cells.listAll, {});
+
+  if (!isSuperadmin(actor) && actor.ministryIds.length === 0) {
+    return {
+      rows: [],
+      total: 0,
+      page,
+      pageSize,
+      stats: emptyCellStats(),
+    };
+  }
+
+  if (filters.ministryId) {
+    if (!canAccessMinistry(actor, filters.ministryId) && !isSuperadmin(actor)) {
+      throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Ministerio fuera de alcance.");
+    }
+  }
+
+  const scoped = scopeCells(actor, allRows);
+  let filtered = scoped;
+  if (filters.ministryId) {
+    filtered = filtered.filter((c) => (c.ministryId as string) === filters.ministryId);
+  }
+  if (filters.networkId) {
+    filtered = filtered.filter((c) => (c.networkId as string) === filters.networkId);
+  }
+  if (filters.status) filtered = filtered.filter((c) => c.status === filters.status);
+  if (filters.type) filtered = filtered.filter((c) => c.type === filters.type);
+  if (filters.q?.trim()) {
+    const q = filters.q.trim().toLowerCase();
+    filtered = filtered.filter(
+      (c) => c.name.toLowerCase().includes(q) || (c.code ?? "").toLowerCase().includes(q),
+    );
+  }
+
+  filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+  const total = filtered.length;
+  const pageRows = filtered.slice(offset, offset + pageSize);
+
+  const [ministries, networks, activeMemberCounts] = await Promise.all([
+    client.query(api.organization.listMinistries, {}),
+    client.query(api.organization.listNetworks, {}),
+    client.query(api.cells.countActiveMembers, { cellIds: pageRows.map((r) => r._id) }),
+  ]);
+  const ministryById = new Map(ministries.map((m) => [m._id as string, m]));
+  const networkById = new Map(networks.map((n) => [n._id as string, n]));
+  const activeMembersById = new Map(
+    activeMemberCounts.map((c) => [c.cellId as string, c.count]),
+  );
+
+  const responsibleIds = pageRows
+    .map((r) => r.responsiblePersonId)
+    .filter((id): id is Id<"persons"> => Boolean(id));
+  const responsiblePersons =
+    responsibleIds.length > 0
+      ? await client.query(api.persons.getManyByIds, { personIds: responsibleIds })
+      : [];
+  const responsibleById = new Map(responsiblePersons.map((p) => [p._id as string, p]));
+
+  const rows = pageRows.map((row) => {
+    const ministry = ministryById.get(row.ministryId as string);
+    const network = networkById.get(row.networkId as string);
+    const responsible = row.responsiblePersonId
+      ? responsibleById.get(row.responsiblePersonId as string)
+      : undefined;
+    return {
+      id: row._id as string,
+      code: row.code ?? null,
+      name: row.name,
+      type: row.type,
+      status: row.status,
+      dayOfWeek: row.dayOfWeek ?? null,
+      startTime: row.startTime ?? null,
+      ministryId: row.ministryId as string,
+      ministryName: ministry?.name ?? null,
+      ministryCode: ministry?.code ?? null,
+      networkId: row.networkId as string,
+      networkName: network?.name ?? null,
+      responsiblePersonId: (row.responsiblePersonId as string | undefined) ?? null,
+      responsibleName: responsible
+        ? formatFullName(responsible.firstName, responsible.lastName)
+        : null,
+      activeMembers: activeMembersById.get(row._id as string) ?? 0,
+      scheduleLabel:
+        row.dayOfWeek && row.startTime
+          ? formatCellSchedule(row.dayOfWeek as DayOfWeek, row.startTime)
+          : "Sin horario",
+    };
+  });
 
   return {
-    total: Number(total),
-    active: Number(active),
-    evangelistic: Number(evangelistic),
-    twelve: Number(twelve),
-    recentAttendanceAvg,
+    rows,
+    total,
+    page,
+    pageSize,
+    stats: await computeCellStats(actor, allRows),
   };
 }
 
 export async function getCellDetail(actorUserId: string, cellId: string) {
   const actor = await requireActor(actorUserId);
-  const cell = await getCellOrThrow(cellId);
-  assertCellReadable(actor, cell.ministryId);
+  const client = getConvexHttpClient();
+  const detail = await client.query(api.cells.getDetail, { cellId: cellId as Id<"cells"> });
+  if (!detail) {
+    throw new DomainError(DomainErrorCode.CELL_NOT_FOUND, "Célula no encontrada.");
+  }
+  assertCellReadable(actor, detail.cell.ministryId as string);
 
-  const db = getDb();
-  const [ministry] = await db
-    .select()
-    .from(ministries)
-    .where(eq(ministries.id, cell.ministryId))
-    .limit(1);
-  const [network] = await db
-    .select()
-    .from(networks)
-    .where(eq(networks.id, cell.networkId))
-    .limit(1);
-  const [district] = cell.districtId
-    ? await db.select().from(districts).where(eq(districts.id, cell.districtId)).limit(1)
-    : [null];
-  const [responsible] = cell.responsiblePersonId
-    ? await db
-        .select()
-        .from(persons)
-        .where(eq(persons.id, cell.responsiblePersonId))
-        .limit(1)
-    : [null];
+  const [ministry, networks, districts, responsible] = await Promise.all([
+    client.query(api.organization.getMinistry, {
+      ministryId: detail.cell.ministryId,
+    }),
+    listNetworks(),
+    client.query(api.foundation.listActiveDistricts, {}),
+    detail.cell.responsiblePersonId
+      ? client.query(api.persons.getById, { personId: detail.cell.responsiblePersonId })
+      : Promise.resolve(null),
+  ]);
+  const network = networks.find((n) => n._id === detail.cell.networkId) ?? null;
+  const district = detail.cell.districtId
+    ? districts.find((d) => d._id === detail.cell.districtId) ?? null
+    : null;
 
-  const members = await db
-    .select({
-      membershipId: cellMemberships.id,
-      personId: cellMemberships.personId,
-      status: cellMemberships.status,
-      joinedAt: cellMemberships.joinedAt,
-      leftAt: cellMemberships.leftAt,
-      leaveReason: cellMemberships.leaveReason,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-      phone: persons.phone,
-    })
-    .from(cellMemberships)
-    .innerJoin(persons, eq(cellMemberships.personId, persons.id))
-    .where(eq(cellMemberships.cellId, cellId))
-    .orderBy(desc(cellMemberships.joinedAt));
-
-  const activeMembers = members.filter((m) => m.status === "active");
-
-  const sessions = await db
-    .select()
-    .from(cellAttendanceSessions)
-    .where(eq(cellAttendanceSessions.cellId, cellId))
-    .orderBy(desc(cellAttendanceSessions.sessionDate))
-    .limit(8);
+  const activeMembers = detail.members.filter((m) => m.status === "active");
 
   let lastSessionStats: {
     sessionId: string;
@@ -609,22 +580,34 @@ export async function getCellDetail(actorUserId: string, cellId: string) {
     pct: number | null;
   } | null = null;
 
-  if (sessions[0]) {
-    const stats = await sessionAttendanceCounts(sessions[0].id);
+  const sessionIds = detail.recentSessions.map((s) => s._id);
+  const counts =
+    sessionIds.length > 0
+      ? await client.query(api.cells.sessionAttendanceCounts, { sessionIds })
+      : [];
+  const countsBySession = new Map(counts.map((c) => [c.sessionId as string, c]));
+
+  if (detail.recentSessions[0]) {
+    const first = detail.recentSessions[0];
+    const stats = countsBySession.get(first._id as string) ?? { present: 0, total: 0 };
     lastSessionStats = {
-      sessionId: sessions[0].id,
-      sessionDate: String(sessions[0].sessionDate),
-      ...stats,
+      sessionId: first._id as string,
+      sessionDate: first.sessionDate,
+      present: stats.present,
+      total: stats.total,
+      pct: stats.total === 0 ? null : Math.round((stats.present / stats.total) * 100),
     };
   }
 
-  const last4 = sessions.slice(0, 4);
+  const last4 = detail.recentSessions.slice(0, 4);
   let avgLast4: number | null = null;
   if (last4.length > 0) {
     const pcts: number[] = [];
     for (const s of last4) {
-      const st = await sessionAttendanceCounts(s.id);
-      if (st.pct !== null) pcts.push(st.pct);
+      const stats = countsBySession.get(s._id as string);
+      if (stats && stats.total > 0) {
+        pcts.push((stats.present / stats.total) * 100);
+      }
     }
     if (pcts.length) {
       avgLast4 = Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
@@ -633,8 +616,11 @@ export async function getCellDetail(actorUserId: string, cellId: string) {
 
   return {
     cell: {
-      ...cell,
-      scheduleLabel: formatCellSchedule(cell.dayOfWeek, cell.startTime),
+      ...toCellRecord(detail.cell),
+      scheduleLabel:
+        detail.cell.dayOfWeek && detail.cell.startTime
+          ? formatCellSchedule(detail.cell.dayOfWeek as DayOfWeek, detail.cell.startTime)
+          : "Sin horario",
     },
     ministry,
     network,
@@ -642,37 +628,30 @@ export async function getCellDetail(actorUserId: string, cellId: string) {
     responsible: responsible
       ? {
           ...responsible,
+          id: responsible._id as string,
           fullName: formatFullName(responsible.firstName, responsible.lastName),
         }
       : null,
-    members: members.map((m) => ({
-      ...m,
+    members: detail.members.map((m) => ({
+      membershipId: m.membershipId as string,
+      personId: m.personId as string,
+      status: m.status,
+      role: m.role,
+      joinedAt: new Date(m.joinedAt),
+      leftAt: m.leftAt ? new Date(m.leftAt) : null,
+      firstName: m.firstName,
+      lastName: m.lastName,
+      phone: m.phone ?? null,
       fullName: formatFullName(m.firstName, m.lastName),
     })),
     activeMemberCount: activeMembers.length,
     lastSessionStats,
     avgLast4,
-    recentSessions: sessions,
-  };
-}
-
-async function sessionAttendanceCounts(sessionId: string) {
-  const db = getDb();
-  const rows = await db
-    .select({ status: cellAttendance.status, c: count() })
-    .from(cellAttendance)
-    .where(eq(cellAttendance.sessionId, sessionId))
-    .groupBy(cellAttendance.status);
-  let present = 0;
-  let total = 0;
-  for (const row of rows) {
-    total += Number(row.c);
-    if (row.status === "present") present += Number(row.c);
-  }
-  return {
-    present,
-    total,
-    pct: total === 0 ? null : Math.round((present / total) * 100),
+    recentSessions: detail.recentSessions.map((s) => ({
+      id: s._id as string,
+      sessionDate: s.sessionDate,
+      status: s.status,
+    })),
   };
 }
 
@@ -686,25 +665,23 @@ export async function addMemberToCell(
   assertCanMutate(actor, "cells.manage_members", {
     type: "cell",
     id: cellId,
-    ministryId: cell.ministryId,
+    ministryId: cell.ministryId as string,
   });
 
   if (cell.status === "closed") {
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "La célula está cerrada.");
   }
 
-  const db = getDb();
-  const [person] = await db
-    .select()
-    .from(persons)
-    .where(and(eq(persons.id, personId), isNull(persons.deletedAt)))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const person = await client.query(api.persons.getById, {
+    personId: personId as Id<"persons">,
+  });
   if (!person) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Persona no encontrada.");
   }
 
   const org = await currentPersonOrg(personId);
-  if (!org?.ministryId || org.ministryId !== cell.ministryId) {
+  if (!org?.ministryId || org.ministryId !== (cell.ministryId as string)) {
     throw new DomainError(
       DomainErrorCode.CELL_NOT_AUTHORIZED,
       "La persona no pertenece al Ministerio de la célula.",
@@ -718,7 +695,7 @@ export async function addMemberToCell(
   }
 
   const personNetwork = await loadNetwork(org.networkId);
-  const cellNetwork = await loadNetwork(cell.networkId);
+  const cellNetwork = await loadNetwork(cell.networkId as string);
   if (
     !canJoinCellNetwork(
       personNetwork.code as NetworkCode,
@@ -730,8 +707,6 @@ export async function addMemberToCell(
       "La persona no es compatible con la Red de la célula.",
     );
   }
-
-  const membershipRole = cell.type === "twelve" ? "twelve_team" : "member";
 
   if (cell.type === "twelve") {
     // Ordinary people cannot join a Célula de 12
@@ -745,49 +720,22 @@ export async function addMemberToCell(
     }
   }
 
-  // Dual membership allowed: one ordinary (member) + one twelve_team.
-  const conflicting = await db
-    .select({
-      id: cellMemberships.id,
-      cellId: cellMemberships.cellId,
-      role: cellMemberships.role,
+  const membership = await client
+    .mutation(api.cells.addMember, {
+      cellId: cellId as Id<"cells">,
+      personId: personId as Id<"persons">,
     })
-    .from(cellMemberships)
-    .where(
-      and(
-        eq(cellMemberships.personId, personId),
-        eq(cellMemberships.status, "active"),
-        eq(cellMemberships.role, membershipRole),
-      ),
-    )
-    .limit(1);
-  if (conflicting[0]) {
-    throw new DomainError(
-      DomainErrorCode.MEMBERSHIP_ALREADY_ACTIVE,
-      "La persona ya tiene una membresía activa de este tipo.",
-      { membershipId: conflicting[0].id, cellId: conflicting[0].cellId },
-    );
-  }
-
-  const [membership] = await db
-    .insert(cellMemberships)
-    .values({
-      cellId,
-      personId,
-      status: "active",
-      role: membershipRole,
-    })
-    .returning();
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
     action: "cell.member.added",
     entityType: "cell_membership",
-    entityId: membership.id,
+    entityId: membership._id,
     metadata: { cellId, personId, ministryId: cell.ministryId },
   });
 
-  return membership;
+  return { ...membership, id: membership._id as string };
 }
 
 export async function removeMemberFromCell(
@@ -796,33 +744,27 @@ export async function removeMemberFromCell(
   reason?: string,
 ) {
   const actor = await requireActor(actorUserId);
-  const db = getDb();
-  const [membership] = await db
-    .select()
-    .from(cellMemberships)
-    .where(eq(cellMemberships.id, membershipId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const membership = await client.query(api.cells.getMembershipById, {
+    membershipId: membershipId as Id<"cellMemberships">,
+  });
   if (!membership || membership.status !== "active") {
     throw new DomainError(DomainErrorCode.MEMBERSHIP_NOT_FOUND, "Membresía no encontrada.");
   }
 
-  const cell = await getCellOrThrow(membership.cellId);
+  const cell = await getCellOrThrow(membership.cellId as string);
   assertCanMutate(actor, "cells.manage_members", {
     type: "cell",
-    id: cell.id,
-    ministryId: cell.ministryId,
+    id: cell._id as string,
+    ministryId: cell.ministryId as string,
   });
 
-  const [after] = await db
-    .update(cellMemberships)
-    .set({
-      status: "left",
-      leftAt: new Date(),
-      leaveReason: reason?.trim() || null,
-      updatedAt: new Date(),
+  const after = await client
+    .mutation(api.cells.removeMember, {
+      membershipId: membershipId as Id<"cellMemberships">,
+      reason: reason?.trim() || undefined,
     })
-    .where(eq(cellMemberships.id, membershipId))
-    .returning();
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
@@ -830,13 +772,13 @@ export async function removeMemberFromCell(
     entityType: "cell_membership",
     entityId: membershipId,
     metadata: {
-      cellId: cell.id,
+      cellId: cell._id,
       personId: membership.personId,
       reason: reason?.trim() || null,
     },
   });
 
-  return after;
+  return { ...after, id: after._id as string };
 }
 
 export async function reassignMember(
@@ -846,31 +788,29 @@ export async function reassignMember(
   reason?: string,
 ) {
   const actor = await requireActor(actorUserId);
-  const db = getDb();
-  const [membership] = await db
-    .select()
-    .from(cellMemberships)
-    .where(eq(cellMemberships.id, membershipId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const membership = await client.query(api.cells.getMembershipById, {
+    membershipId: membershipId as Id<"cellMemberships">,
+  });
   if (!membership || membership.status !== "active") {
     throw new DomainError(DomainErrorCode.MEMBERSHIP_NOT_FOUND, "Membresía no encontrada.");
   }
 
-  const source = await getCellOrThrow(membership.cellId);
+  const source = await getCellOrThrow(membership.cellId as string);
   const target = await getCellOrThrow(targetCellId);
 
   assertCanMutate(actor, "cells.manage_members", {
     type: "cell",
-    id: source.id,
-    ministryId: source.ministryId,
+    id: source._id as string,
+    ministryId: source.ministryId as string,
   });
   assertCanMutate(actor, "cells.manage_members", {
     type: "cell",
-    id: target.id,
-    ministryId: target.ministryId,
+    id: target._id as string,
+    ministryId: target.ministryId as string,
   });
 
-  if (source.ministryId !== target.ministryId) {
+  if ((source.ministryId as string) !== (target.ministryId as string)) {
     throw new DomainError(
       DomainErrorCode.CELL_NOT_AUTHORIZED,
       "La reasignación entre Ministerios no está habilitada en esta fase.",
@@ -880,11 +820,11 @@ export async function reassignMember(
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "La célula destino está cerrada.");
   }
 
-  const sourceNetwork = await loadNetwork(source.networkId);
-  const targetNetwork = await loadNetwork(target.networkId);
+  const sourceNetwork = await loadNetwork(source.networkId as string);
+  const targetNetwork = await loadNetwork(target.networkId as string);
   if (sourceNetwork.code !== targetNetwork.code) {
     // Same pastoral Red required for simple reassignment in Phase 3
-    const org = await currentPersonOrg(membership.personId);
+    const org = await currentPersonOrg(membership.personId as string);
     if (!org?.networkId) {
       throw new DomainError(
         DomainErrorCode.PERSON_NETWORK_INCOMPATIBLE,
@@ -905,42 +845,28 @@ export async function reassignMember(
     }
   }
 
-  const result = await db.transaction(async (tx) => {
-    await tx
-      .update(cellMemberships)
-      .set({
-        status: "transferred",
-        leftAt: new Date(),
-        leaveReason: reason?.trim() || "Reasignación de célula",
-        updatedAt: new Date(),
-      })
-      .where(eq(cellMemberships.id, membershipId));
-
-    const [created] = await tx
-      .insert(cellMemberships)
-      .values({
-        cellId: targetCellId,
-        personId: membership.personId,
-        status: "active",
-      })
-      .returning();
-    return created;
-  });
+  const result = await client
+    .mutation(api.cells.reassignMember, {
+      membershipId: membershipId as Id<"cellMemberships">,
+      targetCellId: targetCellId as Id<"cells">,
+      reason: reason?.trim() || undefined,
+    })
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
     action: "cell.member.reassigned",
     entityType: "cell_membership",
-    entityId: result.id,
+    entityId: result._id,
     metadata: {
-      fromCellId: source.id,
-      toCellId: target.id,
+      fromCellId: source._id,
+      toCellId: target._id,
       personId: membership.personId,
       previousMembershipId: membershipId,
     },
   });
 
-  return result;
+  return { ...result, id: result._id as string };
 }
 
 export async function searchPersonsForCell(
@@ -953,46 +879,24 @@ export async function searchPersonsForCell(
   assertCanMutate(actor, "cells.manage_members", {
     type: "cell",
     id: cellId,
-    ministryId: cell.ministryId,
+    ministryId: cell.ministryId as string,
   });
 
   const query = q.trim();
   if (query.length < 2) return [];
 
-  const db = getDb();
-  const like = `%${query}%`;
-  const rows = await db
-    .select({
-      id: persons.id,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-      phone: persons.phone,
-    })
-    .from(persons)
-    .innerJoin(
-      personOrganizationHistory,
-      and(
-        eq(personOrganizationHistory.personId, persons.id),
-        isNull(personOrganizationHistory.effectiveTo),
-        eq(personOrganizationHistory.ministryId, cell.ministryId),
-      ),
-    )
-    .where(
-      and(
-        isNull(persons.deletedAt),
-        or(
-          ilike(persons.firstName, like),
-          ilike(persons.lastName, like),
-          ilike(persons.phone, like),
-          sql`concat(${persons.firstName}, ' ', ${persons.lastName}) ilike ${like}`,
-        ),
-      ),
-    )
-    .orderBy(asc(persons.lastName), asc(persons.firstName))
-    .limit(20);
+  const client = getConvexHttpClient();
+  const rows = await client.query(api.persons.searchActiveInMinistry, {
+    ministryId: cell.ministryId,
+    search: query,
+    limit: 20,
+  });
 
   return rows.map((r) => ({
-    ...r,
+    id: r._id as string,
+    firstName: r.firstName,
+    lastName: r.lastName,
+    phone: r.phone ?? null,
     fullName: formatFullName(r.firstName, r.lastName),
   }));
 }
@@ -1007,105 +911,50 @@ export async function saveCellAttendance(
   assertCanMutate(actor, "cells.attendance", {
     type: "cell",
     id: cellId,
-    ministryId: cell.ministryId,
+    ministryId: cell.ministryId as string,
   });
 
   const input = saveAttendanceInputSchema.parse(raw);
-  const db = getDb();
+  const client = getConvexHttpClient();
 
-  let session = (
-    await db
-      .select()
-      .from(cellAttendanceSessions)
-      .where(
-        and(
-          eq(cellAttendanceSessions.cellId, cellId),
-          eq(cellAttendanceSessions.sessionDate, input.sessionDate),
-        ),
-      )
-      .limit(1)
-  )[0];
+  const existingBoard = await client.query(api.cells.attendanceBoard, {
+    cellId: cellId as Id<"cells">,
+    sessionDate: input.sessionDate,
+  });
+  const sessionExisted = existingBoard.sessionId !== null;
 
-  let sessionCreated = false;
-  if (!session) {
-    try {
-      const [created] = await db
-        .insert(cellAttendanceSessions)
-        .values({
-          cellId,
-          sessionDate: input.sessionDate,
-          status: "open",
-          notes: input.notes?.trim() || null,
-          createdByUserId: actorUserId,
-        })
-        .returning();
-      session = created;
-      sessionCreated = true;
-    } catch {
-      throw new DomainError(
-        DomainErrorCode.ATTENDANCE_SESSION_ALREADY_EXISTS,
-        "Ya existe una sesión de asistencia para esa fecha.",
-      );
-    }
-  }
+  const sessionId = await client
+    .mutation(api.cells.saveAttendance, {
+      cellId: cellId as Id<"cells">,
+      sessionDate: input.sessionDate,
+      notes: input.notes?.trim() || undefined,
+      recordedByUserId: actorUserId as Id<"users">,
+      records: input.records.map((record) => ({
+        personId: record.personId as Id<"persons">,
+        membershipId: record.membershipId
+          ? (record.membershipId as Id<"cellMemberships">)
+          : undefined,
+        status: record.status,
+        notes: record.notes?.trim() || undefined,
+      })),
+    })
+    .catch(mapConvexError);
 
-  if (sessionCreated) {
+  if (!sessionExisted) {
     await writeAuditLog({
       actorUserId,
       action: "cell.attendance.session.created",
       entityType: "cell_attendance_session",
-      entityId: session.id,
+      entityId: sessionId,
       metadata: { cellId, sessionDate: input.sessionDate },
     });
   }
-
-  await db.transaction(async (tx) => {
-    for (const record of input.records) {
-      const existing = await tx
-        .select({ id: cellAttendance.id })
-        .from(cellAttendance)
-        .where(
-          and(
-            eq(cellAttendance.sessionId, session.id),
-            eq(cellAttendance.personId, record.personId),
-          ),
-        )
-        .limit(1);
-
-      if (existing[0]) {
-        await tx
-          .update(cellAttendance)
-          .set({
-            status: record.status,
-            notes: record.notes?.trim() || null,
-            membershipId: record.membershipId ?? null,
-            recordedByUserId: actorUserId,
-            recordedAt: new Date(),
-          })
-          .where(eq(cellAttendance.id, existing[0].id));
-      } else {
-        await tx.insert(cellAttendance).values({
-          sessionId: session.id,
-          personId: record.personId,
-          membershipId: record.membershipId ?? null,
-          status: record.status,
-          notes: record.notes?.trim() || null,
-          recordedByUserId: actorUserId,
-        });
-      }
-    }
-
-    await tx
-      .update(cellAttendanceSessions)
-      .set({ status: "completed", notes: input.notes?.trim() || session.notes })
-      .where(eq(cellAttendanceSessions.id, session.id));
-  });
 
   await writeAuditLog({
     actorUserId,
     action: "cell.attendance.recorded",
     entityType: "cell_attendance_session",
-    entityId: session.id,
+    entityId: sessionId,
     metadata: {
       cellId,
       sessionDate: input.sessionDate,
@@ -1114,81 +963,73 @@ export async function saveCellAttendance(
     },
   });
 
-  return { sessionId: session.id };
+  return { sessionId: sessionId as string };
 }
 
 export async function getAttendanceBoard(actorUserId: string, cellId: string, sessionDate: string) {
-  const detail = await getCellDetail(actorUserId, cellId);
   const actor = await requireActor(actorUserId);
+  const cell = await getCellOrThrow(cellId);
   assertCanMutate(actor, "cells.attendance", {
     type: "cell",
     id: cellId,
-    ministryId: detail.cell.ministryId,
+    ministryId: cell.ministryId as string,
   });
 
-  const db = getDb();
-  const [session] = await db
-    .select()
-    .from(cellAttendanceSessions)
-    .where(
-      and(
-        eq(cellAttendanceSessions.cellId, cellId),
-        eq(cellAttendanceSessions.sessionDate, sessionDate),
-      ),
-    )
-    .limit(1);
+  const client = getConvexHttpClient();
+  const board = await client.query(api.cells.attendanceBoard, {
+    cellId: cellId as Id<"cells">,
+    sessionDate,
+  });
 
-  const records = session
-    ? await db
-        .select()
-        .from(cellAttendance)
-        .where(eq(cellAttendance.sessionId, session.id))
-    : [];
-
-  const byPerson = Object.fromEntries(records.map((r) => [r.personId, r]));
+  const byPerson = Object.fromEntries(
+    board.attendance.map((r) => [r.personId as string, { status: r.status, notes: r.notes ?? null }]),
+  );
 
   return {
-    cell: detail.cell,
-    activeMembers: detail.members.filter((m) => m.status === "active"),
-    session,
+    cell: toCellRecord(cell),
+    activeMembers: board.activeMembers.map((m) => ({
+      membershipId: m.membershipId as string,
+      personId: m.personId as string,
+      fullName: formatFullName(m.firstName, m.lastName),
+    })),
+    session: board.sessionId
+      ? { id: board.sessionId as string, status: board.sessionStatus }
+      : null,
     byPerson,
   };
 }
 
 export async function listCatalogsForCells(actorUserId: string) {
   const actor = await requireActor(actorUserId);
-  const db = getDb();
-  const districtRows = await db
-    .select({ id: districts.id, name: districts.name })
-    .from(districts)
-    .where(eq(districts.isActive, true))
-    .orderBy(asc(districts.name));
-  const networkRows = await db
-    .select({
-      id: networks.id,
-      code: networks.code,
-      name: networks.name,
-      isActive: networks.isActive,
-    })
-    .from(networks)
-    .orderBy(asc(networks.sortOrder));
-  let ministryRows = await db
-    .select({
-      id: ministries.id,
-      code: ministries.code,
-      name: ministries.name,
-    })
-    .from(ministries)
-    .where(eq(ministries.isActive, true))
-    .orderBy(asc(ministries.sortOrder), asc(ministries.code));
+  const client = getConvexHttpClient();
+  const [districtRows, networkRows, allMinistryRows] = await Promise.all([
+    client.query(api.foundation.listActiveDistricts, {}),
+    client.query(api.organization.listNetworks, {}),
+    client.query(api.organization.listMinistries, {}),
+  ]);
+
+  const districts = [...districtRows]
+    .filter((d) => d.isActive)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((d) => ({ id: d._id as string, name: d.name }));
+
+  const networks = [...networkRows]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .filter((n) => n.isActive && n.code !== "ninos")
+    .map((n) => ({ id: n._id as string, code: n.code as string, name: n.name, isActive: n.isActive }));
+
+  let ministries = [...allMinistryRows]
+    .filter((m) => m.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code))
+    .map((m) => ({ id: m._id as string, code: m.code, name: m.name }));
 
   if (!isSuperadmin(actor)) {
-    ministryRows = ministryRows.filter((m) => actor.ministryIds.includes(m.id));
+    ministries = ministries.filter((m) => actor.ministryIds.includes(m.id));
   }
 
   return {
-    districts: districtRows,
-    networks: networkRows.filter((n) => n.isActive && n.code !== "ninos"),
-    ministries: ministryRows,
+    districts,
+    networks,
+    ministries,
   };
 }

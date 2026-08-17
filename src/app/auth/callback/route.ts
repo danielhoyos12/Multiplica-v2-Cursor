@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
 
-import { getDb } from "@/db/client";
-import { users } from "@/db/schema";
 import {
   MUST_CHANGE_PASSWORD_COOKIE,
   passwordGateCookieOptions,
 } from "@/lib/password-change-gate";
 import { safeInternalPath } from "@/lib/safe-redirect";
+import { api, getConvexHttpClient } from "@/server/convex";
 
 /**
  * Post-auth landing (e.g. password recovery). Clerk owns the OAuth/code exchange;
@@ -24,18 +22,12 @@ export async function GET(request: Request) {
   }
 
   let mustChange = false;
-  if (process.env.DATABASE_URL) {
-    try {
-      const db = getDb();
-      const [profile] = await db
-        .select({ mustChangePassword: users.mustChangePassword })
-        .from(users)
-        .where(eq(users.clerkUserId, userId))
-        .limit(1);
-      mustChange = Boolean(profile?.mustChangePassword);
-    } catch {
-      mustChange = false;
-    }
+  try {
+    const client = getConvexHttpClient();
+    const profile = await client.query(api.users.getByAuthSubject, { authSubject: userId });
+    mustChange = Boolean(profile?.mustChangePassword);
+  } catch {
+    mustChange = false;
   }
 
   const destination = mustChange ? "/cuenta/cambiar-password" : next;

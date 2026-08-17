@@ -336,6 +336,18 @@ export const addMember = mutation({
   },
 });
 
+/** Patches a membership's `role` in place — used when a Célula de 12 direct leader already has a non-`twelve_team` membership. */
+export const setMembershipRole = mutation({
+  args: { membershipId: v.id("cellMemberships"), role: membershipRole },
+  returns: cellMembershipDoc,
+  handler: async (ctx, args) => {
+    const membership = await ctx.db.get("cellMemberships", args.membershipId);
+    if (!membership) return notFound("Membresía no encontrada.");
+    await ctx.db.patch("cellMemberships", args.membershipId, { role: args.role, updatedAt: now() });
+    return (await ctx.db.get("cellMemberships", args.membershipId))!;
+  },
+});
+
 export const getMembershipById = query({
   args: { membershipId: v.id("cellMemberships") },
   returns: v.union(cellMembershipDoc, v.null()),

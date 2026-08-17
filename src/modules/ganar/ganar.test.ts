@@ -84,7 +84,7 @@ describe("GANAR validation", () => {
       publicGanarInputSchema.parse({ ...valid, phone: "123" }),
     ).toThrow();
     expect(() =>
-      publicGanarInputSchema.parse({ ...valid, districtId: "no-uuid" }),
+      publicGanarInputSchema.parse({ ...valid, districtId: "" }),
     ).toThrow();
   });
 

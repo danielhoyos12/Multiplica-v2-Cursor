@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -7,8 +6,6 @@ import { EditPersonForm } from "@/components/ganar/edit-person-form";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { getDb } from "@/db/client";
-import { personLeadership } from "@/db/schema";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { hasPermission, isSuperadmin } from "@/modules/authorization";
 import { getPersonLadder, statusLabel } from "@/modules/formation";
@@ -23,6 +20,9 @@ import {
   listCatalogsForGanar,
 } from "@/modules/ganar";
 import { requireAppActor } from "@/server/actor";
+import { api, getConvexHttpClient } from "@/server/convex";
+
+import type { Id } from "../../../../../convex/_generated/dataModel";
 
 export const metadata = { title: "Persona · GANAR" };
 
@@ -68,11 +68,10 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
   const canCompleteConsol = hasPermission(auth, "consolidation.manage");
   const canTransfers = hasPermission(auth, "transfers.read");
 
-  const [leadership] = await getDb()
-    .select()
-    .from(personLeadership)
-    .where(eq(personLeadership.personId, id))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const leadership = await client.query(api.leadership.getByPerson, {
+    personId: id as Id<"persons">,
+  });
 
   let ladder: Awaited<ReturnType<typeof getPersonLadder>> | null = null;
   try {

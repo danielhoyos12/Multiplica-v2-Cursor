@@ -435,11 +435,84 @@ export const listDirectLeaders = query({
   },
 });
 
+/** All `personLeadership` rows with `status: "eligible"` and this `directLeaderPersonId` — pending-activation list for a leader's dashboard. */
+export const listEligibleChildren = query({
+  args: { directLeaderPersonId: v.id("persons") },
+  returns: v.array(
+    v.object({ personId: v.id("persons"), firstName: v.string(), lastName: v.string() }),
+  ),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("personLeadership")
+      .withIndex("by_directLeader", (q) => q.eq("directLeaderPersonId", args.directLeaderPersonId))
+      .collect();
+    const eligible = rows.filter((r) => r.status === "eligible").slice(0, 20);
+
+    return await Promise.all(
+      eligible.map(async (r) => {
+        const person = await ctx.db.get("persons", r.personId);
+        return { personId: r.personId, firstName: person?.firstName ?? "", lastName: person?.lastName ?? "" };
+      }),
+    );
+  },
+});
+
+/** Ancestor chain (any depth > 0) for a person, with leader display data — used for breadcrumbs. */
+export const listAncestors = query({
+  args: { personId: v.id("persons") },
+  returns: v.array(
+    v.object({
+      personId: v.id("persons"),
+      depth: v.number(),
+      humanLeaderCode: v.optional(v.string()),
+      firstName: v.string(),
+      lastName: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("leadershipClosure")
+      .withIndex("by_descendant", (q) => q.eq("descendantPersonId", args.personId))
+      .collect();
+
+    const withDetails = await Promise.all(
+      rows.map(async (r) => {
+        const [person, leadership] = await Promise.all([
+          ctx.db.get("persons", r.ancestorPersonId),
+          getLeadership(ctx.db, r.ancestorPersonId),
+        ]);
+        return {
+          personId: r.ancestorPersonId,
+          depth: r.depth,
+          humanLeaderCode: leadership?.humanLeaderCode,
+          firstName: person?.firstName ?? "",
+          lastName: person?.lastName ?? "",
+        };
+      }),
+    );
+
+    return withDetails.sort((a, b) => b.depth - a.depth);
+  },
+});
+
 export const isDescendant = query({
   args: { ancestorPersonId: v.id("persons"), descendantPersonId: v.id("persons") },
   returns: v.boolean(),
   handler: async (ctx, args) => {
     return await isDescendantInternal(ctx.db, args.ancestorPersonId, args.descendantPersonId);
+  },
+});
+
+/** All descendants (any depth > 0) of a person in the leadership tree. */
+export const listDescendants = query({
+  args: { ancestorPersonId: v.id("persons") },
+  returns: v.array(v.object({ personId: v.id("persons"), depth: v.number() })),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("leadershipClosure")
+      .withIndex("by_ancestor_depth", (q) => q.eq("ancestorPersonId", args.ancestorPersonId).gt("depth", 0))
+      .collect();
+    return rows.map((r) => ({ personId: r.descendantPersonId, depth: r.depth }));
   },
 });
 
