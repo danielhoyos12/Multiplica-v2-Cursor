@@ -10,6 +10,8 @@
 
 import type * as foundation from "../foundation.js";
 import type * as health from "../health.js";
+import type * as lib_errors from "../lib/errors.js";
+import type * as lib_time from "../lib/time.js";
 
 import type {
   ApiFromModules,
@@ -20,6 +22,8 @@ import type {
 declare const fullApi: ApiFromModules<{
   foundation: typeof foundation;
   health: typeof health;
+  "lib/errors": typeof lib_errors;
+  "lib/time": typeof lib_time;
 }>;
 
 /**
