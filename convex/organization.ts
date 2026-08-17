@@ -82,6 +82,14 @@ export const listNetworks = query({
   },
 });
 
+export const getNetwork = query({
+  args: { networkId: v.id("networks") },
+  returns: v.union(networkDoc, v.null()),
+  handler: async (ctx, args) => {
+    return await ctx.db.get("networks", args.networkId);
+  },
+});
+
 /** App users, ordered by email. Bounded — paginate via `listWithExtraArg`-style query if this grows unbounded. */
 export const listUsers = query({
   args: {},

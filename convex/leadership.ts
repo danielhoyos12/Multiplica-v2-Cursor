@@ -362,6 +362,16 @@ export const getByPerson = query({
   },
 });
 
+/** Batch lookup — used by dashboards computing leadership status for a set of persons. */
+export const getManyByPersons = query({
+  args: { personIds: v.array(v.id("persons")) },
+  returns: v.array(personLeadershipDoc),
+  handler: async (ctx, args) => {
+    const rows = await Promise.all(args.personIds.map((personId) => getLeadership(ctx.db, personId)));
+    return rows.filter((r): r is NonNullable<typeof r> => r !== null);
+  },
+});
+
 /** All `personLeadership` rows (any status) with this `directLeaderPersonId` — for human-code allocation. */
 export const listChildrenAny = query({
   args: { directLeaderPersonId: v.id("persons") },

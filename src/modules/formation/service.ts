@@ -2,7 +2,7 @@
  * Formation / Escalera del Éxito — Consolidar + Universidad de la Vida.
  * Persona Maestra (persons.id) is the only identity. No person silos.
  */
-import type { Id } from "../../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { withId } from "@/lib/convex-doc";
 import { mapConvexError } from "@/lib/convex-errors";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
@@ -1236,7 +1236,7 @@ export async function listProcessPeople(
     assignedLeaderPersonId = actor.personId as Id<"persons">;
   }
 
-  let rows: Array<{ progress: { processType: string; status: string; personId: Id<"persons">; ministryId: Id<"ministries">; networkId?: Id<"networks">; assignedLeaderPersonId?: Id<"persons">; updatedAt: number }; firstName: string; lastName: string }>;
+  let rows: Array<{ progress: Doc<"personProcessProgress">; firstName: string; lastName: string }>;
 
   if (treeScopedIds) {
     const [byTree, byAssignedLeader] = await Promise.all([
@@ -1282,7 +1282,7 @@ export async function listProcessPeople(
   const paged = rows.slice(offset, offset + pageSize);
 
   return paged.map((r) => ({
-    ...withId(r.progress as never),
+    ...withId(r.progress),
     fullName: formatFullName(r.firstName, r.lastName),
     statusLabel: statusLabel(r.progress.status),
   }));
