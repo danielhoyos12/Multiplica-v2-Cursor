@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { hasPermission } from "@/modules/authorization";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 import {
   approveTransferAction,
   executeTransferAction,
@@ -38,7 +38,7 @@ export default async function TransferenciasPage({
   const canApprove = hasPermission(auth, "transfers.approve");
   const canExecute = hasPermission(auth, "transfers.execute");
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [allMinistries, allNetworks] = await Promise.all([
     client.query(api.organization.listMinistries, {}),
     client.query(api.organization.listNetworks, {}),

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { requireActiveAppUser, requireMinistryScope, requirePermission } from "./lib/identity";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { conflict, invalidArgument, notFound } from "./lib/errors";
 import { now } from "./lib/time";
@@ -173,7 +174,7 @@ export async function getCurrentOrgForPerson(
  */
 export const listForActor = query({
   args: {
-    actorUserId: v.optional(v.id("users")),
+
     ministryId: v.optional(v.id("ministries")),
     networkId: v.optional(v.id("networks")),
     search: v.optional(v.string()),
@@ -181,6 +182,8 @@ export const listForActor = query({
   },
   returns: v.array(personDoc),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "persons.read");
+
     const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
 
     let allowedIds: Set<Id<"persons">> | null = null;
@@ -222,6 +225,8 @@ export const getById = query({
   args: { personId: v.id("persons") },
   returns: v.union(personDoc, v.null()),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "persons.read");
+
     const person = await ctx.db.get("persons", args.personId);
     if (!person || person.deletedAt !== undefined) return null;
     return person;
@@ -233,6 +238,8 @@ export const getManyByIds = query({
   args: { personIds: v.array(v.id("persons")) },
   returns: v.array(personDoc),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "persons.read");
+
     const rows = await Promise.all(args.personIds.map((id) => ctx.db.get("persons", id)));
     return rows.filter((p): p is NonNullable<typeof p> => p !== null);
   },
@@ -250,6 +257,8 @@ export const getCurrentOrg = query({
     v.null(),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await getCurrentOrgForPerson(ctx, args.personId);
   },
 });
@@ -268,6 +277,8 @@ export const getOrgHistory = query({
     }),
   ),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "persons.read");
+
     const rows = await ctx.db
       .query("personOrganizationHistory")
       .withIndex("by_person", (q) => q.eq("personId", args.personId))
@@ -303,6 +314,8 @@ export const findDuplicateCandidates = query({
     }),
   ),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "persons.read");
+
     const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
     const suffix = args.phoneNormalized.slice(-9);
 
@@ -365,6 +378,8 @@ export const listActiveWithOrg = query({
     }),
   ),
   handler: async (ctx) => {
+    await requirePermission(ctx, "persons.read");
+
     const rows = await ctx.db
       .query("persons")
       .withIndex("by_active", (q) => q.eq("isActive", true))
@@ -409,6 +424,8 @@ export const searchActiveInMinistry = query({
     }),
   ),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "persons.read");
+
     const limit = Math.min(Math.max(args.limit ?? 20, 1), 50);
     const needle = args.search.trim().toLowerCase();
     if (needle.length < 2) return [];
@@ -455,10 +472,12 @@ export const createInternal = mutation({
     notes: v.optional(v.string()),
     ministryId: v.id("ministries"),
     networkId: v.id("networks"),
-    createdByUserId: v.optional(v.id("users")),
-  },
+    },
   returns: personDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "persons.write");
+    await requireMinistryScope(ctx, args.ministryId);
+
     const firstName = args.firstName.trim();
     const lastName = args.lastName.trim();
     if (!firstName || !lastName) {
@@ -490,7 +509,7 @@ export const createInternal = mutation({
       ministryId: args.ministryId,
       networkId: args.networkId,
       source: "internal_form",
-      createdByUserId: args.createdByUserId,
+      createdByUserId: actor._id,
     });
 
     return (await ctx.db.get("persons", personId))!;
@@ -547,6 +566,29 @@ export const createPublic = mutation({
       if (!district || !district.isActive) return reject("rejected_district");
     }
 
+    const phoneNormalized = normalizePhone(args.phone?.trim() || undefined);
+    if (phoneNormalized) {
+      const phoneMatches = await ctx.db
+        .query("persons")
+        .withIndex("by_phoneNormalized", (q) => q.eq("phoneNormalized", phoneNormalized))
+        .take(20);
+      const strong = phoneMatches.find(
+        (p) => p.deletedAt === undefined && p.isActive && p.phoneNormalized === phoneNormalized,
+      );
+      if (strong) {
+        await logIntakeEvent(ctx, {
+          personId: strong._id,
+          source: "public_form",
+          outcome: "duplicate_silent",
+          ministryId: args.ministryId,
+          networkId: args.networkId,
+          ipHash: args.ipHash,
+          userAgentHash: args.userAgentHash,
+        });
+        return { ok: true as const };
+      }
+    }
+
     const personId = await insertPersonWithOrg(ctx, {
       firstName,
       lastName,
@@ -587,6 +629,8 @@ export const update = mutation({
   },
   returns: personDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "persons.write");
+
     const existing = await ctx.db.get("persons", args.personId);
     if (!existing || existing.deletedAt !== undefined) {
       return notFound("Persona no encontrada.");
@@ -676,6 +720,8 @@ export const softDelete = mutation({
   args: { personId: v.id("persons") },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "persons.write");
+
     const person = await ctx.db.get("persons", args.personId);
     if (!person) return notFound("Persona no encontrada.");
     if (person.deletedAt !== undefined) return conflict("La persona ya fue eliminada.");

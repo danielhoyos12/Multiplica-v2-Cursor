@@ -18,7 +18,7 @@ import {
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
 import { ensureOfficialCatalog } from "@/modules/formation/official-catalog";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export type EmLevel = 1 | 2 | 3;
 
@@ -39,7 +39,7 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -51,7 +51,7 @@ async function currentOrg(personId: string) {
 }
 
 async function getEmProgress(personId: string, level: EmLevel) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: LEVEL_PROCESS[level],
@@ -67,7 +67,7 @@ export async function ensureEmLevelEligible(
 ) {
   const existing = await getEmProgress(personId, level);
   if (existing && existing.status !== "pending") return existing;
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -85,7 +85,7 @@ export async function ensureEmLevelEligible(
 }
 
 export async function assertEmLevelEligible(personId: string, level: EmLevel) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (level === 1) {
     const cd3 = await client.query(api.formation.getProgress, {
       personId: personId as Id<"persons">,
@@ -121,7 +121,7 @@ export async function isEmLevelEligible(personId: string, level: EmLevel) {
 
 async function getProgram(level: EmLevel) {
   await ensureOfficialCatalog();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = await client.query(api.formation.getProgramByCode, { code: LEVEL_CODE[level] });
   if (!program) {
     throw new DomainError(DomainErrorCode.CONFIGURATION_ERROR, "Programa EM no configurado.");
@@ -145,7 +145,7 @@ export async function createEmLevelCycle(
     ministryId: raw.ministryId ?? undefined,
   });
   const program = await getProgram(raw.level);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return withId(
     await client
       .mutation(api.formation.createCycle, {
@@ -154,7 +154,6 @@ export async function createEmLevelCycle(
         startDate: raw.startDate,
         endDate: raw.endDate,
         ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
-        createdByUserId: actorUserId as Id<"users">,
       })
       .catch(mapConvexError),
   );
@@ -176,7 +175,7 @@ export async function enrollEmLevel(
   }
   await assertProcessAccess(actor, raw.personId, org.ministryId);
   const program = await getProgram(raw.level);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: raw.cycleId as Id<"trainingCycles">,
   });
@@ -241,7 +240,6 @@ export async function enrollEmLevel(
       eventType: "enrolled",
       fromStatus: (progress?.status ?? undefined) as never,
       toStatus: "in_progress",
-      actorUserId: actorUserId as Id<"users">,
       metadata: { cycleId: cycle._id, enrollmentId: enrollment.id },
     })
     .catch(mapConvexError);
@@ -276,7 +274,7 @@ export async function markEmLevelAcademic(
       "Estado inválido para académico.",
     );
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
     await client
       .mutation(api.formation.updateEnrollmentStatus, {
@@ -337,7 +335,7 @@ export async function completeEmLevel(
     );
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = await getProgram(raw.level);
   const requirements = (
     await client.query(api.formation.listRequirements, { programId: program.id as Id<"trainingPrograms"> })
@@ -431,7 +429,7 @@ export async function getEmLevelsDashboardCounts(actorUserId: string) {
   if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ministryIds =
     !isSuperadmin(actor) && actor.ministryIds.length
       ? (actor.ministryIds as Id<"ministries">[])
@@ -458,7 +456,7 @@ export async function listEmLevelCycles(actorUserId: string, level?: EmLevel) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
   await ensureOfficialCatalog();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (level) {
     const program = await getProgram(level);
     const cycles = await client.query(api.formation.listCycles, {
@@ -481,7 +479,7 @@ export async function getEmLevelCycleBoard(actorUserId: string, cycleId: string)
   if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: cycleId as Id<"trainingCycles">,
   });

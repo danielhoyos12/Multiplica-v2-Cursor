@@ -20,7 +20,7 @@ import {
   listCatalogsForGanar,
 } from "@/modules/ganar";
 import { requireAppActor } from "@/server/actor";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
 
@@ -68,7 +68,7 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
   const canCompleteConsol = hasPermission(auth, "consolidation.manage");
   const canTransfers = hasPermission(auth, "transfers.read");
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const leadership = await client.query(api.leadership.getByPerson, {
     personId: id as Id<"persons">,
   });

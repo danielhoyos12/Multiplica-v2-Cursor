@@ -50,6 +50,61 @@ clerk doctor
 
 Middleware matcher includes `/__clerk/:path*`.
 
+## Security hardening Clerk ↔ Convex
+
+Cadena de identidad (obligatoria):
+
+Clerk session → JWT template exactamente `convex` → `ConvexHttpClient.setAuth(token)` / `ConvexProviderWithClerk` → `ctx.auth.getUserIdentity()` → `users.authSubject` → RBAC/scope
+
+### Identidad
+
+- El actor **nunca** se toma de `actorUserId` enviado por el cliente.
+- Helpers Convex: `requireIdentity`, `requireAppUser`, `requireActiveAppUser`, `requirePermission`, `requireMinistryScope`, `requireSuperadmin`.
+- Server Next: `getAuthenticatedConvexClient()` pide `auth().getToken({ template: "convex" })` por request (no hay singleton compartido entre usuarios).
+- `getPublicConvexClient()` solo para health ping y GANAR público (`persons.createPublic`, catálogos `foundation.*`).
+
+### Provisioning
+
+Flujo de alta:
+
+Persona Maestra → apta → **activateLeader** (Next, server-side) → `clerk.users.createUser` (idempotente por email) → `users.provisionLeaderUser` → `authz.assignRole` (`leader`) → login.
+
+- `ensureProfile` / `linkProvisionedIdentity` **no insertan** usuarios nuevos.
+- Identidad Clerk sin fila Convex → `/acceso-denegado` (“Tu cuenta no está habilitada en MULTIPLICA”).
+- Signup público eliminado de UI (`SignUpButton`, `/sign-up` redirige a `/login`). `NEXT_PUBLIC_CLERK_SIGN_UP_URL=/login`.
+
+### Restricted mode (HUMAN STEP si la instancia no es la de esta VM)
+
+En Clerk Dashboard → User & Authentication → **Access mode** → **Invite-only** (`sign_up_mode=restricted`).
+
+Google/Apple pueden existir como **método de login** para usuarios ya creados por Backend API; no deben auto-provisionar pastoral.
+
+Instancia de desarrollo local (keyless, `pk_test_`): `clerk config patch` no admite `sign_up_mode` hasta reclamar la app (`clerk auth login`). Allowlist de restrictions se puede activar en esa instancia de desarrollo.
+
+### Variables (no imprimir secretos)
+
+| Variable | Dónde |
+| --- | --- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Vercel Preview/staging |
+| `CLERK_SECRET_KEY` | Vercel Preview/staging |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/login` | Vercel + `.env` |
+| `NEXT_PUBLIC_CONVEX_URL` | Vercel Preview/staging — deployment Convex **staging**, no local |
+| `NEXT_PUBLIC_CONVEX_SITE_URL` | opcional |
+| `CONVEX_DEPLOY_KEY` | si el build despliega funciones Convex |
+| `CLERK_JWT_ISSUER_DOMAIN` | Convex Dashboard del deployment staging/preview |
+
+JWT template Clerk: nombre exacto `convex`, `aud: convex`.
+
+### UAT pendiente
+
+- Preview Vercel con Deployment Protection / SSO: no navegable desde esta VM.
+- `/api/ready` debe ser 200 con `clerkConfigured`, `convexConfigured`, `convexReachable` (query `health.ping`).
+- Producción pública (`main`) **no** forma parte de este hardening.
+
+### Rollback
+
+Revertir el commit de hardening en `cursor/convex-pastoral-cutover-a3cc`. No cambiar Production Branch. No mergear a `main`. Restaurar signup solo si un humano lo pide explícitamente.
+
 ## Fuera de alcance histórico
 
-Supabase Auth/SDK removed — see [`supabase-removal.md`](./supabase-removal.md). Pastoral modules still migrating off interim Drizzle: [`convex-full-cutover-plan.md`](./convex-full-cutover-plan.md).
+Supabase Auth/SDK removed — see [`supabase-removal.md`](./supabase-removal.md). Pastoral runtime is Convex — [`convex-full-cutover-plan.md`](./convex-full-cutover-plan.md).

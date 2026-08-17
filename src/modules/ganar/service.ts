@@ -13,7 +13,7 @@ import {
   type AuthContext,
   type NetworkCode,
 } from "@/modules/authorization";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient, getPublicConvexClient } from "@/server/convex";
 
 import {
   formatFullName,
@@ -48,12 +48,12 @@ async function requireActor(userId: string): Promise<AuthContext> {
 }
 
 async function listNetworks() {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.organization.listNetworks, {});
 }
 
 async function listMinistries() {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.organization.listMinistries, {});
 }
 
@@ -67,7 +67,7 @@ async function loadNetwork(networkId: string) {
 }
 
 async function loadMinistry(ministryId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.organization.getMinistry, {
     ministryId: ministryId as Id<"ministries">,
   });
@@ -88,7 +88,7 @@ async function dbNetworksForActor(actor: AuthContext) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -101,7 +101,7 @@ async function currentOrg(personId: string) {
 }
 
 async function assertDistrictActive(districtId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const districts = await client.query(api.foundation.listActiveDistricts, {});
   const found = districts.some((d) => (d._id as string) === districtId);
   if (!found) {
@@ -118,7 +118,7 @@ export async function findDuplicateCandidates(params: {
   const phoneNormalized = normalizePhone(params.phone);
   if (!phoneNormalized) return [];
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.persons.findDuplicateCandidates, {
     phoneNormalized,
     limit: 20,
@@ -225,7 +225,7 @@ export async function createPersonInternal(
     return { personId: "", duplicates };
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const person = await client
     .mutation(api.persons.createInternal, {
       firstName,
@@ -237,7 +237,6 @@ export async function createPersonInternal(
       email: input.email?.trim() || undefined,
       ministryId: input.ministryId as Id<"ministries">,
       networkId: input.networkId as Id<"networks">,
-      createdByUserId: actorUserId as Id<"users">,
     })
     .catch(mapConvexError);
 
@@ -270,11 +269,10 @@ export async function createPersonPublic(
   const input = publicGanarInputSchema.parse(raw);
   const ipHash = meta.ip ? hashValue(meta.ip) : null;
   const uaHash = meta.userAgent ? hashValue(meta.userAgent) : null;
-  const client = getConvexHttpClient();
+  const client = getPublicConvexClient();
 
-  const recordEvent = async (outcome: string, personId?: string) => {
+  const recordEvent = async (outcome: string) => {
     await client.mutation(api.persons.recordIntakeEvent, {
-      personId: personId ? (personId as Id<"persons">) : undefined,
       ministryId: input.ministryId as Id<"ministries">,
       networkId: input.networkId as Id<"networks">,
       source: "public_form",
@@ -297,60 +295,10 @@ export async function createPersonPublic(
     }
   }
 
-  try {
-    await loadMinistry(input.ministryId);
-  } catch {
-    await recordEvent("rejected_ministry");
-    return { ok: true };
-  }
-
-  const network = await loadNetwork(input.networkId);
-  try {
-    assertNetworkAllowedForCapture({
-      networkCode: network.code as NetworkCode,
-      networkIsActive: network.isActive,
-    });
-  } catch {
-    await recordEvent("rejected_network");
-    return { ok: true };
-  }
-
-  try {
-    await assertDistrictActive(input.districtId);
-  } catch {
-    await recordEvent("rejected_district");
-    return { ok: true };
-  }
-
   const { firstName, lastName } = splitFullName(input.fullName);
-  const phoneNormalized = normalizePhone(input.phone);
-  const duplicates = await findDuplicateCandidates({
-    phone: input.phone,
-    firstName,
-    lastName,
-    ministryScopeIds: null,
-  });
-  const strong = duplicates.find((d) => d.strength === "strong");
 
-  if (strong) {
-    await writeAuditLog({
-      action: "person.possible_duplicate_detected",
-      entityType: "person",
-      entityId: strong.personId,
-      metadata: {
-        source: "public_form",
-        strength: "strong",
-        ministryId: input.ministryId,
-        networkId: input.networkId,
-        silent: true,
-      },
-    });
-    await recordEvent("duplicate_silent", strong.personId);
-    return { ok: true };
-  }
-
-  // `persons.createPublic` creates the person + org row and logs the
-  // "created" intake event atomically — no separate `recordIntakeEvent` call.
+  // Public mutation validates catalogs, dedupes by phone, and never leaks
+  // whether the person already existed.
   await client
     .mutation(api.persons.createPublic, {
       firstName,
@@ -365,22 +313,6 @@ export async function createPersonPublic(
       userAgentHash: uaHash ?? undefined,
     })
     .catch(mapConvexError);
-
-  await writeAuditLog({
-    action: "person.created.public",
-    entityType: "person",
-    afterData: {
-      firstName,
-      lastName,
-      phoneNormalized,
-      districtId: input.districtId,
-    },
-    metadata: {
-      ministryId: input.ministryId,
-      networkId: input.networkId,
-      source: "public_form",
-    },
-  });
 
   return { ok: true };
 }
@@ -421,7 +353,7 @@ type ActivePersonRow = {
 };
 
 async function scopedActiveRows(actor: AuthContext): Promise<ActivePersonRow[]> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.persons.listActiveWithOrg, {});
   if (isSuperadmin(actor)) return rows;
   if (actor.ministryIds.length === 0) return [];
@@ -486,7 +418,7 @@ export async function listPersonsForActor(
   const pageRows = filtered.slice(offset, offset + pageSize);
 
   const [{ ministryById, networkById }] = await Promise.all([getMinistryNetworkMaps()]);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const districts = await client.query(api.foundation.listActiveDistricts, {});
   const districtById = Object.fromEntries(districts.map((d) => [d._id as string, d]));
 
@@ -542,7 +474,7 @@ function computeStats(scoped: ActivePersonRow[]) {
 
 export async function getPersonForActor(actorUserId: string, personId: string) {
   const actor = await requireActor(actorUserId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const person = await client.query(api.persons.getById, {
     personId: personId as Id<"persons">,
   });
@@ -629,7 +561,7 @@ export async function updatePersonForActor(
     throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Edición cross-ministry bloqueada.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   let firstName: string | undefined;
   let lastName: string | undefined;
   if (patch.fullName) {
@@ -684,7 +616,39 @@ export async function listCatalogsForGanar(
   actorUserId: string | null,
   opts?: { ministryId?: string; networkId?: string; publicMode?: boolean },
 ) {
-  const client = getConvexHttpClient();
+  if (opts?.publicMode) {
+    const publicClient = getPublicConvexClient();
+    const [districtRows, networkRows, ministryRowsRaw] = await Promise.all([
+      publicClient.query(api.foundation.listActiveDistricts, {}),
+      publicClient.query(api.foundation.listActiveNetworks, {}),
+      publicClient.query(api.foundation.listActiveMinistries, {}),
+    ]);
+    const districts = [...districtRows]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((d) => ({ id: d._id as string, name: d.name }));
+    let activeNetworks = networkRows
+      .filter((n) => n.isActive && n.code !== "ninos")
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((n) => ({
+        id: n._id as string,
+        code: n.code as string,
+        name: n.name,
+        isActive: n.isActive,
+      }));
+    if (opts.networkId) {
+      activeNetworks = activeNetworks.filter((n) => n.id === opts.networkId);
+    }
+    let ministryRows = ministryRowsRaw
+      .filter((m) => m.isActive)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code))
+      .map((m) => ({ id: m._id as string, code: m.code, name: m.name, isActive: m.isActive }));
+    if (opts.ministryId) {
+      ministryRows = ministryRows.filter((m) => m.id === opts.ministryId);
+    }
+    return { districts, networks: activeNetworks, ministries: ministryRows };
+  }
+
+  const client = await getAuthenticatedConvexClient();
   const [districtRows, networkRows, allMinistryRows] = await Promise.all([
     client.query(api.foundation.listActiveDistricts, {}),
     listNetworks(),

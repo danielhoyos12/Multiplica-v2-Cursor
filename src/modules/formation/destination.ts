@@ -25,7 +25,7 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export type DestinoLevel = 1 | 2 | 3;
 
@@ -46,7 +46,7 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -58,7 +58,7 @@ async function currentOrg(personId: string) {
 }
 
 async function getLevelProgress(personId: string, level: DestinoLevel) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: LEVEL_PROCESS[level],
@@ -77,7 +77,7 @@ async function appendEvent(params: {
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   await client
     .mutation(api.formation.appendProcessEvent, {
       progressId: params.progressId as Id<"personProcessProgress">,
@@ -86,7 +86,6 @@ async function appendEvent(params: {
       eventType: params.eventType,
       fromStatus: (params.fromStatus ?? undefined) as never,
       toStatus: (params.toStatus ?? undefined) as never,
-      actorUserId: params.actorUserId as Id<"users">,
       note: params.note ?? undefined,
       metadata: params.metadata ?? {},
     })
@@ -94,7 +93,7 @@ async function appendEvent(params: {
 }
 
 export async function ensureDestinoPrograms() {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const defs = [
     {
       code: DESTINO_N1_CODE,
@@ -171,7 +170,7 @@ export async function ensureDestinoN1Eligible(
 ) {
   const existing = await getLevelProgress(personId, 1);
   if (existing && existing.status !== "pending") return existing;
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -191,7 +190,7 @@ export async function ensureDestinoN1Eligible(
 export async function assertDestinoEligible(personId: string, level: DestinoLevel) {
   if (level === 1) {
     // Official: Consolidar completed (Pre+Encuentro+Post). UDV is NOT a gate.
-    const client = getConvexHttpClient();
+    const client = await getAuthenticatedConvexClient();
     const consolidar = await client.query(api.formation.getProgress, {
       personId: personId as Id<"persons">,
       processType: "consolidar",
@@ -222,7 +221,7 @@ export async function assertDestinoEligible(personId: string, level: DestinoLeve
       "Capacitación Destino 2 debe estar formalmente completada.",
     );
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const re = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: "reencuentro",
@@ -248,7 +247,7 @@ export async function isDestinoLevelEligible(personId: string, level: DestinoLev
 
 async function getProgramByLevel(level: DestinoLevel) {
   await ensureDestinoPrograms();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = await client.query(api.formation.getProgramByCode, { code: LEVEL_CODE[level] });
   if (!program) {
     throw new DomainError(DomainErrorCode.CONFIGURATION_ERROR, "Programa Destino no configurado.");
@@ -265,7 +264,7 @@ async function assertCycleStaffOrManage(
   if (hasPermission(actor, "destination.manage") || hasPermission(actor, "school.cycles.manage")) {
     return;
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const staff = await client.query(api.formation.getCycleStaff, {
     cycleId: cycleId as Id<"trainingCycles">,
     userId: actor.userId as Id<"users">,
@@ -299,7 +298,7 @@ async function assertCycleStaffOrManage(
  * Does NOT count leaders of the 12 — this is PERSONS, not G12 leaders.
  */
 export async function countActiveCellMembersForPerson(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.formation.countActiveCellMembers, {
     personId: personId as Id<"persons">,
   });
@@ -307,7 +306,7 @@ export async function countActiveCellMembersForPerson(personId: string) {
 
 export async function evaluateLevelRequirements(personId: string, level: DestinoLevel) {
   const program = await getProgramByLevel(level);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const requirements = (
     await client.query(api.formation.listRequirements, { programId: program.id as Id<"trainingPrograms"> })
   ).filter((r) => r.isActive && r.isRequired);
@@ -414,7 +413,7 @@ export async function createDestinoCycle(
     throw new DomainError(DomainErrorCode.DESTINATION_INVALID_LEVEL, "Nivel inválido.");
   }
   const program = await getProgramByLevel(raw.level);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = withId(
     await client
       .mutation(api.formation.createCycle, {
@@ -423,7 +422,6 @@ export async function createDestinoCycle(
         startDate: raw.startDate,
         endDate: raw.endDate,
         ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
-        createdByUserId: actorUserId as Id<"users">,
       })
       .catch(mapConvexError),
   );
@@ -448,7 +446,7 @@ export async function assignCycleStaff(
 ) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "training.cycles.assign_staff", { type: "training" });
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return withId(
     await client
       .mutation(api.formation.assignCycleStaff, {
@@ -479,7 +477,7 @@ export async function enrollDestino(
   await assertProcessAccess(actor, raw.personId, org.ministryId);
 
   const program = await getProgramByLevel(raw.level);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: raw.cycleId as Id<"trainingCycles">,
   });
@@ -585,7 +583,7 @@ export async function markAcademicCompleted(
     throw new DomainError(DomainErrorCode.DESTINATION_ALREADY_COMPLETED, "Nivel ya completado.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
     const enrollment = await client.query(api.formation.getEnrollment, {
       enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
@@ -670,7 +668,7 @@ export async function completeDestinoLevel(
     );
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   // Apply overrides if requested
   if (raw.overrideRequirementIds?.length) {
@@ -694,7 +692,6 @@ export async function completeDestinoLevel(
           programId: program.id as Id<"trainingPrograms">,
           requirementId: requirementId as Id<"trainingCompletionRequirements">,
           reason: raw.overrideReason.trim(),
-          actorUserId: actorUserId as Id<"users">,
         })
         .catch(mapConvexError);
       await writeAuditLog({
@@ -872,7 +869,7 @@ export async function listDestinoEligible(actorUserId: string, level: DestinoLev
   if (!hasPermission(actor, "destination.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.DESTINATION_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   if (level === 1) {
     // Consolidar completed and N1 not completed (UDV is NOT a gate)
@@ -961,7 +958,7 @@ export async function getDestinoDashboardCounts(actorUserId: string) {
   if (!hasPermission(actor, "destination.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.DESTINATION_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ministryIds =
     !isSuperadmin(actor) && actor.ministryIds.length
       ? (actor.ministryIds as Id<"ministries">[])
@@ -1004,7 +1001,7 @@ export async function listDestinoCycles(actorUserId: string, level?: DestinoLeve
     throw new DomainError(DomainErrorCode.DESTINATION_ACCESS_DENIED, "Sin permiso.");
   }
   await ensureDestinoPrograms();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (level) {
     const program = await getProgramByLevel(level);
     const cycles = await client.query(api.formation.listCycles, {
@@ -1027,7 +1024,7 @@ export async function getDestinoCycleBoard(actorUserId: string, cycleId: string)
   if (!hasPermission(actor, "destination.read") && !hasPermission(actor, "udv.read")) {
     throw new DomainError(DomainErrorCode.DESTINATION_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: cycleId as Id<"trainingCycles">,
   });

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { DashboardBoard } from "@/components/dashboard/dashboard-board";
 import { hasPermission, isSuperadmin } from "@/modules/authorization";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 import { DomainError } from "@/lib/errors";
 import { userFacingErrorMessage } from "@/lib/user-facing-errors";
 import { getExecutiveDashboard } from "@/modules/reporting";
@@ -36,7 +36,7 @@ export default async function DashboardPage({
   const params = await searchParams;
   const period = (params.periodo as PeriodKey | undefined) ?? "this_month";
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [allMinistries, allNetworks] = await Promise.all([
     client.query(api.organization.listMinistries, {}),
     client.query(api.organization.listNetworks, {}),

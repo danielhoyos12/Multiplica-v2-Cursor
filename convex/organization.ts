@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
+import { requireActiveAppUser, requirePermission } from "./lib/identity";
 import { conflict, notFound } from "./lib/errors";
 import { now } from "./lib/time";
 import { userDoc } from "./users";
@@ -59,6 +60,8 @@ export const listMinistries = query({
   args: {},
   returns: v.array(ministryDoc),
   handler: async (ctx) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db.query("ministries").collect();
     return rows.sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
   },
@@ -68,6 +71,8 @@ export const getMinistry = query({
   args: { ministryId: v.id("ministries") },
   returns: v.union(ministryDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db.get("ministries", args.ministryId);
   },
 });
@@ -77,6 +82,8 @@ export const listNetworks = query({
   args: {},
   returns: v.array(networkDoc),
   handler: async (ctx) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db.query("networks").collect();
     return rows.sort((a, b) => a.sortOrder - b.sortOrder);
   },
@@ -86,6 +93,8 @@ export const getNetwork = query({
   args: { networkId: v.id("networks") },
   returns: v.union(networkDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db.get("networks", args.networkId);
   },
 });
@@ -95,6 +104,8 @@ export const listUsers = query({
   args: {},
   returns: v.array(userDoc),
   handler: async (ctx) => {
+    await requirePermission(ctx, "users.read");
+
     return await ctx.db.query("users").withIndex("by_email").order("asc").take(500);
   },
 });
@@ -104,6 +115,8 @@ export const listUserRoleAssignments = query({
   args: {},
   returns: v.array(userRoleAssignmentView),
   handler: async (ctx) => {
+    await requirePermission(ctx, "users.read");
+
     const assignments = await ctx.db
       .query("userRoleAssignments")
       .order("desc")
@@ -146,6 +159,8 @@ export const createMinistry = mutation({
   },
   returns: ministryDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "ministry.manage");
+
     const existing = await ctx.db
       .query("ministries")
       .withIndex("by_code", (q) => q.eq("code", args.code))
@@ -175,6 +190,8 @@ export const updateMinistry = mutation({
   },
   returns: ministryDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "ministry.manage");
+
     const before = await ctx.db.get("ministries", args.ministryId);
     if (!before) return notFound("Ministerio no encontrado.");
 
@@ -204,6 +221,8 @@ export const setMinistryActive = mutation({
   },
   returns: ministryDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "ministry.manage");
+
     const before = await ctx.db.get("ministries", args.ministryId);
     if (!before) return notFound("Ministerio no encontrado.");
 
@@ -225,10 +244,11 @@ export const assignMinistryResponsible = mutation({
   args: {
     ministryId: v.id("ministries"),
     responsibleUserId: v.union(v.id("users"), v.null()),
-    createdByUserId: v.optional(v.id("users")),
-  },
+    },
   returns: ministryDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "users.assign_roles");
+
     const ministry = await ctx.db.get("ministries", args.ministryId);
     if (!ministry) return notFound("Ministerio no encontrado.");
 
@@ -263,7 +283,7 @@ export const assignMinistryResponsible = mutation({
         roleId: leaderGeneralRole._id,
         ministryId: args.ministryId,
         startsAt: ts,
-        createdByUserId: args.createdByUserId,
+        createdByUserId: actor._id,
         createdAt: ts,
       });
     }

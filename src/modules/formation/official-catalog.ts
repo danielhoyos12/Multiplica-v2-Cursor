@@ -10,7 +10,7 @@
 import type { Id } from "../../../convex/_generated/dataModel";
 import { withId } from "@/lib/convex-doc";
 import { mapConvexError } from "@/lib/convex-errors";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 import {
   CONSOLIDAR_FAMILY,
   DESTINO_FAMILY,
@@ -224,7 +224,7 @@ export const OFFICIAL_PROGRAM_SEEDS: ProgramSeed[] = [
 
 /** Idempotent official catalog seed. Does not invent doctrinal class names. */
 export async function ensureOfficialCatalog() {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const results = await client
     .mutation(api.formation.seedOfficialCatalog, {
       seeds: OFFICIAL_PROGRAM_SEEDS.map((seed) => ({
@@ -265,7 +265,7 @@ export async function getProgressStatus(
   personId: string,
   processType: string,
 ): Promise<string | null> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: processType as never,

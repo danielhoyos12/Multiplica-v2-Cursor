@@ -16,6 +16,7 @@ import type * as foundation from "../foundation.js";
 import type * as health from "../health.js";
 import type * as leadership from "../leadership.js";
 import type * as lib_errors from "../lib/errors.js";
+import type * as lib_identity from "../lib/identity.js";
 import type * as lib_ids from "../lib/ids.js";
 import type * as lib_time from "../lib/time.js";
 import type * as organization from "../organization.js";
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   health: typeof health;
   leadership: typeof leadership;
   "lib/errors": typeof lib_errors;
+  "lib/identity": typeof lib_identity;
   "lib/ids": typeof lib_ids;
   "lib/time": typeof lib_time;
   organization: typeof organization;

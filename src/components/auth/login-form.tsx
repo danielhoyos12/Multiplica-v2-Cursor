@@ -98,10 +98,7 @@ export function LoginForm() {
         </Link>
       </p>
       <p className="text-center text-sm text-[var(--muted)]">
-        ¿No tienes cuenta?{" "}
-        <Link href="/sign-up" className="underline text-[var(--ink)]">
-          Crear cuenta
-        </Link>
+        El acceso es solo para usuarios habilitados por MULTIPLICA.
       </p>
     </form>
   );

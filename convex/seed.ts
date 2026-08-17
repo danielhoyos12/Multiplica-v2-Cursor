@@ -7,7 +7,7 @@ import {
   ROLE_PERMISSION_MAP,
   ROLE_SEEDS,
 } from "../src/db/seeds/data";
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { now } from "./lib/time";
 
@@ -168,8 +168,11 @@ async function seedRolePermissions(ctx: MutationCtx) {
  * Safe to call repeatedly (upserts by natural key / index lookup).
  *
  * Does NOT seed Ministerios Generales (Superadmin setup) or app users.
+ *
+ * Internal-only — not callable from the Next.js client. Run:
+ * `npx convex run seed:seedCatalogs` (CLI uses the admin deploy key).
  */
-export const seedCatalogs = mutation({
+export const seedCatalogs = internalMutation({
   args: {},
   returns: v.object({
     networks: v.number(),

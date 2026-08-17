@@ -14,7 +14,7 @@ import {
   type NetworkCode,
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { formatCellSchedule, type DayOfWeek } from "./schedule";
 import {
@@ -31,7 +31,7 @@ async function requireActor(userId: string): Promise<AuthContext> {
 }
 
 async function listNetworks() {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.organization.listNetworks, {});
 }
 
@@ -45,7 +45,7 @@ async function loadNetwork(networkId: string) {
 }
 
 async function loadMinistry(ministryId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.organization.getMinistry, {
     ministryId: ministryId as Id<"ministries">,
   });
@@ -56,7 +56,7 @@ async function loadMinistry(ministryId: string) {
 }
 
 async function currentPersonOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -68,7 +68,7 @@ async function currentPersonOrg(personId: string) {
 }
 
 async function getCellOrThrow(cellId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.cells.getById, { cellId: cellId as Id<"cells"> });
   if (!row) {
     throw new DomainError(DomainErrorCode.CELL_NOT_FOUND, "Célula no encontrada.");
@@ -99,7 +99,7 @@ async function countActiveCellsForResponsible(
   responsiblePersonId: string,
   excludeCellId?: string,
 ) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.cells.listByResponsible, {
     responsiblePersonId: responsiblePersonId as Id<"persons">,
   });
@@ -215,7 +215,7 @@ export async function createCell(actorUserId: string, raw: CreateCellInput) {
     }
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cell = await client
     .mutation(api.cells.create, {
       name: input.name.trim(),
@@ -295,7 +295,7 @@ export async function updateCell(
     }
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const after = await client
     .mutation(api.cells.update, {
       cellId: cellId as Id<"cells">,
@@ -355,7 +355,7 @@ export async function closeCell(actorUserId: string, cellId: string) {
     ministryId: cell.ministryId as string,
   });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const after = await client
     .mutation(api.cells.close, { cellId: cellId as Id<"cells"> })
     .catch(mapConvexError);
@@ -428,7 +428,7 @@ async function computeCellStats(actor: AuthContext, allRows: CellRow[]) {
 
   let recentAttendanceAvg: number | null = null;
   if (scoped.length > 0) {
-    const client = getConvexHttpClient();
+    const client = await getAuthenticatedConvexClient();
     recentAttendanceAvg = await client.query(api.cells.recentAttendanceAvg, {
       cellIds: scoped.map((c) => c._id),
       limit: 20,
@@ -446,7 +446,7 @@ export async function listCellsForActor(actorUserId: string, filters: CellListFi
   const pageSize = Math.min(50, Math.max(1, filters.pageSize ?? 20));
   const offset = (page - 1) * pageSize;
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const allRows = await client.query(api.cells.listAll, {});
 
   if (!isSuperadmin(actor) && actor.ministryIds.length === 0) {
@@ -548,7 +548,7 @@ export async function listCellsForActor(actorUserId: string, filters: CellListFi
 
 export async function getCellDetail(actorUserId: string, cellId: string) {
   const actor = await requireActor(actorUserId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const detail = await client.query(api.cells.getDetail, { cellId: cellId as Id<"cells"> });
   if (!detail) {
     throw new DomainError(DomainErrorCode.CELL_NOT_FOUND, "Célula no encontrada.");
@@ -672,7 +672,7 @@ export async function addMemberToCell(
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "La célula está cerrada.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const person = await client.query(api.persons.getById, {
     personId: personId as Id<"persons">,
   });
@@ -744,7 +744,7 @@ export async function removeMemberFromCell(
   reason?: string,
 ) {
   const actor = await requireActor(actorUserId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const membership = await client.query(api.cells.getMembershipById, {
     membershipId: membershipId as Id<"cellMemberships">,
   });
@@ -788,7 +788,7 @@ export async function reassignMember(
   reason?: string,
 ) {
   const actor = await requireActor(actorUserId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const membership = await client.query(api.cells.getMembershipById, {
     membershipId: membershipId as Id<"cellMemberships">,
   });
@@ -885,7 +885,7 @@ export async function searchPersonsForCell(
   const query = q.trim();
   if (query.length < 2) return [];
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.persons.searchActiveInMinistry, {
     ministryId: cell.ministryId,
     search: query,
@@ -915,7 +915,7 @@ export async function saveCellAttendance(
   });
 
   const input = saveAttendanceInputSchema.parse(raw);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   const existingBoard = await client.query(api.cells.attendanceBoard, {
     cellId: cellId as Id<"cells">,
@@ -975,7 +975,7 @@ export async function getAttendanceBoard(actorUserId: string, cellId: string, se
     ministryId: cell.ministryId as string,
   });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const board = await client.query(api.cells.attendanceBoard, {
     cellId: cellId as Id<"cells">,
     sessionDate,
@@ -1001,7 +1001,7 @@ export async function getAttendanceBoard(actorUserId: string, cellId: string, se
 
 export async function listCatalogsForCells(actorUserId: string) {
   const actor = await requireActor(actorUserId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [districtRows, networkRows, allMinistryRows] = await Promise.all([
     client.query(api.foundation.listActiveDistricts, {}),
     client.query(api.organization.listNetworks, {}),

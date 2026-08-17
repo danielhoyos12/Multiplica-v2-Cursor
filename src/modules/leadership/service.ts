@@ -14,7 +14,7 @@ import {
   type AuthContext,
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { generateTemporaryPassword } from "./credentials";
 import { buildUsernameBase, nextUsernameCandidate } from "./username";
@@ -32,7 +32,7 @@ async function requireActor(userId: string) {
 }
 
 async function getLeadership(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.leadership.getByPerson, { personId: personId as Id<"persons"> });
 }
 
@@ -41,7 +41,7 @@ export async function isDescendantOf(
   descendantPersonId: string,
 ): Promise<boolean> {
   if (ancestorPersonId === descendantPersonId) return true;
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.leadership.isDescendant, {
     ancestorPersonId: ancestorPersonId as Id<"persons">,
     descendantPersonId: descendantPersonId as Id<"persons">,
@@ -64,7 +64,7 @@ export async function assertTreeAccess(
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -76,7 +76,7 @@ async function currentOrg(personId: string) {
 }
 
 async function countDirectActiveLeaders(leaderPersonId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.leadership.countActiveDirectLeadersFor, {
     leaderPersonId: leaderPersonId as Id<"persons">,
   });
@@ -88,7 +88,7 @@ async function wouldCreateCycle(personId: string, proposedDirectLeaderId: string
 }
 
 async function allocateUsername(firstName: string, lastName: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const base = buildUsernameBase(firstName, lastName);
   for (let attempt = 1; attempt <= 50; attempt += 1) {
     const candidate = nextUsernameCandidate(base, attempt);
@@ -99,7 +99,7 @@ async function allocateUsername(firstName: string, lastName: string) {
 }
 
 async function allocateHumanCode(directLeaderPersonId: string | null, ministryId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (!directLeaderPersonId) {
     const ministry = await client.query(api.organization.getMinistry, {
       ministryId: ministryId as Id<"ministries">,
@@ -220,7 +220,7 @@ export async function markPersonEligible(actorUserId: string, raw: unknown) {
   const intendedDirectLeader =
     input.directLeaderPersonId === undefined ? actor.personId : input.directLeaderPersonId;
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client
     .mutation(api.leadership.markEligible, {
       personId: input.personId as Id<"persons">,
@@ -229,7 +229,6 @@ export async function markPersonEligible(actorUserId: string, raw: unknown) {
       directLeaderPersonId: intendedDirectLeader
         ? (intendedDirectLeader as Id<"persons">)
         : undefined,
-      actorUserId: actorUserId as Id<"users">,
     })
     .catch(mapConvexError);
 
@@ -250,7 +249,7 @@ export async function markPersonEligible(actorUserId: string, raw: unknown) {
 export async function activateLeader(actorUserId: string, raw: unknown) {
   const actor = await requireActor(actorUserId);
   const input = activateLeaderInputSchema.parse(raw);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   const person = await client.query(api.persons.getById, {
     personId: input.personId as Id<"persons">,
@@ -344,19 +343,29 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
         })
         .catch(mapConvexError);
     } else {
-      const created = await clerk.users.createUser({
+      const existingByEmail = await clerk.users.getUserList({
         emailAddress: [email],
-        password: temporaryPassword,
-        skipPasswordChecks: true,
-        skipPasswordRequirement: false,
-        publicMetadata: {
-          mustChangePassword: true,
-          username,
-          personId: input.personId,
-        },
+        limit: 1,
       });
-      clerkUserId = created.id;
-      provisionedNew = true;
+      const already = existingByEmail.data[0];
+      if (already) {
+        clerkUserId = already.id;
+        provisionedNew = false;
+      } else {
+        const created = await clerk.users.createUser({
+          emailAddress: [email],
+          password: temporaryPassword,
+          skipPasswordChecks: true,
+          skipPasswordRequirement: false,
+          publicMetadata: {
+            mustChangePassword: true,
+            username,
+            personId: input.personId,
+          },
+        });
+        clerkUserId = created.id;
+        provisionedNew = true;
+      }
       const inserted = await client
         .mutation(api.users.provisionLeaderUser, {
           personId: input.personId as Id<"persons">,
@@ -379,7 +388,6 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
           roleCode: "leader",
           ministryId: org.ministryId as Id<"ministries">,
           networkId: org.networkId as Id<"networks">,
-          createdByUserId: actorUserId as Id<"users">,
         })
         .catch(mapConvexError);
     }
@@ -412,7 +420,6 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
         primaryCellId: cell._id,
         isMinistryRoot: isRoot,
         humanLeaderCode,
-        actorUserId: actorUserId as Id<"users">,
       })
       .catch(mapConvexError);
 
@@ -513,7 +520,7 @@ export async function deactivateLeader(actorUserId: string, personId: string) {
     personId,
   });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const directCount = await countDirectActiveLeaders(personId);
   const ownCells = await client.query(api.cells.listByResponsible, {
     responsiblePersonId: personId as Id<"persons">,
@@ -536,7 +543,6 @@ export async function deactivateLeader(actorUserId: string, personId: string) {
   const row = await client
     .mutation(api.leadership.deactivate, {
       personId: personId as Id<"persons">,
-      actorUserId: actorUserId as Id<"users">,
     })
     .catch(mapConvexError);
 
@@ -572,7 +578,7 @@ export async function listDirectLeaders(actorUserId: string, leaderPersonId: str
     ministryId: leadership.ministryId as string,
   });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.leadership.listDirectLeaders, {
     leaderPersonId: leaderPersonId as Id<"persons">,
   });
@@ -598,7 +604,7 @@ export async function getLeaderDashboard(actorUserId: string, focusPersonId?: st
     );
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const dashboard = await client.query(api.leadership.getDashboard, {
     personId: personId as Id<"persons">,
   });
@@ -661,7 +667,7 @@ export async function getBreadcrumbs(actorUserId: string, personId: string) {
   if (!leadership) return [];
   await assertTreeAccess(actor, personId, leadership.ministryId as string);
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ancestors = await client.query(api.leadership.listAncestors, {
     personId: personId as Id<"persons">,
   });
@@ -680,7 +686,7 @@ export async function countsAsTwelveLeader(personId: string): Promise<boolean> {
   if (!leadership || leadership.status !== "active" || !leadership.primaryCellId) {
     return false;
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cell = await client.query(api.cells.getById, { cellId: leadership.primaryCellId });
   return Boolean(cell && cell.status === "active");
 }
@@ -691,7 +697,7 @@ export async function convertEvangelisticCellToTwelve(
 ) {
   const actor = await requireActor(actorUserId);
   const input = convertTwelveInputSchema.parse(raw);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   const cell = await client.query(api.cells.getById, { cellId: input.cellId as Id<"cells"> });
   if (!cell || cell.type !== "evangelistic" || cell.status !== "active") {
@@ -871,7 +877,7 @@ export async function convertEvangelisticCellToTwelve(
 }
 
 export async function listDescendantLeaderIds(ancestorPersonId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.leadership.listDescendants, {
     ancestorPersonId: ancestorPersonId as Id<"persons">,
   });

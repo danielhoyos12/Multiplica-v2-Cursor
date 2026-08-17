@@ -12,17 +12,15 @@ import {
   isSuperadmin,
   loadAuthContext,
 } from "@/modules/authorization";
-import { ensureAppUserProfile } from "@/modules/organization";
 import { signOut } from "@/server/actions/auth";
 import { getSessionUser } from "@/server/auth";
-import { api, getConvexHttpClient } from "@/server/convex";
-import type { Id } from "../../../convex/_generated/dataModel";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Authenticated layout — READ-ONLY regarding cookies / Auth metadata.
- * Gate cookie is set in middleware / password actions (not during RSC render).
+ * Authenticated pastoral shell. Clerk-signed-in users without a provisioned
+ * MULTIPLICA profile never auto-create one and never enter the dashboard.
  */
 export default async function AuthenticatedLayout({
   children,
@@ -36,33 +34,22 @@ export default async function AuthenticatedLayout({
   const { userId } = await clerkAuth();
   const user = await getSessionUser();
   if (!user) {
-    // Signed into Clerk but no app profile yet (often missing interim DB).
-    // Avoid /login ↔ /dashboard redirect loops.
     if (userId) {
-      redirect("/bienvenida");
+      redirect("/acceso-denegado");
     }
     redirect("/login");
   }
 
+  const client = await getAuthenticatedConvexClient();
+  const profile = await client.query(api.users.getMe, {});
 
-  if (user.email) {
-    await ensureAppUserProfile({
-      clerkUserId: user.clerkUserId,
-      email: user.email,
-    });
-  }
-
-  const profile = await getConvexHttpClient().query(api.users.getById, {
-    userId: user.id as Id<"users">,
-  });
-
-  if (profile && profile.isActive === false) {
-    redirect("/login?error=inactive");
+  if (!profile || profile.isActive === false) {
+    redirect("/acceso-denegado");
   }
 
   const headerList = await headers();
   const pathname = headerList.get("x-multiplica-pathname") ?? "";
-  const mustChange = Boolean(profile?.mustChangePassword);
+  const mustChange = Boolean(profile.mustChangePassword);
 
   if (mustChange && pathname && !isPasswordChangeAllowedPath(pathname)) {
     redirect("/cuenta/cambiar-password");

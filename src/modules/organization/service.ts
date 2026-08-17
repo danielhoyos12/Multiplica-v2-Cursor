@@ -13,7 +13,7 @@ import {
   loadAuthContext,
   type AuthContext,
 } from "@/modules/authorization";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export const ministryInputSchema = z.object({
   code: z
@@ -104,7 +104,7 @@ export async function listMinistriesForActor(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   assertCanView(actor, { type: "ministry" });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [ministries, users] = await Promise.all([
     client.query(api.organization.listMinistries, {}),
     client.query(api.organization.listUsers, {}),
@@ -124,7 +124,7 @@ export async function getMinistryForActor(actorUserId: string, ministryId: strin
   const actor = await requireActor(actorUserId);
   assertCanView(actor, { type: "ministry", id: ministryId });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ministry = await client.query(api.organization.getMinistry, {
     ministryId: ministryId as Id<"ministries">,
   });
@@ -144,7 +144,7 @@ export async function createMinistry(actorUserId: string, input: MinistryInput) 
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "Código humano inválido.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const created = await client
     .mutation(api.organization.createMinistry, {
       code: parsed.code,
@@ -175,7 +175,7 @@ export async function updateMinistry(
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "ministry.manage", { type: "ministry", id: ministryId });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const before = await client.query(api.organization.getMinistry, {
     ministryId: ministryId as Id<"ministries">,
   });
@@ -218,7 +218,7 @@ export async function setMinistryActive(
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "ministry.manage", { type: "ministry", id: ministryId });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const before = await client.query(api.organization.getMinistry, {
     ministryId: ministryId as Id<"ministries">,
   });
@@ -261,7 +261,7 @@ export async function assignMinistryResponsible(
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "users.assign_roles", { type: "ministry", id: ministryId });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const before = await client.query(api.organization.getMinistry, {
     ministryId: ministryId as Id<"ministries">,
   });
@@ -275,7 +275,6 @@ export async function assignMinistryResponsible(
       responsibleUserId: responsibleUserId
         ? (responsibleUserId as Id<"users">)
         : null,
-      createdByUserId: actorUserId as Id<"users">,
     })
     .catch(mapConvexError);
 
@@ -301,7 +300,7 @@ export async function listNetworksForActor(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   assertCanView(actor, { type: "network" });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.organization.listNetworks, {});
 
   return rows.map((row) => ({
@@ -320,7 +319,7 @@ export async function listUsersForAdmin(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "users.read", { type: "user" });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.organization.listUsers, {});
 
   return rows.map((row) => ({
@@ -337,7 +336,7 @@ export async function listUserRoleAssignments(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "users.read", { type: "user" });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.organization.listUserRoleAssignments, {});
 
   return rows.map((row) => ({
@@ -353,22 +352,14 @@ export async function listUserRoleAssignments(actorUserId: string) {
 }
 
 /**
- * Ensures the Convex `users` profile exists for the authenticated identity
- * (idempotent — see `convex/users.ts` `ensureProfile`).
+ * Links a Clerk identity to an already-provisioned MULTIPLICA user.
+ * Never creates a new active user for an unknown identity.
  */
-export async function ensureAppUserProfile(input: {
-  clerkUserId: string;
-  email: string;
-  displayName?: string | null;
-}) {
-  const client = getConvexHttpClient();
+export async function ensureAppUserProfile() {
+  const client = await getAuthenticatedConvexClient();
   const profile = await client
-    .mutation(api.users.ensureProfile, {
-      authSubject: input.clerkUserId,
-      email: input.email,
-      displayName: input.displayName ?? undefined,
-    })
+    .mutation(api.users.linkProvisionedIdentity, {})
     .catch(mapConvexError);
-
+  if (!profile) return null;
   return toAppUser(profile);
 }

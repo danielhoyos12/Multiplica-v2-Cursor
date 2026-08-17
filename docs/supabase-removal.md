@@ -34,7 +34,7 @@
 
 ## Interim Postgres
 
-**Pastoral runtime no usa Postgres.** Los módulos bajo `src/modules/*` y `src/app/*` llaman Convex (`getConvexHttpClient`).
+**Pastoral runtime no usa Postgres.** Los módulos bajo `src/modules/*` y `src/app/*` llaman Convex (`getAuthenticatedConvexClient` / `getPublicConvexClient`).
 
 `getDb()` / `DATABASE_URL` solo quedan para seed legacy opcional (`src/db/seeds/run.ts`). No configures `*.supabase.co`.
 

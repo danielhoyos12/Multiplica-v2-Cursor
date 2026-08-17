@@ -1,7 +1,7 @@
 /**
  * Unified executive / pastoral dashboard assembler.
  */
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { getBreadcrumbs } from "@/modules/leadership/service";
 
@@ -88,7 +88,7 @@ async function getTransferMetrics(
   scope: DashboardScope,
   period: PeriodRange,
 ): Promise<TransferMetrics> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [snapshot, subtreeIds] = await Promise.all([
     client.query(api.reporting.transferRequestsSnapshot, {}),
     scope.mode === "subtree" && scope.rootPersonId

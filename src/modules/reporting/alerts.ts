@@ -1,7 +1,7 @@
 /**
  * Lightweight derived alert engine — does NOT mutate domain state.
  */
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { formatFullName } from "@/modules/ganar/normalize";
 import { getTwelveProgress } from "@/modules/leadership/service";
@@ -27,7 +27,7 @@ export async function computePastoralAlerts(
   scope: DashboardScope,
 ): Promise<PastoralAlert[]> {
   const alerts: PastoralAlert[] = [];
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const stalledBeforeMs = Date.now() - ReportingThresholds.formationStalledDays * 86_400_000;
   const eligibleBeforeMs = Date.now() - ReportingThresholds.eligibleNotActivatedDays * 86_400_000;
 

@@ -1,7 +1,7 @@
 /**
  * System integrity checks — read-only. No auto-repair.
  */
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export type IntegrityViolation = {
   code: string;
@@ -20,7 +20,7 @@ export type IntegrityReport = {
 };
 
 export async function runIntegrityChecks(): Promise<IntegrityReport> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const violations: IntegrityViolation[] = [];
 
   const [leadershipSnapshot, cellsSnapshot, twelveOrdinary, multipleOpenOrg, closureChecks] =

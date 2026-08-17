@@ -54,6 +54,7 @@ npm run dev
 - [Architecture](docs/architecture.md)
 - [Supabase removal](docs/supabase-removal.md) · [Clerk cutover](docs/clerk-auth-cutover.md)
 - [Convex FULL_CUTOVER](docs/convex-full-cutover-plan.md)
+- [Security hardening Clerk ↔ Convex](docs/clerk-auth-cutover.md#security-hardening-clerk--convex)
 - [Domain invariants](docs/domain-invariants.md)
 - [Security](docs/security.md)
 - [Operations](docs/operations-runbook.md)

@@ -1,7 +1,14 @@
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
-import { notFound } from "./lib/errors";
+import { internalMutation, mutation, query } from "./_generated/server";
+import {
+  isSuperadmin,
+  loadAuthzForUser,
+  requireActiveAppUser,
+  requirePermission,
+  requireSelfOrPermission,
+} from "./lib/identity";
+import { forbidden, notFound } from "./lib/errors";
 import { now } from "./lib/time";
 
 /** Mirrors `src/modules/authorization/policy.ts` `AuthContext` (ids as strings). */
@@ -15,77 +22,21 @@ export const authContext = v.object({
 });
 
 /**
- * Loads the full authorization context for a user: active role codes,
- * the union of permissions granted by those roles, and the Ministry/Red
- * scopes implied by active assignments (plus Ministries where the user is
- * the registered `responsibleUserId`, i.e. Líder General).
+ * Loads authorization context. The caller must be the target user or hold
+ * `users.read`. Actor identity always comes from the Clerk JWT.
  */
 export const loadContext = query({
   args: { userId: v.id("users") },
   returns: authContext,
   handler: async (ctx, args) => {
-    const user = await ctx.db.get("users", args.userId);
-
-    const assignments = await ctx.db
-      .query("userRoleAssignments")
-      .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .collect();
-    const activeAssignments = assignments.filter((a) => a.endsAt === undefined);
-
-    const roleIds = [...new Set(activeAssignments.map((a) => a.roleId))];
-    const roleDocs = await Promise.all(roleIds.map((roleId) => ctx.db.get("roles", roleId)));
-    const roleCodes = [
-      ...new Set(
-        roleDocs
-          .filter((role): role is NonNullable<typeof role> => role !== null)
-          .map((role) => role.code),
-      ),
-    ];
-
-    const permissionCodes = new Set<string>();
-    for (const roleId of roleIds) {
-      const rolePermissions = await ctx.db
-        .query("rolePermissions")
-        .withIndex("by_role", (q) => q.eq("roleId", roleId))
-        .collect();
-      for (const rp of rolePermissions) {
-        const permission = await ctx.db.get("permissions", rp.permissionId);
-        if (permission) permissionCodes.add(permission.code);
-      }
-    }
-
-    const ministryIds = new Set<string>();
-    for (const assignment of activeAssignments) {
-      if (assignment.ministryId) ministryIds.add(assignment.ministryId);
-    }
-    const responsibleMinistries = await ctx.db
-      .query("ministries")
-      .withIndex("by_responsibleUserId", (q) => q.eq("responsibleUserId", args.userId))
-      .collect();
-    for (const ministry of responsibleMinistries) {
-      ministryIds.add(ministry._id);
-    }
-
-    const networkIds = new Set<string>();
-    for (const assignment of activeAssignments) {
-      if (assignment.networkId) networkIds.add(assignment.networkId);
-    }
-
-    return {
-      userId: args.userId,
-      personId: user?.personId ?? null,
-      roleCodes,
-      permissionCodes: [...permissionCodes],
-      ministryIds: [...ministryIds],
-      networkIds: [...networkIds],
-    };
+    await requireSelfOrPermission(ctx, args.userId, "users.read");
+    return await loadAuthzForUser(ctx, args.userId);
   },
 });
 
 /**
- * Creates a new active `userRoleAssignments` row. Does not end prior
- * assignments of the same role — callers that need "replace" semantics
- * (e.g. reassigning Líder General) should end the previous row first.
+ * Assigns a role. `createdByUserId` is always the authenticated actor.
+ * Superadmin role can only be granted by an existing superadmin.
  */
 export const assignRole = mutation({
   args: {
@@ -93,10 +44,15 @@ export const assignRole = mutation({
     roleCode: v.string(),
     ministryId: v.optional(v.id("ministries")),
     networkId: v.optional(v.id("networks")),
-    createdByUserId: v.optional(v.id("users")),
   },
   returns: v.id("userRoleAssignments"),
   handler: async (ctx, args) => {
+    const { actor, auth } = await requirePermission(ctx, "users.assign_roles");
+
+    if (args.roleCode === "superadmin" && !isSuperadmin(auth)) {
+      return forbidden("Solo un superadmin puede asignar el rol superadmin.");
+    }
+
     const user = await ctx.db.get("users", args.userId);
     if (!user) return notFound("Usuario no encontrado.");
 
@@ -112,19 +68,17 @@ export const assignRole = mutation({
       ministryId: args.ministryId,
       networkId: args.networkId,
       startsAt: now(),
-      createdByUserId: args.createdByUserId,
+      createdByUserId: actor._id,
       createdAt: now(),
     });
   },
 });
 
 /**
- * Assigns the `superadmin` role to `userId` if that role has been seeded
- * (see `seed.ts`) and the user does not already hold an active assignment
- * of it. No-op (returns `null`) when the role catalog isn't seeded yet, so
- * bootstrap scripts can call this unconditionally.
+ * Bootstrap-only: assign superadmin. Not callable from the Next.js client.
+ * Run via `npx convex run authz:seedSuperadminRole '{"userId":"..."}'`.
  */
-export const seedSuperadminRole = mutation({
+export const seedSuperadminRole = internalMutation({
   args: { userId: v.id("users") },
   returns: v.union(v.id("userRoleAssignments"), v.null()),
   handler: async (ctx, args) => {
@@ -152,5 +106,15 @@ export const seedSuperadminRole = mutation({
       startsAt: now(),
       createdAt: now(),
     });
+  },
+});
+
+/** Current actor's authz context — derived from JWT, not from args. */
+export const loadMyContext = query({
+  args: {},
+  returns: authContext,
+  handler: async (ctx) => {
+    const actor = await requireActiveAppUser(ctx);
+    return await loadAuthzForUser(ctx, actor._id);
   },
 });

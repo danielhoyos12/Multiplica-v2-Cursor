@@ -2,7 +2,7 @@
  * Escalera / formation funnel metrics — derived from person_process_progress.
  * Counts are CURRENT STATE by status, not historical conversion cohorts.
  */
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { buildScopeMatcher } from "./convex-scope";
 import type { DashboardScope } from "./scope";
@@ -67,7 +67,7 @@ function fillStage(
 }
 
 export async function getLadderMetrics(scope: DashboardScope): Promise<LadderMetrics> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [rows, matches, leadershipSnapshot] = await Promise.all([
     client.query(api.formation.listProgressRows, {}),
     buildScopeMatcher(scope),

@@ -21,7 +21,7 @@ import {
   ensureOfficialCatalog,
 } from "@/modules/formation/official-catalog";
 import { ENCUENTRO_CODE, POST_ENCUENTRO_CODE, PRE_ENCUENTRO_CODE } from "@/db/schema";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export type ConsolidarStage = "pre_encuentro" | "encuentro" | "post_encuentro";
 
@@ -36,7 +36,7 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -48,7 +48,7 @@ async function currentOrg(personId: string) {
 }
 
 async function getStageProgress(personId: string, stage: ConsolidarStage) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: stage,
@@ -57,7 +57,7 @@ async function getStageProgress(personId: string, stage: ConsolidarStage) {
 }
 
 async function getConsolidarAggregate(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: "consolidar",
@@ -76,7 +76,7 @@ async function appendStageEvent(params: {
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   await client
     .mutation(api.formation.appendProcessEvent, {
       progressId: params.progressId as Id<"personProcessProgress">,
@@ -85,7 +85,6 @@ async function appendStageEvent(params: {
       eventType: params.eventType,
       fromStatus: (params.fromStatus ?? undefined) as never,
       toStatus: (params.toStatus ?? undefined) as never,
-      actorUserId: params.actorUserId as Id<"users">,
       note: params.note ?? undefined,
       metadata: params.metadata ?? {},
     })
@@ -129,7 +128,7 @@ export async function syncConsolidarAggregate(personId: string, actorUserId: str
   if (!org?.ministryId) return null;
 
   const existing = await getConsolidarAggregate(personId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (existing?.status === "completed") {
     const { ensureDestinoN1Eligible } = await import("./destination");
     await ensureDestinoN1Eligible(personId, org.ministryId, org.networkId);
@@ -198,7 +197,7 @@ export async function createConsolidarCycle(
     ministryId: raw.ministryId ?? undefined,
   });
   await ensureOfficialCatalog();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = await client.query(api.formation.getProgramByCode, {
     code: STAGE_CODE[raw.stage],
   });
@@ -213,7 +212,6 @@ export async function createConsolidarCycle(
         startDate: raw.startDate,
         endDate: raw.endDate,
         ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
-        createdByUserId: actorUserId as Id<"users">,
       })
       .catch(mapConvexError),
   );
@@ -236,7 +234,7 @@ export async function enrollConsolidarStage(
   await assertProcessAccess(actor, raw.personId, org.ministryId);
   await ensureOfficialCatalog();
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: raw.cycleId as Id<"trainingCycles">,
   });
@@ -321,7 +319,7 @@ export async function completeConsolidarStage(
   await assertStageEligible(raw.personId, raw.stage);
 
   const existing = await getStageProgress(raw.personId, raw.stage);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const progress = withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -365,7 +363,7 @@ export async function getConsolidarDashboardCounts(actorUserId: string) {
   if (!hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ministryIds =
     !isSuperadmin(actor) && actor.ministryIds.length
       ? (actor.ministryIds as Id<"ministries">[])
@@ -424,7 +422,7 @@ export async function listConsolidarCycles(actorUserId: string, stage?: Consolid
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
   await ensureOfficialCatalog();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (stage) {
     const program = await client.query(api.formation.getProgramByCode, {
       code: STAGE_CODE[stage],
@@ -448,7 +446,7 @@ export async function getConsolidarCycleBoard(actorUserId: string, cycleId: stri
   if (!hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: cycleId as Id<"trainingCycles">,
   });

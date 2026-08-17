@@ -5,7 +5,7 @@
  * metrics module filters/aggregates them here in plain JS.
  */
 import type { Id } from "../../../convex/_generated/dataModel";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import type { DashboardScope } from "./scope";
 
@@ -17,7 +17,7 @@ export type ScopeMatchRow = {
 
 /** Self + every authorized descendant of `rootPersonId` in the leadership tree. */
 export async function resolveSubtreePersonIds(rootPersonId: string): Promise<Set<string>> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const descendantIds = await client.query(api.formation.getDescendantPersonIds, {
     rootPersonId: rootPersonId as Id<"persons">,
   });

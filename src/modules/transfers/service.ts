@@ -24,7 +24,7 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertTreeAccess, isDescendantOf } from "@/modules/leadership/service";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 const MAX_DIRECT_LEADERS = 12;
 
@@ -80,7 +80,7 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -92,7 +92,7 @@ async function currentOrg(personId: string) {
 }
 
 async function getNetworkCode(networkId: string): Promise<NetworkCode> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const n = await client.query(api.organization.getNetwork, {
     networkId: networkId as Id<"networks">,
   });
@@ -101,7 +101,7 @@ async function getNetworkCode(networkId: string): Promise<NetworkCode> {
 }
 
 async function getLeadership(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.leadership.getByPerson, {
     personId: personId as Id<"persons">,
   });
@@ -109,14 +109,14 @@ async function getLeadership(personId: string) {
 }
 
 async function countDirectActive(leaderPersonId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.leadership.countActiveDirectLeadersFor, {
     leaderPersonId: leaderPersonId as Id<"persons">,
   });
 }
 
 async function listOpenCells(responsiblePersonId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.cells.listByResponsible, {
     responsiblePersonId: responsiblePersonId as Id<"persons">,
   });
@@ -124,7 +124,7 @@ async function listOpenCells(responsiblePersonId: string) {
 }
 
 async function countActiveMembers(cellId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [row] = await client.query(api.cells.countActiveMembers, {
     cellIds: [cellId as Id<"cells">],
   });
@@ -132,7 +132,7 @@ async function countActiveMembers(cellId: string) {
 }
 
 async function listSubtreePersonIds(rootPersonId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.leadership.listDescendants, {
     ancestorPersonId: rootPersonId as Id<"persons">,
   });
@@ -153,12 +153,11 @@ export async function rebuildClosureForSubtree(
   newDirectLeaderPersonId: string | null,
   ministryId: string,
 ) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const result = await client
     .mutation(api.leadership.rebuildClosureForMinistry, { ministryId: ministryId as Id<"ministries"> })
     .catch(mapConvexError);
   await writeAuditLog({
-    actorUserId: null,
     action: "closure.rebuilt",
     entityType: "leadership_closure",
     entityId: rootPersonId,
@@ -197,7 +196,7 @@ export async function previewTransfer(
   const actor = await requireActor(actorUserId);
   const input = createTransferInputSchema.parse(raw);
   const org = await currentOrg(input.personId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const person = await client.query(api.persons.getById, {
     personId: input.personId as Id<"persons">,
   });
@@ -373,7 +372,7 @@ export async function createTransferRequest(actorUserId: string, raw: unknown) {
     finalStatus = "approved";
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = withId(
     await client
       .mutation(api.transfers.createRequest, {
@@ -423,7 +422,7 @@ export async function createTransferRequest(actorUserId: string, raw: unknown) {
 export async function approveTransfer(actorUserId: string, requestId: string) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "transfers.approve", { type: "person" });
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   const row = await client.query(api.transfers.getRequest, {
     requestId: requestId as Id<"pastoralTransferRequests">,
@@ -456,7 +455,6 @@ export async function approveTransfer(actorUserId: string, requestId: string) {
     await client
       .mutation(api.transfers.approve, {
         requestId: requestId as Id<"pastoralTransferRequests">,
-        actorUserId: actorUserId as Id<"users">,
       })
       .catch(mapConvexError),
   );
@@ -474,7 +472,7 @@ export async function approveTransfer(actorUserId: string, requestId: string) {
 export async function rejectTransfer(actorUserId: string, requestId: string, reason: string) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "transfers.approve", { type: "person" });
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.transfers.getRequest, {
     requestId: requestId as Id<"pastoralTransferRequests">,
   });
@@ -486,7 +484,6 @@ export async function rejectTransfer(actorUserId: string, requestId: string, rea
     await client
       .mutation(api.transfers.reject, {
         requestId: requestId as Id<"pastoralTransferRequests">,
-        actorUserId: actorUserId as Id<"users">,
         reason,
       })
       .catch(mapConvexError),
@@ -509,7 +506,7 @@ export async function rejectTransfer(actorUserId: string, requestId: string, rea
 export async function executePastoralTransfer(actorUserId: string, requestId: string) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "transfers.execute", { type: "person" });
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   const req = await client.query(api.transfers.getRequest, {
     requestId: requestId as Id<"pastoralTransferRequests">,
@@ -529,7 +526,6 @@ export async function executePastoralTransfer(actorUserId: string, requestId: st
     await client
       .mutation(api.transfers.execute, {
         requestId: requestId as Id<"pastoralTransferRequests">,
-        actorUserId: actorUserId as Id<"users">,
       })
       .catch(mapConvexError),
   );
@@ -556,7 +552,7 @@ export async function listTransferRequests(
   if (!hasPermission(actor, "transfers.read")) {
     throw new DomainError(DomainErrorCode.TRANSFER_INVALID_ACTOR, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ministryIds =
     !isSuperadmin(actor) && actor.ministryIds.length
       ? (actor.ministryIds as Id<"ministries">[])
@@ -582,7 +578,7 @@ export async function buildDeactivationPlan(actorUserId: string, personId: strin
   await assertTreeAccess(actor, personId, leadership.ministryId);
 
   const openCells = await listOpenCells(personId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const members: Array<{
     personId: string;
     fullName: string;

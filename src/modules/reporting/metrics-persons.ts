@@ -5,7 +5,7 @@
  * HISTORICAL NEW: persons.registered_at in period ∩ currently in scope
  *   (leader/subtree) or registered while scoped — documented in metrics defs.
  */
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { buildScopeMatcher } from "./convex-scope";
 import { formatPctChange, type PeriodRange } from "./period";
@@ -29,7 +29,7 @@ export async function getPersonMetrics(
   scope: DashboardScope,
   period: PeriodRange,
 ): Promise<PersonMetrics> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [snapshot, matches] = await Promise.all([
     client.query(api.reporting.personsSnapshot, {}),
     buildScopeMatcher(scope),
@@ -87,7 +87,7 @@ export async function getNewPersonsWeeklySeries(
   scope: DashboardScope,
   weeks = 8,
 ): Promise<Array<{ weekStart: string; count: number }>> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [snapshot, matches] = await Promise.all([
     client.query(api.reporting.personsSnapshot, {}),
     buildScopeMatcher(scope),

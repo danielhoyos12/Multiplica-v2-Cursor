@@ -2,7 +2,7 @@
  * Operational reports — same scope as dashboards. Paginated. No prayer text.
  */
 import type { Id } from "../../../convex/_generated/dataModel";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
@@ -67,7 +67,7 @@ export async function runReport(
   await assertReportsAccess(scope);
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 50));
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const matches = await buildScopeMatcher(scope);
 
   if (type === "persons") {

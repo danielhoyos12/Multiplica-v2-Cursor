@@ -6,11 +6,11 @@ import {
   passwordGateCookieOptions,
 } from "@/lib/password-change-gate";
 import { safeInternalPath } from "@/lib/safe-redirect";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 /**
  * Post-auth landing (e.g. password recovery). Clerk owns the OAuth/code exchange;
- * this route syncs the password-gate cookie from the DB profile.
+ * this route syncs the password-gate cookie from the provisioned app profile.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -23,9 +23,12 @@ export async function GET(request: Request) {
 
   let mustChange = false;
   try {
-    const client = getConvexHttpClient();
-    const profile = await client.query(api.users.getByAuthSubject, { authSubject: userId });
-    mustChange = Boolean(profile?.mustChangePassword);
+    const client = await getAuthenticatedConvexClient();
+    const profile = await client.query(api.users.getMe, {});
+    if (!profile) {
+      return NextResponse.redirect(new URL("/acceso-denegado", request.url));
+    }
+    mustChange = Boolean(profile.mustChangePassword);
   } catch {
     mustChange = false;
   }

@@ -10,12 +10,12 @@ import {
   passwordGateCookieOptions,
 } from "@/lib/password-change-gate";
 import { requireSessionUser } from "@/server/auth";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export async function clearMustChangePasswordAction() {
   try {
     const user = await requireSessionUser();
-    const client = getConvexHttpClient();
+    const client = await getAuthenticatedConvexClient();
     await client.mutation(api.users.setMustChangePassword, {
       userId: user.id as Id<"users">,
       value: false,

@@ -19,7 +19,7 @@ import {
 import { formatFullName } from "@/modules/ganar/normalize";
 import { isDescendantOf } from "@/modules/leadership/service";
 import { UDV_PROGRAM_CODE } from "@/db/schema";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import {
   authorizeRecoveryInputSchema,
@@ -49,7 +49,7 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -79,7 +79,7 @@ export async function assertProcessAccess(
   if (actor.personId && actor.personId === personId) return;
   if (actor.personId && (await isDescendantOf(actor.personId, personId))) return;
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   // Assigned consolidator / leader of cell membership
   if (actor.personId) {
@@ -103,7 +103,7 @@ export async function assertProcessAccess(
 }
 
 async function getProgress(personId: string, processType: "consolidar" | "udv" | "destino") {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType,
@@ -122,7 +122,7 @@ async function appendEvent(params: {
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   await client
     .mutation(api.formation.appendProcessEvent, {
       progressId: params.progressId as Id<"personProcessProgress">,
@@ -131,7 +131,6 @@ async function appendEvent(params: {
       eventType: params.eventType,
       fromStatus: (params.fromStatus ?? undefined) as never,
       toStatus: (params.toStatus ?? undefined) as never,
-      actorUserId: params.actorUserId as Id<"users">,
       note: params.note ?? undefined,
       metadata: params.metadata ?? {},
     })
@@ -139,7 +138,7 @@ async function appendEvent(params: {
 }
 
 export async function ensureUdvProgram() {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = withId(
     await client.mutation(api.formation.ensureProgram, {
       code: UDV_PROGRAM_CODE,
@@ -199,7 +198,7 @@ export async function startConsolidation(actorUserId: string, raw: unknown) {
     return existing;
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const assignedLeaderPersonId = input.assignedLeaderPersonId ?? actor.personId ?? undefined;
 
   const row = withId(
@@ -257,7 +256,7 @@ export async function completeConsolidation(actorUserId: string, raw: unknown) {
     return progress;
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -300,7 +299,7 @@ async function ensureUdvEligibleRow(
 ) {
   const existing = await getProgress(personId, "udv");
   if (existing) return existing;
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -337,7 +336,7 @@ export async function pauseProcess(actorUserId: string, raw: unknown) {
     );
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -390,7 +389,7 @@ export async function resumeProcess(actorUserId: string, raw: unknown) {
   }
   if (progress.status === "in_progress") return progress;
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -422,7 +421,7 @@ export async function createTrainingCycle(actorUserId: string, raw: CreateCycleI
   });
 
   const program = await ensureUdvProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = withId(
     await client
       .mutation(api.formation.createCycle, {
@@ -431,7 +430,6 @@ export async function createTrainingCycle(actorUserId: string, raw: CreateCycleI
         startDate: input.startDate,
         endDate: input.endDate,
         ministryId: (input.ministryId || undefined) as Id<"ministries"> | undefined,
-        createdByUserId: actorUserId as Id<"users">,
       })
       .catch(mapConvexError),
   );
@@ -448,7 +446,7 @@ export async function createTrainingCycle(actorUserId: string, raw: CreateCycleI
 
 export async function activateTrainingCycle(actorUserId: string, cycleId: string) {
   const actor = await requireActor(actorUserId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: cycleId as Id<"trainingCycles">,
   });
@@ -484,7 +482,7 @@ export async function activateTrainingCycle(actorUserId: string, cycleId: string
 
 export async function closeTrainingCycle(actorUserId: string, cycleId: string) {
   const actor = await requireActor(actorUserId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: cycleId as Id<"trainingCycles">,
   });
@@ -522,7 +520,7 @@ export async function enrollInUdv(actorUserId: string, raw: unknown) {
   });
   await assertProcessAccess(actor, input.personId, consolidar.ministryId);
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: input.cycleId as Id<"trainingCycles">,
   });
@@ -613,7 +611,7 @@ export async function recordTrainingAttendance(actorUserId: string, raw: RecordA
     throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Sin permiso de asistencia formativa.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const enrollment = await client.query(api.formation.getEnrollment, {
     enrollmentId: input.enrollmentId as Id<"trainingEnrollments">,
   });
@@ -731,7 +729,7 @@ export async function authorizeAttendanceRecovery(actorUserId: string, raw: unkn
     throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Sin permiso de asistencia formativa.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getAttendanceById, {
     attendanceId: input.attendanceId as Id<"trainingAttendance">,
   });
@@ -759,7 +757,6 @@ export async function authorizeAttendanceRecovery(actorUserId: string, raw: unkn
     await client
       .mutation(api.formation.authorizeRecovery, {
         attendanceId: row._id,
-        actorUserId: actorUserId as Id<"users">,
         note: input.note?.trim() || undefined,
       })
       .catch(mapConvexError),
@@ -804,7 +801,7 @@ export async function completeUdv(actorUserId: string, raw: unknown) {
     throw new DomainError(DomainErrorCode.CONSOLIDATION_REQUIRED, "Consolidar debe estar completado.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -1056,7 +1053,7 @@ export async function getProcessDashboardCounts(
   if (!hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   const allProcessTypes = [
     "consolidar",
@@ -1205,7 +1202,7 @@ export async function listProcessPeople(
   if (!hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const page = filters.page ?? 1;
   const pageSize = Math.min(filters.pageSize ?? 40, 100);
   const offset = (page - 1) * pageSize;
@@ -1294,7 +1291,7 @@ export async function listUdvCycles(actorUserId: string) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
   const program = await ensureUdvProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycles = await client.query(api.formation.listCycles, {
     programIds: [program.id as Id<"trainingPrograms">],
   });
@@ -1306,7 +1303,7 @@ export async function getUdvCycleBoard(actorUserId: string, cycleId: string) {
   if (!hasPermission(actor, "udv.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: cycleId as Id<"trainingCycles">,
   });
@@ -1363,7 +1360,7 @@ export async function getUdvCycleBoard(actorUserId: string, cycleId: string) {
 
 export async function getPersonsProcessSummary(personIds: string[]) {
   if (personIds.length === 0) return {};
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.formation.listProgressByPersons, {
     personIds: personIds as Id<"persons">[],
   });

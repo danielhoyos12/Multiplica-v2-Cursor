@@ -1,6 +1,5 @@
-import type { Id } from "../../../convex/_generated/dataModel";
 import { mapConvexError } from "@/lib/convex-errors";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 const SENSITIVE_KEY_PATTERN =
   /^(password|token|secret|authorization|api[_-]?key|service[_-]?role|prayer[_-]?request|peticion(_de_oracion)?)$/i;
@@ -39,13 +38,15 @@ export type WriteAuditLogInput = {
   requestId?: string | null;
 };
 
-/** Writes an append-only audit row via `convex/audit.ts` `write`. */
+/**
+ * Writes an append-only audit row. Convex derives `actorUserId` from the
+ * Clerk JWT; the optional input field is ignored for identity.
+ */
 export async function writeAuditLog(input: WriteAuditLogInput) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   await client
     .mutation(api.audit.write, {
-      actorUserId: input.actorUserId ? (input.actorUserId as Id<"users">) : null,
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId ?? null,

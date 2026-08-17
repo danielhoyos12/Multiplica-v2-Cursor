@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { requireActiveAppUser, requirePermission } from "./lib/identity";
 import { conflict, invalidArgument, notFound } from "./lib/errors";
 import { now } from "./lib/time";
 
@@ -172,6 +173,8 @@ export const listRequests = query({
     v.object({ request: transferRequestDoc, firstName: v.string(), lastName: v.string() }),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     let rows: Doc<"pastoralTransferRequests">[];
     if (args.status) {
       rows = await ctx.db
@@ -226,6 +229,8 @@ export const getPersonSnapshot = query({
     activeDirectLeaderCount: v.number(),
   }),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const org = await currentOrgInternal(ctx.db, args.personId);
     const leadership = await getLeadershipInternal(ctx.db, args.personId);
     const openCells = (
@@ -290,6 +295,8 @@ export const createRequest = mutation({
   },
   returns: transferRequestDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "transfers.request");
+
     const ts = now();
     const id = await ctx.db.insert("pastoralTransferRequests", {
       personId: args.personId,
@@ -316,9 +323,11 @@ export const createRequest = mutation({
 });
 
 export const approve = mutation({
-  args: { requestId: v.id("pastoralTransferRequests"), actorUserId: v.id("users") },
+  args: { requestId: v.id("pastoralTransferRequests"), },
   returns: transferRequestDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "transfers.approve");
+
     const row = await ctx.db.get("pastoralTransferRequests", args.requestId);
     if (!row) return notFound("Solicitud no encontrada.");
     if (row.status === "executed") return conflict("Ya ejecutada.");
@@ -328,7 +337,7 @@ export const approve = mutation({
     const ts = now();
     await ctx.db.patch("pastoralTransferRequests", args.requestId, {
       status: "approved",
-      approvedByUserId: args.actorUserId,
+      approvedByUserId: actor._id,
       approvedAt: ts,
       updatedAt: ts,
     });
@@ -338,19 +347,19 @@ export const approve = mutation({
 
 export const reject = mutation({
   args: {
-    requestId: v.id("pastoralTransferRequests"),
-    actorUserId: v.id("users"),
-    reason: v.string(),
+    requestId: v.id("pastoralTransferRequests"), reason: v.string(),
   },
   returns: transferRequestDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "transfers.approve");
+
     const row = await ctx.db.get("pastoralTransferRequests", args.requestId);
     if (!row) return notFound("Solicitud no encontrada.");
     if (row.status === "executed") return conflict("Ya ejecutada.");
     const ts = now();
     await ctx.db.patch("pastoralTransferRequests", args.requestId, {
       status: "rejected",
-      rejectedByUserId: args.actorUserId,
+      rejectedByUserId: actor._id,
       rejectedAt: ts,
       rejectionReason: args.reason,
       updatedAt: ts,
@@ -360,9 +369,11 @@ export const reject = mutation({
 });
 
 export const execute = mutation({
-  args: { requestId: v.id("pastoralTransferRequests"), actorUserId: v.id("users") },
+  args: { requestId: v.id("pastoralTransferRequests"), },
   returns: transferRequestDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "transfers.execute");
+
     const req = await ctx.db.get("pastoralTransferRequests", args.requestId);
     if (!req) return notFound("Solicitud no encontrada.");
     if (req.status === "executed") return conflict("Ya ejecutada.");
@@ -413,7 +424,7 @@ export const execute = mutation({
         networkId,
         effectiveFrom: ts,
         changeReason: `transfer:${req.transferType}`,
-        createdByUserId: args.actorUserId,
+        createdByUserId: actor._id,
         createdAt: ts,
       });
 
@@ -455,7 +466,7 @@ export const execute = mutation({
         ministryId: req.destinationMinistryId ?? req.sourceMinistryId,
         reason: req.reason,
         transferRequestId: req._id,
-        actorUserId: args.actorUserId,
+        actorUserId: actor._id,
         changedAt: ts,
       });
       affectedMinistries.add(parentLead.ministryId);
@@ -543,7 +554,7 @@ export const execute = mutation({
           newDirectLeaderPersonId: res.newDirectLeaderPersonId,
           reason: "deactivation_plan",
           transferRequestId: req._id,
-          actorUserId: args.actorUserId,
+          actorUserId: actor._id,
           changedAt: ts,
         });
       }
@@ -570,7 +581,7 @@ export const execute = mutation({
           newResponsiblePersonId: undefined,
           reason: "leader_deactivation",
           transferRequestId: req._id,
-          actorUserId: args.actorUserId,
+          actorUserId: actor._id,
           changedAt: ts,
         });
       }
@@ -579,7 +590,7 @@ export const execute = mutation({
         await ctx.db.patch("personLeadership", leadership._id, {
           status: "inactive",
           deactivatedAt: ts,
-          deactivatedByUserId: args.actorUserId,
+          deactivatedByUserId: actor._id,
           primaryCellId: undefined,
           updatedAt: ts,
         });
@@ -616,7 +627,7 @@ export const execute = mutation({
             ministryId: req.destinationMinistryId,
             networkId: req.destinationNetworkId ?? a.networkId,
             startsAt: ts,
-            createdByUserId: args.actorUserId,
+            createdByUserId: actor._id,
             createdAt: ts,
           });
         }
@@ -625,7 +636,7 @@ export const execute = mutation({
 
     await ctx.db.patch("pastoralTransferRequests", args.requestId, {
       status: "executed",
-      executedByUserId: args.actorUserId,
+      executedByUserId: actor._id,
       executedAt: ts,
       updatedAt: ts,
     });

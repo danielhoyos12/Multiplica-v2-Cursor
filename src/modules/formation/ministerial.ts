@@ -19,7 +19,7 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 const PROCESS = "escuela_ministerial" as const;
 
@@ -28,7 +28,7 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -40,7 +40,7 @@ async function currentOrg(personId: string) {
 }
 
 async function getEmProgress(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: PROCESS,
@@ -49,7 +49,7 @@ async function getEmProgress(personId: string) {
 }
 
 async function getDestinoN3(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: "destino_n3",
@@ -67,7 +67,7 @@ async function appendEvent(params: {
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   await client
     .mutation(api.formation.appendProcessEvent, {
       progressId: params.progressId as Id<"personProcessProgress">,
@@ -76,7 +76,6 @@ async function appendEvent(params: {
       eventType: params.eventType,
       fromStatus: (params.fromStatus ?? undefined) as never,
       toStatus: (params.toStatus ?? undefined) as never,
-      actorUserId: params.actorUserId as Id<"users">,
       note: params.note ?? undefined,
       metadata: params.metadata ?? {},
     })
@@ -84,7 +83,7 @@ async function appendEvent(params: {
 }
 
 export async function ensureEmProgram() {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = withId(
     await client
       .mutation(api.formation.ensureProgram, {
@@ -140,7 +139,7 @@ export async function ensureEmEligible(
   networkId: string | null,
 ) {
   const existing = await getEmProgress(personId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (existing) {
     if (existing.status === "pending") {
       return withId(
@@ -196,7 +195,7 @@ export async function isEmEligible(personId: string) {
 
 async function getEmProgram() {
   await ensureEmProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = await client.query(api.formation.getProgramByCode, { code: EM_PROGRAM_CODE });
   if (!program) {
     throw new DomainError(DomainErrorCode.CONFIGURATION_ERROR, "Programa EM no configurado.");
@@ -216,7 +215,7 @@ async function assertCycleStaffOrManage(
   ) {
     return;
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const staff = await client.query(api.formation.getCycleStaff, {
     cycleId: cycleId as Id<"trainingCycles">,
     userId: actor.userId as Id<"users">,
@@ -243,7 +242,7 @@ async function assertCycleStaffOrManage(
 
 export async function evaluateEmRequirements(personId: string) {
   const program = await getEmProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const requirements = (
     await client.query(api.formation.listRequirements, { programId: program.id as Id<"trainingPrograms"> })
   ).filter((r) => r.isActive && r.isRequired);
@@ -312,7 +311,7 @@ export async function createEmCycle(
     ministryId: raw.ministryId ?? undefined,
   });
   const program = await getEmProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = withId(
     await client
       .mutation(api.formation.createCycle, {
@@ -321,7 +320,6 @@ export async function createEmCycle(
         startDate: raw.startDate,
         endDate: raw.endDate,
         ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
-        createdByUserId: actorUserId as Id<"users">,
       })
       .catch(mapConvexError),
   );
@@ -355,7 +353,7 @@ export async function enrollEm(actorUserId: string, raw: { personId: string; cyc
   await assertProcessAccess(actor, raw.personId, org.ministryId);
 
   const program = await getEmProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: raw.cycleId as Id<"trainingCycles">,
   });
@@ -462,7 +460,7 @@ export async function markEmAcademicCompleted(
     );
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
     const enrollment = await client.query(api.formation.getEnrollment, {
       enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
@@ -546,7 +544,7 @@ export async function completeEm(
     );
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (raw.overrideRequirementIds?.length) {
     if (!hasPermission(actor, "destination.override_requirement") && !isSuperadmin(actor)) {
       throw new DomainError(
@@ -568,7 +566,6 @@ export async function completeEm(
           programId: program.id as Id<"trainingPrograms">,
           requirementId: requirementId as Id<"trainingCompletionRequirements">,
           reason: raw.overrideReason.trim(),
-          actorUserId: actorUserId as Id<"users">,
         })
         .catch(mapConvexError);
     }
@@ -663,7 +660,7 @@ export async function pauseEm(actorUserId: string, personId: string, note?: stri
   if (!progress || progress.status === "completed") {
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "No se puede pausar.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -702,7 +699,7 @@ export async function resumeEm(actorUserId: string, personId: string) {
   if (!progress || progress.status !== "paused") {
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "No está pausado.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -736,7 +733,7 @@ export async function listEmEligible(actorUserId: string) {
   if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const n3Done = (
     await client.query(api.formation.listProgressRows, { processTypes: ["destino_n3"], statuses: ["completed"] })
   ).map((r) => ({
@@ -769,7 +766,7 @@ export async function getEmDashboardCounts(actorUserId: string) {
   if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ministryIds =
     !isSuperadmin(actor) && actor.ministryIds.length
       ? (actor.ministryIds as Id<"ministries">[])
@@ -797,7 +794,7 @@ export async function listEmCycles(actorUserId: string) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
   const program = await getEmProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycles = await client.query(api.formation.listCycles, {
     programIds: [program.id as Id<"trainingPrograms">],
   });
@@ -809,7 +806,7 @@ export async function getEmCycleBoard(actorUserId: string, cycleId: string) {
   if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: cycleId as Id<"trainingCycles">,
   });

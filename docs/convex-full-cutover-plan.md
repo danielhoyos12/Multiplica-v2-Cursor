@@ -40,6 +40,16 @@ npm run dev
 
 Env requerido: `NEXT_PUBLIC_CONVEX_URL`, Clerk keys, `CLERK_JWT_ISSUER_DOMAIN` en el deployment Convex.
 
+## Security hardening Clerk ↔ Convex
+
+Ver [`docs/clerk-auth-cutover.md`](./clerk-auth-cutover.md). Resumen:
+
+- Authz real en Convex via `ctx.auth` (no `actorUserId` de cliente).
+- JWT Clerk template `convex` en SSR (`getAuthenticatedConvexClient`).
+- Sin signup público; alta solo por `provisionLeaderUser` / `activateLeader`.
+- `seedCatalogs` y `seedSuperadminRole` son `internalMutation`.
+- `/api/ready` = Clerk + Convex `health.ping` (no Postgres).
+
 ---
 
-**STATUS: FULL_CUTOVER CODE COMPLETE — UAT STAGING PENDING**
+**STATUS: FULL_CUTOVER CODE COMPLETE — HARDENING IN PR #23 — UAT STAGING PENDING**

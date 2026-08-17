@@ -21,7 +21,7 @@ import {
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
 import { markPersonEligible } from "@/modules/leadership/service";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 const PROCESS = "enviar" as const;
 
@@ -48,7 +48,7 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -60,13 +60,13 @@ async function currentOrg(personId: string) {
 }
 
 async function getProgress(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.send.getProgress, { personId: personId as Id<"persons"> });
   return row ? withId(row) : null;
 }
 
 async function getEm3Status(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return client.query(api.send.getEm3Status, { personId: personId as Id<"persons"> });
 }
 
@@ -97,7 +97,7 @@ export async function ensureSendEligible(
   networkId: string | null,
 ) {
   await assertSendEligible(personId);
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return withId(
     await client
       .mutation(api.send.ensureEligible, {
@@ -126,14 +126,13 @@ export async function startSend(actorUserId: string, raw: unknown) {
     throw new DomainError(DomainErrorCode.SEND_ALREADY_COMPLETED, "Enviar ya completado.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = withId(
     await client
       .mutation(api.send.markEnviarProgress, {
         personId: input.personId as Id<"persons">,
         ministryId: org.ministryId as Id<"ministries">,
         networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
-        actorUserId: actorUserId as Id<"users">,
         note: input.note,
       })
       .catch(mapConvexError),
@@ -170,14 +169,13 @@ export async function completeSend(actorUserId: string, raw: unknown) {
     throw new DomainError(DomainErrorCode.SEND_ALREADY_COMPLETED, "Enviar ya completado.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const updated = withId(
     await client
       .mutation(api.send.completeEnviar, {
         personId: input.personId as Id<"persons">,
         ministryId: org.ministryId as Id<"ministries">,
         networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
-        actorUserId: actorUserId as Id<"users">,
         note: input.note,
       })
       .catch(mapConvexError),
@@ -250,7 +248,7 @@ export async function anointAfterSend(actorUserId: string, raw: unknown) {
     directLeaderPersonId: input.directLeaderPersonId ?? undefined,
   });
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const lead = await client.query(api.leadership.getByPerson, {
     personId: input.personId as Id<"persons">,
   });
@@ -267,7 +265,7 @@ export async function getSendDashboardCounts(actorUserId: string, focusLeaderPer
   if (!hasPermission(actor, "send.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.SEND_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
 
   let personIds: Id<"persons">[] | undefined;
   let ministryIds: Id<"ministries">[] | undefined;
@@ -320,7 +318,7 @@ export async function listSendPeople(
   if (!hasPermission(actor, "send.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.SEND_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ministryIds =
     !isSuperadmin(actor) && actor.ministryIds.length
       ? (actor.ministryIds as Id<"ministries">[])
@@ -341,7 +339,7 @@ export async function listSendPeople(
 }
 
 export async function getPersonSendSummary(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const summary = await client.query(api.send.getPersonSendSummary, {
     personId: personId as Id<"persons">,
   });

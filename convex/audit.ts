@@ -1,16 +1,15 @@
 import { v } from "convex/values";
 
 import { mutation } from "./_generated/server";
+import { requireActiveAppUser } from "./lib/identity";
 import { now } from "./lib/time";
 
 /**
- * Append-only audit trail writer. Mirrors the shape previously written via
- * Drizzle `auditLogs` (see `src/modules/audit/logger.ts`). No read/query is
- * exposed here yet — add one when an audit viewer module needs it.
+ * Append-only audit trail writer. Actor is always the authenticated identity.
+ * Client-supplied `actorUserId` is ignored (removed) to prevent impersonation.
  */
 export const write = mutation({
   args: {
-    actorUserId: v.optional(v.union(v.id("users"), v.null())),
     action: v.string(),
     entityType: v.string(),
     entityId: v.optional(v.union(v.string(), v.null())),
@@ -22,8 +21,9 @@ export const write = mutation({
   },
   returns: v.id("auditLogs"),
   handler: async (ctx, args) => {
+    const actor = await requireActiveAppUser(ctx);
     return await ctx.db.insert("auditLogs", {
-      actorUserId: args.actorUserId ?? undefined,
+      actorUserId: actor._id,
       action: args.action,
       entityType: args.entityType,
       entityId: args.entityId ?? undefined,

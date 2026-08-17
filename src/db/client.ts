@@ -14,11 +14,12 @@ let dbInstance: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 /**
  * Legacy-only Drizzle client. The MULTIPLICA pastoral data plane is Convex
- * (see `src/server/convex.ts`) — auth, organization (ministries/networks/
- * users/roles), and authorization all read/write Convex now. `getDb()`
- * must NOT be used by modules already migrated to Convex; it exists solely
- * for pastoral modules still pending cutover (cells, formation, transfers,
- * reporting, …). Supabase-hosted Postgres is rejected regardless.
+ * (`src/server/convex.ts`) — auth (Clerk), organization, and all pastoral
+ * modules (persons, cells, leadership, formation, transfers, reporting)
+ * read/write Convex. `getDb()` must not be used by `src/modules/*` or
+ * `src/app/*`. It remains solely for historical Postgres seeds
+ * (`src/db/seeds/run.ts`) and unused verify scripts. Supabase-hosted
+ * Postgres is rejected regardless.
  * Never import from client components.
  */
 export function getDb() {

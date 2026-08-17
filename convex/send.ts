@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
+import { requireActiveAppUser, requireMinistryScope, requirePermission } from "./lib/identity";
 import { now } from "./lib/time";
 
 /**
@@ -95,6 +96,8 @@ export const listSendPeople = query({
     }),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     let rows: Doc<"personProcessProgress">[] = await ctx.db
       .query("personProcessProgress")
       .withIndex("by_processType_status", (q) =>
@@ -139,6 +142,8 @@ export const getPersonSendSummary = query({
     ),
   }),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const progress = await getSendProgressInternal(ctx.db, args.personId);
     const leadership = await ctx.db
       .query("personLeadership")
@@ -161,6 +166,8 @@ export const ensureEligible = mutation({
   },
   returns: sendProgressDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "leaders.mark_eligible");
+
     const existing = await getSendProgressInternal(ctx.db, args.personId);
     const ts = now();
     if (existing) {
@@ -195,12 +202,13 @@ export const markEnviarProgress = mutation({
   args: {
     personId: v.id("persons"),
     ministryId: v.id("ministries"),
-    networkId: v.optional(v.id("networks")),
-    actorUserId: v.id("users"),
-    note: v.optional(v.string()),
+    networkId: v.optional(v.id("networks")), note: v.optional(v.string()),
   },
   returns: sendProgressDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "send.manage");
+    await requireMinistryScope(ctx, args.ministryId);
+
     const existing = await getSendProgressInternal(ctx.db, args.personId);
     const ts = now();
     let row = existing;
@@ -236,7 +244,7 @@ export const markEnviarProgress = mutation({
       eventType: "started",
       fromStatus: existing?.status,
       toStatus: "in_progress",
-      actorUserId: args.actorUserId,
+      actorUserId: actor._id,
       note: args.note,
       metadata: {},
       createdAt: ts,
@@ -251,12 +259,12 @@ export const completeEnviar = mutation({
   args: {
     personId: v.id("persons"),
     ministryId: v.id("ministries"),
-    networkId: v.optional(v.id("networks")),
-    actorUserId: v.id("users"),
-    note: v.optional(v.string()),
+    networkId: v.optional(v.id("networks")), note: v.optional(v.string()),
   },
   returns: sendProgressDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "send.complete");
+
     let progress = await getSendProgressInternal(ctx.db, args.personId);
     const ts = now();
     if (!progress) {
@@ -270,7 +278,7 @@ export const completeEnviar = mutation({
         networkId: args.networkId,
         startedAt: ts,
         completedAt: ts,
-        completedByUserId: args.actorUserId,
+        completedByUserId: actor._id,
         metadata: { leadership_activated: false, cell_created: false },
         createdAt: ts,
         updatedAt: ts,
@@ -281,7 +289,7 @@ export const completeEnviar = mutation({
         status: "completed",
         currentStep: "completado",
         completedAt: ts,
-        completedByUserId: args.actorUserId,
+        completedByUserId: actor._id,
         updatedAt: ts,
         metadata: {
           ...(progress.metadata ?? {}),
@@ -298,7 +306,7 @@ export const completeEnviar = mutation({
       processType: PROCESS,
       eventType: "completed",
       toStatus: "completed",
-      actorUserId: args.actorUserId,
+      actorUserId: actor._id,
       note: args.note,
       metadata: { leadership_activated: false },
       createdAt: ts,

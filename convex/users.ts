@@ -1,7 +1,15 @@
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
-import { notFound } from "./lib/errors";
+import {
+  findUserByAuthSubject,
+  findUserByEmail,
+  requireActiveAppUser,
+  requireIdentity,
+  requirePermission,
+  requireSelfOrPermission,
+} from "./lib/identity";
+import { forbidden, notFound } from "./lib/errors";
 import { now } from "./lib/time";
 
 /** Matches the `users` table shape in `schema.ts`. */
@@ -21,64 +29,90 @@ export const userDoc = v.object({
 });
 
 /**
- * Upserts the app `users` profile for an authenticated identity.
- * Match order: `authSubject` (stable Clerk/Convex identity subject) first,
- * then `email` (covers linking a pre-existing invited/legacy user row).
- * Idempotent — safe to call on every sign-in.
+ * Current app user for the Clerk JWT, or null when the identity is not
+ * provisioned. Never inserts a `users` row.
+ *
+ * PUBLIC to authenticated Clerk sessions (returns only the caller's row).
+ */
+export const getMe = query({
+  args: {},
+  returns: v.union(userDoc, v.null()),
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    return await findUserByAuthSubject(ctx, identity.subject);
+  },
+});
+
+/**
+ * Links a Clerk identity to an already-provisioned MULTIPLICA user.
+ * Match order: authSubject, then email of a pre-created row whose
+ * `authSubject` is empty or already this subject.
+ *
+ * NEVER creates a new user. NEVER activates an inactive user. NEVER assigns roles.
+ */
+export const linkProvisionedIdentity = mutation({
+  args: {},
+  returns: v.union(userDoc, v.null()),
+  handler: async (ctx) => {
+    const identity = await requireIdentity(ctx);
+    const ts = now();
+
+    const bySubject = await findUserByAuthSubject(ctx, identity.subject);
+    if (bySubject) return bySubject;
+
+    const email =
+      typeof identity.email === "string" && identity.email.trim()
+        ? identity.email.trim().toLowerCase()
+        : "";
+    if (!email) return null;
+
+    const byEmail = await findUserByEmail(ctx, email);
+    if (!byEmail) return null;
+
+    const existingSubject = byEmail.authSubject?.trim() ?? "";
+    const alreadyLinkedToOther =
+      existingSubject.length > 0 && existingSubject !== identity.subject;
+    if (alreadyLinkedToOther) {
+      return forbidden("Este correo ya está vinculado a otra identidad.");
+    }
+
+    await ctx.db.patch("users", byEmail._id, {
+      authSubject: identity.subject,
+      updatedAt: ts,
+    });
+    return (await ctx.db.get("users", byEmail._id))!;
+  },
+});
+
+/**
+ * @deprecated Use `getMe` + `linkProvisionedIdentity`. Kept as a no-insert
+ * alias so older callers cannot auto-provision unknown Clerk identities.
  */
 export const ensureProfile = mutation({
   args: {
-    authSubject: v.string(),
-    email: v.string(),
+    authSubject: v.optional(v.string()),
+    email: v.optional(v.string()),
     displayName: v.optional(v.string()),
   },
-  returns: userDoc,
-  handler: async (ctx, args) => {
-    const ts = now();
-
-    const byAuthSubject = await ctx.db
-      .query("users")
-      .withIndex("by_authSubject", (q) => q.eq("authSubject", args.authSubject))
-      .unique();
-
-    if (byAuthSubject) {
+  returns: v.union(userDoc, v.null()),
+  handler: async (ctx) => {
+    const identity = await requireIdentity(ctx);
+    const existing = await findUserByAuthSubject(ctx, identity.subject);
+    if (existing) {
+      const ts = now();
+      const email =
+        typeof identity.email === "string" ? identity.email.trim() : "";
       const patch: Record<string, unknown> = {};
-      if (byAuthSubject.email !== args.email) patch.email = args.email;
-      if (args.displayName !== undefined && byAuthSubject.displayName !== args.displayName) {
-        patch.displayName = args.displayName;
-      }
+      if (email && existing.email !== email) patch.email = email;
       if (Object.keys(patch).length > 0) {
         patch.updatedAt = ts;
-        await ctx.db.patch("users", byAuthSubject._id, patch);
-        return (await ctx.db.get("users", byAuthSubject._id))!;
+        await ctx.db.patch("users", existing._id, patch);
+        return (await ctx.db.get("users", existing._id))!;
       }
-      return byAuthSubject;
+      return existing;
     }
-
-    const byEmail = await ctx.db
-      .query("users")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
-      .unique();
-
-    if (byEmail) {
-      await ctx.db.patch("users", byEmail._id, {
-        authSubject: args.authSubject,
-        displayName: args.displayName ?? byEmail.displayName,
-        updatedAt: ts,
-      });
-      return (await ctx.db.get("users", byEmail._id))!;
-    }
-
-    const userId = await ctx.db.insert("users", {
-      authSubject: args.authSubject,
-      email: args.email,
-      displayName: args.displayName,
-      isActive: true,
-      mustChangePassword: false,
-      createdAt: ts,
-      updatedAt: ts,
-    });
-    return (await ctx.db.get("users", userId))!;
+    return null;
   },
 });
 
@@ -86,10 +120,11 @@ export const getByAuthSubject = query({
   args: { authSubject: v.string() },
   returns: v.union(userDoc, v.null()),
   handler: async (ctx, args) => {
-    return await ctx.db
-      .query("users")
-      .withIndex("by_authSubject", (q) => q.eq("authSubject", args.authSubject))
-      .unique();
+    const identity = await requireIdentity(ctx);
+    if (identity.subject !== args.authSubject) {
+      await requirePermission(ctx, "users.read");
+    }
+    return await findUserByAuthSubject(ctx, args.authSubject);
   },
 });
 
@@ -97,6 +132,7 @@ export const getById = query({
   args: { userId: v.id("users") },
   returns: v.union(userDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireSelfOrPermission(ctx, args.userId, "users.read");
     return await ctx.db.get("users", args.userId);
   },
 });
@@ -105,6 +141,7 @@ export const getByUsername = query({
   args: { username: v.string() },
   returns: v.union(userDoc, v.null()),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "users.read");
     return await ctx.db
       .query("users")
       .withIndex("by_username", (q) => q.eq("username", args.username))
@@ -116,6 +153,7 @@ export const getByPersonId = query({
   args: { personId: v.id("persons") },
   returns: v.union(userDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
     return await ctx.db
       .query("users")
       .withIndex("by_personId", (q) => q.eq("personId", args.personId))
@@ -124,10 +162,9 @@ export const getByPersonId = query({
 });
 
 /**
- * Creates (or, if a `users` row already exists for `personId`, updates) the
- * app profile provisioned during leader activation. Credential creation
- * itself (Clerk `authSubject`) happens in the Next layer — this mutation
- * only persists the resulting profile.
+ * Creates (or updates) the app profile provisioned during leader activation.
+ * Clerk `createUser` happens in Next; this mutation only persists the row.
+ * Actor is derived from the Clerk JWT — never from client-supplied IDs.
  */
 export const provisionLeaderUser = mutation({
   args: {
@@ -139,6 +176,8 @@ export const provisionLeaderUser = mutation({
   },
   returns: userDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "leaders.activate");
+
     const existing = await ctx.db
       .query("users")
       .withIndex("by_personId", (q) => q.eq("personId", args.personId))
@@ -150,6 +189,7 @@ export const provisionLeaderUser = mutation({
         username: existing.username ?? args.username,
         email: existing.email || args.email,
         displayName: args.displayName ?? existing.displayName,
+        authSubject: args.authSubject || existing.authSubject,
         updatedAt: ts,
       });
       return (await ctx.db.get("users", existing._id))!;
@@ -170,11 +210,14 @@ export const provisionLeaderUser = mutation({
   },
 });
 
-/** Best-effort rollback of a `users` row provisioned during a failed leader activation. */
+/** Rollback of a `users` row provisioned during a failed leader activation. */
 export const remove = mutation({
   args: { userId: v.id("users") },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "leaders.activate");
+    const existing = await ctx.db.get("users", args.userId);
+    if (!existing) return null;
     await ctx.db.delete("users", args.userId);
     return null;
   },
@@ -187,6 +230,10 @@ export const setMustChangePassword = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const actor = await requireActiveAppUser(ctx);
+    if (actor._id !== args.userId) {
+      await requirePermission(ctx, "users.assign_roles");
+    }
     const existing = await ctx.db.get("users", args.userId);
     if (!existing) return notFound("Usuario no encontrado.");
 
@@ -205,6 +252,7 @@ export const setActive = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "users.assign_roles");
     const existing = await ctx.db.get("users", args.userId);
     if (!existing) return notFound("Usuario no encontrado.");
 

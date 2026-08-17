@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { requireActiveAppUser, requireMinistryScope, requirePermission } from "./lib/identity";
 import type { MutationCtx } from "./_generated/server";
 import { conflict, invalidArgument, notFound } from "./lib/errors";
 import { now } from "./lib/time";
@@ -123,6 +124,9 @@ export const create = mutation({
   },
   returns: cellDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "cells.create");
+    await requireMinistryScope(ctx, args.ministryId);
+
     const name = args.name.trim();
     if (!name) return invalidArgument("El nombre de la célula es obligatorio.");
 
@@ -189,6 +193,8 @@ export const update = mutation({
   },
   returns: cellDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "cells.update");
+
     const cell = await ctx.db.get("cells", args.cellId);
     if (!cell) return notFound("Célula no encontrada.");
     if (cell.status === "closed") return conflict("La célula está cerrada.");
@@ -236,6 +242,8 @@ export const close = mutation({
   args: { cellId: v.id("cells") },
   returns: cellDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "cells.update");
+
     const cell = await ctx.db.get("cells", args.cellId);
     if (!cell) return notFound("Célula no encontrada.");
     if (cell.status === "closed") return cell;
@@ -267,6 +275,8 @@ export const convertToTwelve = mutation({
   args: { cellId: v.id("cells") },
   returns: cellDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "g12.convert_twelve");
+
     const cell = await ctx.db.get("cells", args.cellId);
     if (!cell) return notFound("Célula no encontrada.");
     if (cell.type !== "evangelistic") {
@@ -304,6 +314,8 @@ export const addMember = mutation({
   },
   returns: cellMembershipDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "cells.manage_members");
+
     const cell = await ctx.db.get("cells", args.cellId);
     if (!cell) return notFound("Célula no encontrada.");
     if (cell.status === "closed") return conflict("La célula está cerrada.");
@@ -341,6 +353,8 @@ export const setMembershipRole = mutation({
   args: { membershipId: v.id("cellMemberships"), role: membershipRole },
   returns: cellMembershipDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "cells.manage_members");
+
     const membership = await ctx.db.get("cellMemberships", args.membershipId);
     if (!membership) return notFound("Membresía no encontrada.");
     await ctx.db.patch("cellMemberships", args.membershipId, { role: args.role, updatedAt: now() });
@@ -352,6 +366,8 @@ export const getMembershipById = query({
   args: { membershipId: v.id("cellMemberships") },
   returns: v.union(cellMembershipDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db.get("cellMemberships", args.membershipId);
   },
 });
@@ -363,6 +379,8 @@ export const sessionAttendanceCounts = query({
     v.object({ sessionId: v.id("cellAttendanceSessions"), present: v.number(), total: v.number() }),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const results = [];
     for (const sessionId of args.sessionIds) {
       const records = await ctx.db
@@ -383,6 +401,8 @@ export const removeMember = mutation({
   args: { membershipId: v.id("cellMemberships"), reason: v.optional(v.string()) },
   returns: cellMembershipDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "cells.manage_members");
+
     const membership = await ctx.db.get("cellMemberships", args.membershipId);
     if (!membership || membership.status !== "active") {
       return notFound("Membresía no encontrada.");
@@ -408,6 +428,8 @@ export const reassignMember = mutation({
   },
   returns: cellMembershipDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "cells.manage_members");
+
     const membership = await ctx.db.get("cellMemberships", args.membershipId);
     if (!membership || membership.status !== "active") {
       return notFound("Membresía no encontrada.");
@@ -456,6 +478,8 @@ export const saveAttendance = mutation({
   },
   returns: v.id("cellAttendanceSessions"),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "cells.attendance");
+
     const cell = await ctx.db.get("cells", args.cellId);
     if (!cell) return notFound("Célula no encontrada.");
 
@@ -531,6 +555,8 @@ export const list = query({
   },
   returns: v.array(cellDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
 
     let rows: Doc<"cells">[];
@@ -601,6 +627,8 @@ export const getDetail = query({
     v.null(),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const cell = await ctx.db.get("cells", args.cellId);
     if (!cell) return null;
 
@@ -650,6 +678,8 @@ export const getById = query({
   args: { cellId: v.id("cells") },
   returns: v.union(cellDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db.get("cells", args.cellId);
   },
 });
@@ -659,6 +689,8 @@ export const listByResponsible = query({
   args: { responsiblePersonId: v.id("persons") },
   returns: v.array(cellDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db
       .query("cells")
       .withIndex("by_responsiblePersonId", (q) => q.eq("responsiblePersonId", args.responsiblePersonId))
@@ -675,6 +707,8 @@ export const listAll = query({
   args: {},
   returns: v.array(cellDoc),
   handler: async (ctx) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db.query("cells").take(5000);
   },
 });
@@ -684,6 +718,8 @@ export const countActiveMembers = query({
   args: { cellIds: v.array(v.id("cells")) },
   returns: v.array(v.object({ cellId: v.id("cells"), count: v.number() })),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const counts = new Map<Id<"cells">, number>();
     for (const cellId of args.cellIds) {
       const memberships = await ctx.db
@@ -704,6 +740,8 @@ export const recentAttendanceAvg = query({
   args: { cellIds: v.array(v.id("cells")), limit: v.optional(v.number()) },
   returns: v.union(v.number(), v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const cellIdSet = new Set(args.cellIds);
     if (cellIdSet.size === 0) return null;
     const limit = args.limit ?? 20;
@@ -750,6 +788,8 @@ export const attendanceBoard = query({
     ),
   }),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const memberships = await ctx.db
       .query("cellMemberships")
       .withIndex("by_cell", (q) => q.eq("cellId", args.cellId))
@@ -803,6 +843,8 @@ export const listCatalogs = query({
     ministries: v.array(v.object({ _id: v.id("ministries"), code: v.string(), name: v.string() })),
   }),
   handler: async (ctx) => {
+    await requireActiveAppUser(ctx);
+
     const [districts, networks, ministries] = await Promise.all([
       ctx.db
         .query("districts")

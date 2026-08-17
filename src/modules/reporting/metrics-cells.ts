@@ -10,7 +10,7 @@
  * no_recent_attendance: active cell with habitual dayOfWeek; after that weekday
  * + grace hours in America/Lima with no completed/open session in last 7 days.
  */
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { buildScopeMatcher } from "./convex-scope";
 import type { DashboardScope } from "./scope";
@@ -39,7 +39,7 @@ export type CellAttendanceDetail = {
 };
 
 async function scopedCells(scope: DashboardScope) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [snapshot, matches] = await Promise.all([
     client.query(api.reporting.cellsSnapshot, {}),
     buildScopeMatcher(scope),
@@ -108,7 +108,7 @@ function shouldAlertNoRecent(d: CellAttendanceDetail) {
 export async function listCellAttendanceDetails(
   scope: DashboardScope,
 ): Promise<CellAttendanceDetail[]> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cells = (await scopedCells(scope)).filter((c) => c.status !== "closed").slice(0, 300);
 
   const details = await client.query(api.reporting.cellAttendanceDetails, {

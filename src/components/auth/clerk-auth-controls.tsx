@@ -1,15 +1,9 @@
 "use client";
 
-import {
-  Show,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-} from "@clerk/nextjs";
+import { Show, SignInButton, UserButton } from "@clerk/nextjs";
 
 /**
- * Clear Clerk auth controls for signed-out / signed-in states.
- * Sign-up uses modal so it never depends on a misconfigured redirect URL.
+ * Signed-out users can only sign in. Public Clerk sign-up is not offered.
  */
 export function ClerkAuthControls({
   appearance = "light",
@@ -25,16 +19,11 @@ export function ClerkAuthControls({
   return (
     <div className={`flex items-center gap-2 ${muted}`}>
       <Show when="signed-out">
-        <SignInButton mode="modal" forceRedirectUrl="/bienvenida">
+        <SignInButton mode="modal" forceRedirectUrl="/dashboard">
           <button type="button" className={btn}>
             Ingresar
           </button>
         </SignInButton>
-        <SignUpButton mode="modal" forceRedirectUrl="/bienvenida">
-          <button type="button" className={btn}>
-            Crear cuenta
-          </button>
-        </SignUpButton>
       </Show>
       <Show when="signed-in">
         <UserButton />

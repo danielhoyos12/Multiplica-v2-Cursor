@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { requireActiveAppUser, requirePermission, requireSuperadmin } from "./lib/identity";
 import type { DatabaseReader, MutationCtx } from "./_generated/server";
 import { conflict, invalidArgument, notFound } from "./lib/errors";
 import { now } from "./lib/time";
@@ -235,6 +236,8 @@ export const listProgressByPerson = query({
   args: { personId: v.id("persons") },
   returns: v.array(progressDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db
       .query("personProcessProgress")
       .withIndex("by_person", (q) => q.eq("personId", args.personId))
@@ -246,6 +249,8 @@ export const listProgressByPersons = query({
   args: { personIds: v.array(v.id("persons")) },
   returns: v.array(progressDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const results = await Promise.all(
       args.personIds.map((personId) =>
         ctx.db
@@ -265,6 +270,8 @@ export const countProgressByTypeStatus = query({
   },
   returns: v.array(v.object({ processType, status: processStatus, count: v.number() })),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rowsByType = await Promise.all(
       args.processTypes.map((type) =>
         ctx.db
@@ -306,6 +313,8 @@ export const listProgressRows = query({
     }),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     let rows: Doc<"personProcessProgress">[];
     if (args.personIds && args.personIds.length) {
       const perPerson = await Promise.all(
@@ -363,6 +372,8 @@ export const hasAssignedProgress = query({
   args: { personId: v.id("persons"), assignedLeaderPersonId: v.id("persons") },
   returns: v.boolean(),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("personProcessProgress")
       .withIndex("by_assignedLeader", (q) =>
@@ -377,6 +388,8 @@ export const getDescendantPersonIds = query({
   args: { rootPersonId: v.id("persons") },
   returns: v.array(v.id("persons")),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("leadershipClosure")
       .withIndex("by_ancestor_depth", (q) => q.eq("ancestorPersonId", args.rootPersonId).gt("depth", 0))
@@ -389,6 +402,8 @@ export const isPersonInActiveCellUnder = query({
   args: { personId: v.id("persons"), responsiblePersonId: v.id("persons") },
   returns: v.boolean(),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const ownCells = (
       await ctx.db
         .query("cells")
@@ -414,6 +429,8 @@ export const countActiveCellMembers = query({
     cellType: v.union(v.literal("evangelistic"), v.literal("twelve"), v.null()),
   }),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const ownCells = (
       await ctx.db
         .query("cells")
@@ -440,6 +457,8 @@ export const getProgramByCode = query({
   args: { code: v.string() },
   returns: v.union(programDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db
       .query("trainingPrograms")
       .withIndex("by_code", (q) => q.eq("code", args.code))
@@ -451,6 +470,8 @@ export const listProgramsByCodes = query({
   args: { codes: v.array(v.string()) },
   returns: v.array(programDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await Promise.all(
       args.codes.map((code) =>
         ctx.db
@@ -467,6 +488,8 @@ export const listProgramsByFamily = query({
   args: { family: v.string() },
   returns: v.array(programDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db.query("trainingPrograms").collect();
     return rows.filter((r) => r.family === args.family);
   },
@@ -476,6 +499,8 @@ export const listModules = query({
   args: { programId: v.id("trainingPrograms"), activeOnly: v.optional(v.boolean()) },
   returns: v.array(moduleDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("trainingModules")
       .withIndex("by_program_order", (q) => q.eq("programId", args.programId))
@@ -489,6 +514,8 @@ export const listRequirements = query({
   args: { programId: v.id("trainingPrograms") },
   returns: v.array(requirementDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db
       .query("trainingCompletionRequirements")
       .withIndex("by_program", (q) => q.eq("programId", args.programId))
@@ -500,6 +527,8 @@ export const listOverrides = query({
   args: { personId: v.id("persons"), programId: v.id("trainingPrograms") },
   returns: v.array(overrideDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("trainingRequirementOverrides")
       .withIndex("by_person", (q) => q.eq("personId", args.personId))
@@ -512,6 +541,8 @@ export const getCycleStaff = query({
   args: { cycleId: v.id("trainingCycles"), userId: v.id("users") },
   returns: v.union(cycleStaffDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db
       .query("trainingCycleStaff")
       .withIndex("by_cycle_user", (q) => q.eq("cycleId", args.cycleId).eq("userId", args.userId))
@@ -523,6 +554,8 @@ export const listCycles = query({
   args: { programIds: v.array(v.id("trainingPrograms")) },
   returns: v.array(cycleDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await Promise.all(
       args.programIds.map((programId) =>
         ctx.db
@@ -547,6 +580,8 @@ export const listEnrollmentsByCycle = query({
     v.object({ enrollment: enrollmentDoc, firstName: v.string(), lastName: v.string() }),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("trainingEnrollments")
       .withIndex("by_cycle_person", (q) => q.eq("cycleId", args.cycleId))
@@ -576,6 +611,8 @@ export const getEnrollmentByCycleAndPerson = query({
   args: { cycleId: v.id("trainingCycles"), personId: v.id("persons") },
   returns: v.union(enrollmentDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db
       .query("trainingEnrollments")
       .withIndex("by_cycle_person", (q) => q.eq("cycleId", args.cycleId).eq("personId", args.personId))
@@ -587,6 +624,8 @@ export const listAttendanceByEnrollments = query({
   args: { enrollmentIds: v.array(v.id("trainingEnrollments")) },
   returns: v.array(attendanceDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await Promise.all(
       args.enrollmentIds.map((enrollmentId) =>
         ctx.db
@@ -603,6 +642,8 @@ export const getAttendance = query({
   args: { enrollmentId: v.id("trainingEnrollments"), moduleId: v.id("trainingModules") },
   returns: v.union(attendanceDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await ctx.db
       .query("trainingAttendance")
       .withIndex("by_enrollment_module", (q) =>
@@ -639,6 +680,8 @@ export const upsertProgress = mutation({
   },
   returns: progressDoc,
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const existing = await getProgressInternal(ctx.db, args.personId, args.processType);
     const ts = now();
     if (existing) {
@@ -683,12 +726,14 @@ export const appendProcessEvent = mutation({
     eventType: v.string(),
     fromStatus: v.optional(processStatus),
     toStatus: v.optional(processStatus),
-    actorUserId: v.optional(v.id("users")),
+
     note: v.optional(v.string()),
     metadata: v.optional(v.any()),
   },
   returns: v.id("personProcessEvents"),
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "process.update");
+
     return await ctx.db.insert("personProcessEvents", {
       progressId: args.progressId,
       personId: args.personId,
@@ -696,7 +741,7 @@ export const appendProcessEvent = mutation({
       eventType: args.eventType,
       fromStatus: args.fromStatus,
       toStatus: args.toStatus,
-      actorUserId: args.actorUserId,
+      actorUserId: actor._id,
       note: args.note,
       metadata: args.metadata ?? {},
       createdAt: now(),
@@ -848,6 +893,8 @@ export const syncModules = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "school.catalog.manage");
+
     await syncModulesInternal(ctx, args.programId, args.modules, args.deactivateMissing ?? false);
     return null;
   },
@@ -874,6 +921,8 @@ export const syncRequirements = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "school.catalog.manage");
+
     const existing = await ctx.db
       .query("trainingCompletionRequirements")
       .withIndex("by_program", (q) => q.eq("programId", args.programId))
@@ -911,6 +960,8 @@ export const deactivateRequirementType = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "school.catalog.manage");
+
     const rows = await ctx.db
       .query("trainingCompletionRequirements")
       .withIndex("by_program", (q) => q.eq("programId", args.programId))
@@ -933,6 +984,8 @@ export const ensureAcademicRequirement = mutation({
   args: { programId: v.id("trainingPrograms") },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "school.catalog.manage");
+
     const rows = await ctx.db
       .query("trainingCompletionRequirements")
       .withIndex("by_program", (q) => q.eq("programId", args.programId))
@@ -984,6 +1037,8 @@ export const seedOfficialCatalog = mutation({
   },
   returns: v.array(programDoc),
   handler: async (ctx, args) => {
+    await requireSuperadmin(ctx);
+
     const results: Doc<"trainingPrograms">[] = [];
     for (const seed of args.seeds) {
       const program = await ensureProgramInternal(ctx, {
@@ -1070,10 +1125,11 @@ export const createCycle = mutation({
     startDate: v.string(),
     endDate: v.string(),
     ministryId: v.optional(v.id("ministries")),
-    createdByUserId: v.optional(v.id("users")),
-  },
+    },
   returns: cycleDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "school.cycles.manage");
+
     const ts = now();
     const id = await ctx.db.insert("trainingCycles", {
       programId: args.programId,
@@ -1082,7 +1138,7 @@ export const createCycle = mutation({
       endDate: args.endDate,
       status: "planned",
       ministryId: args.ministryId,
-      createdByUserId: args.createdByUserId,
+      createdByUserId: actor._id,
       createdAt: ts,
       updatedAt: ts,
     });
@@ -1094,6 +1150,8 @@ export const activateCycle = mutation({
   args: { cycleId: v.id("trainingCycles") },
   returns: cycleDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "school.cycles.manage");
+
     const cycle = await ctx.db.get("trainingCycles", args.cycleId);
     if (!cycle) return notFound("Ciclo no encontrado.");
     if (cycle.status === "active") return conflict("El ciclo ya está activo.");
@@ -1108,6 +1166,8 @@ export const closeCycle = mutation({
   args: { cycleId: v.id("trainingCycles") },
   returns: cycleDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "school.cycles.manage");
+
     const cycle = await ctx.db.get("trainingCycles", args.cycleId);
     if (!cycle) return notFound("Ciclo no encontrado.");
     if (cycle.status === "closed") return conflict("El ciclo ya está cerrado.");
@@ -1125,6 +1185,8 @@ export const enroll = mutation({
   },
   returns: enrollmentDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "udv.manage");
+
     const existing = await ctx.db
       .query("trainingEnrollments")
       .withIndex("by_cycle_person", (q) => q.eq("cycleId", args.cycleId).eq("personId", args.personId))
@@ -1151,6 +1213,8 @@ export const updateEnrollmentStatus = mutation({
   },
   returns: enrollmentDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "process.update");
+
     const existing = await ctx.db.get("trainingEnrollments", args.enrollmentId);
     if (!existing) return notFound("Inscripción no encontrada.");
     const ts = now();
@@ -1172,6 +1236,8 @@ export const bulkCompleteEnrollmentsForPerson = mutation({
   },
   returns: v.number(),
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "process.update");
+
     const rows = await ctx.db
       .query("trainingEnrollments")
       .withIndex("by_person", (q) => q.eq("personId", args.personId))
@@ -1206,6 +1272,8 @@ export const recordAttendance = mutation({
   },
   returns: attendanceDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "udv.attendance");
+
     const existing = await ctx.db
       .query("trainingAttendance")
       .withIndex("by_enrollment_module", (q) =>
@@ -1238,12 +1306,12 @@ export const recordAttendance = mutation({
 
 export const authorizeRecovery = mutation({
   args: {
-    attendanceId: v.id("trainingAttendance"),
-    actorUserId: v.id("users"),
-    note: v.optional(v.string()),
+    attendanceId: v.id("trainingAttendance"), note: v.optional(v.string()),
   },
   returns: attendanceDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "udv.attendance");
+
     const row = await ctx.db.get("trainingAttendance", args.attendanceId);
     if (!row) return notFound("Asistencia no encontrada.");
     if (row.status !== "absent" && row.status !== "excused") {
@@ -1252,7 +1320,7 @@ export const authorizeRecovery = mutation({
     const ts = now();
     await ctx.db.patch("trainingAttendance", args.attendanceId, {
       status: "recovered",
-      recoveryAuthorizedByUserId: args.actorUserId,
+      recoveryAuthorizedByUserId: actor._id,
       recoveryAuthorizedAt: ts,
       recoveryNote: args.note?.trim() || undefined,
       recordedAt: ts,
@@ -1273,6 +1341,8 @@ export const assignCycleStaff = mutation({
   },
   returns: cycleStaffDoc,
   handler: async (ctx, args) => {
+    await requirePermission(ctx, "training.cycles.assign_staff");
+
     const existing = await ctx.db
       .query("trainingCycleStaff")
       .withIndex("by_cycle_user", (q) => q.eq("cycleId", args.cycleId).eq("userId", args.userId))
@@ -1306,17 +1376,17 @@ export const insertOverride = mutation({
     personId: v.id("persons"),
     programId: v.id("trainingPrograms"),
     requirementId: v.optional(v.id("trainingCompletionRequirements")),
-    reason: v.string(),
-    actorUserId: v.id("users"),
-  },
+    reason: v.string(), },
   returns: v.id("trainingRequirementOverrides"),
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "destination.override_requirement");
+
     return await ctx.db.insert("trainingRequirementOverrides", {
       personId: args.personId,
       programId: args.programId,
       requirementId: args.requirementId,
       reason: args.reason,
-      actorUserId: args.actorUserId,
+      actorUserId: actor._id,
       createdAt: now(),
     });
   },

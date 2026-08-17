@@ -1,16 +1,10 @@
 /**
- * Seeds Convex foundation catalogs (networks, Lima Metropolitana districts,
- * RBAC roles/permissions/role-permission map) via `convex/seed.ts`
- * `seedCatalogs`. Idempotent — safe to run repeatedly.
- *
- * Does NOT seed Ministerios Generales (Superadmin setup) or app users.
+ * Seeds Convex foundation catalogs via internal mutation `seed:seedCatalogs`.
+ * Idempotent. CLI uses the Convex admin key (not the public HTTP client).
  *
  * Usage: npm run db:seed:convex
- * Requires NEXT_PUBLIC_CONVEX_URL (e.g. from `.env.local`, see `npm run convex:dev`).
  */
-import { ConvexHttpClient } from "convex/browser";
-
-import { api } from "../convex/_generated/api";
+import { spawnSync } from "node:child_process";
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -21,18 +15,13 @@ async function main() {
     process.exit(1);
   }
 
-  const client = new ConvexHttpClient(url);
   console.log(`Seeding Convex catalogs… target=${url}`);
-
-  const result = await client.mutation(api.seed.seedCatalogs, {});
-
-  console.log("Convex catalogs seeded:");
-  console.log(`  networks=${result.networks}`);
-  console.log(`  districts=${result.districts}`);
-  console.log(`  roles=${result.roles}`);
-  console.log(`  permissions=${result.permissions}`);
-  console.log(`  rolePermissions=${result.rolePermissions}`);
-  process.exit(0);
+  const result = spawnSync(
+    "npx",
+    ["convex", "run", "seed:seedCatalogs"],
+    { stdio: "inherit", env: process.env },
+  );
+  process.exit(result.status === 0 ? 0 : 1);
 }
 
 main().catch((error) => {

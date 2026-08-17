@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { requireActiveAppUser, requireMinistryScope, requirePermission, requireSuperadmin } from "./lib/identity";
 import type { DatabaseReader, MutationCtx } from "./_generated/server";
 import { conflict, invalidArgument, notFound } from "./lib/errors";
 import { now } from "./lib/time";
@@ -140,11 +141,12 @@ export const markEligible = mutation({
     personId: v.id("persons"),
     ministryId: v.id("ministries"),
     networkId: v.id("networks"),
-    directLeaderPersonId: v.optional(v.id("persons")),
-    actorUserId: v.id("users"),
-  },
+    directLeaderPersonId: v.optional(v.id("persons")), },
   returns: personLeadershipDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "leaders.mark_eligible");
+    await requireMinistryScope(ctx, args.ministryId);
+
     const person = await ctx.db.get("persons", args.personId);
     if (!person || person.deletedAt !== undefined) return notFound("Persona no encontrada.");
 
@@ -159,7 +161,7 @@ export const markEligible = mutation({
         networkId: args.networkId,
         directLeaderPersonId: args.directLeaderPersonId,
         eligibleAt: ts,
-        eligibleByUserId: args.actorUserId,
+        eligibleByUserId: actor._id,
         updatedAt: ts,
       });
       return (await ctx.db.get("personLeadership", existing._id))!;
@@ -173,7 +175,7 @@ export const markEligible = mutation({
       directLeaderPersonId: args.directLeaderPersonId,
       isMinistryRoot: false,
       eligibleAt: ts,
-      eligibleByUserId: args.actorUserId,
+      eligibleByUserId: actor._id,
       createdAt: ts,
       updatedAt: ts,
     });
@@ -192,11 +194,11 @@ export const activate = mutation({
     directLeaderPersonId: v.optional(v.id("persons")),
     primaryCellId: v.id("cells"),
     isMinistryRoot: v.optional(v.boolean()),
-    humanLeaderCode: v.optional(v.string()),
-    actorUserId: v.id("users"),
-  },
+    humanLeaderCode: v.optional(v.string()), },
   returns: personLeadershipDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "leaders.activate");
+
     const leadership = await getLeadership(ctx.db, args.personId);
     if (!leadership) {
       return notFound("La persona necesita estar marcada como apta antes de activarse.");
@@ -205,6 +207,7 @@ export const activate = mutation({
     if (leadership.status !== "eligible") {
       return conflict("La persona debe estar marcada como apta antes de activarse.");
     }
+    await requireMinistryScope(ctx, leadership.ministryId);
 
     const isRoot = args.isMinistryRoot ?? false;
     const directLeaderPersonId = isRoot
@@ -247,7 +250,7 @@ export const activate = mutation({
       humanLeaderCode: args.humanLeaderCode ?? leadership.humanLeaderCode,
       isMinistryRoot: isRoot,
       activatedAt: ts,
-      activatedByUserId: args.actorUserId,
+      activatedByUserId: actor._id,
       updatedAt: ts,
     });
 
@@ -259,13 +262,16 @@ export const activate = mutation({
 
 /** Deactivates a leader. Blocked while they still have active direct leaders or open cells. */
 export const deactivate = mutation({
-  args: { personId: v.id("persons"), actorUserId: v.id("users") },
+  args: { personId: v.id("persons"), },
   returns: personLeadershipDoc,
   handler: async (ctx, args) => {
+    const { actor } = await requirePermission(ctx, "leaders.deactivate");
+
     const leadership = await getLeadership(ctx.db, args.personId);
     if (!leadership || leadership.status !== "active") {
       return notFound("Líder activo no encontrado.");
     }
+    await requireMinistryScope(ctx, leadership.ministryId);
 
     const directCount = await countActiveDirectLeaders(ctx.db, args.personId);
     const ownCells = (
@@ -285,7 +291,7 @@ export const deactivate = mutation({
     await ctx.db.patch("personLeadership", leadership._id, {
       status: "inactive",
       deactivatedAt: ts,
-      deactivatedByUserId: args.actorUserId,
+      deactivatedByUserId: actor._id,
       updatedAt: ts,
     });
 
@@ -303,6 +309,8 @@ export const rebuildClosureForMinistry = mutation({
   args: { ministryId: v.id("ministries") },
   returns: v.object({ leadersProcessed: v.number(), edgesInserted: v.number() }),
   handler: async (ctx, args) => {
+    await requireSuperadmin(ctx);
+
     const existingClosureRows = await ctx.db
       .query("leadershipClosure")
       .withIndex("by_ministry", (q) => q.eq("ministryId", args.ministryId))
@@ -358,6 +366,8 @@ export const getByPerson = query({
   args: { personId: v.id("persons") },
   returns: v.union(personLeadershipDoc, v.null()),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await getLeadership(ctx.db, args.personId);
   },
 });
@@ -367,6 +377,8 @@ export const getManyByPersons = query({
   args: { personIds: v.array(v.id("persons")) },
   returns: v.array(personLeadershipDoc),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await Promise.all(args.personIds.map((personId) => getLeadership(ctx.db, personId)));
     return rows.filter((r): r is NonNullable<typeof r> => r !== null);
   },
@@ -377,6 +389,8 @@ export const listChildrenAny = query({
   args: { directLeaderPersonId: v.id("persons") },
   returns: v.array(v.object({ personId: v.id("persons"), humanLeaderCode: v.optional(v.string()) })),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("personLeadership")
       .withIndex("by_directLeader", (q) => q.eq("directLeaderPersonId", args.directLeaderPersonId))
@@ -390,6 +404,8 @@ export const isHumanCodeTaken = query({
   args: { code: v.string() },
   returns: v.boolean(),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const row = await ctx.db
       .query("personLeadership")
       .withIndex("by_humanLeaderCode", (q) => q.eq("humanLeaderCode", args.code))
@@ -403,6 +419,8 @@ export const countActiveDirectLeadersFor = query({
   args: { leaderPersonId: v.id("persons") },
   returns: v.number(),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await countActiveDirectLeaders(ctx.db, args.leaderPersonId);
   },
 });
@@ -420,6 +438,8 @@ export const listDirectLeaders = query({
     }),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("personLeadership")
       .withIndex("by_directLeader", (q) => q.eq("directLeaderPersonId", args.leaderPersonId))
@@ -452,6 +472,8 @@ export const listEligibleChildren = query({
     v.object({ personId: v.id("persons"), firstName: v.string(), lastName: v.string() }),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("personLeadership")
       .withIndex("by_directLeader", (q) => q.eq("directLeaderPersonId", args.directLeaderPersonId))
@@ -480,6 +502,8 @@ export const listAncestors = query({
     }),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("leadershipClosure")
       .withIndex("by_descendant", (q) => q.eq("descendantPersonId", args.personId))
@@ -509,6 +533,8 @@ export const isDescendant = query({
   args: { ancestorPersonId: v.id("persons"), descendantPersonId: v.id("persons") },
   returns: v.boolean(),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     return await isDescendantInternal(ctx.db, args.ancestorPersonId, args.descendantPersonId);
   },
 });
@@ -518,6 +544,8 @@ export const listDescendants = query({
   args: { ancestorPersonId: v.id("persons") },
   returns: v.array(v.object({ personId: v.id("persons"), depth: v.number() })),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const rows = await ctx.db
       .query("leadershipClosure")
       .withIndex("by_ancestor_depth", (q) => q.eq("ancestorPersonId", args.ancestorPersonId).gt("depth", 0))
@@ -541,6 +569,8 @@ export const getDashboard = query({
     v.null(),
   ),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+
     const leadership = await getLeadership(ctx.db, args.personId);
     if (!leadership) return null;
 

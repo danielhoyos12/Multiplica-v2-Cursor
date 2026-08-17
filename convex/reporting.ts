@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
 import { query } from "./_generated/server";
+import { requireAnyPermission } from "./lib/identity";
 import { getCurrentOrgForPerson } from "./persons";
 
 /**
@@ -40,6 +41,8 @@ export const personsSnapshot = query({
   args: {},
   returns: v.array(personSnapshotRow),
   handler: async (ctx) => {
+    await requireAnyPermission(ctx, ["dashboard.read", "reports.read", "persons.read"]);
+
     const rows = await ctx.db
       .query("persons")
       .withIndex("by_active", (q) => q.eq("isActive", true))
@@ -85,6 +88,8 @@ export const cellsSnapshot = query({
   args: {},
   returns: v.array(cellSnapshotRow),
   handler: async (ctx) => {
+    await requireAnyPermission(ctx, ["dashboard.read", "reports.read", "persons.read"]);
+
     const rows = await ctx.db.query("cells").take(5000);
     return rows.map((c) => ({
       cellId: c._id,
@@ -117,6 +122,8 @@ export const leadershipSnapshot = query({
   args: {},
   returns: v.array(leadershipSnapshotRow),
   handler: async (ctx) => {
+    await requireAnyPermission(ctx, ["dashboard.read", "reports.read", "persons.read"]);
+
     const rows = await ctx.db.query("personLeadership").take(10000);
     return await Promise.all(
       rows.map(async (l) => {
@@ -157,6 +164,8 @@ export const transferRequestsSnapshot = query({
   args: {},
   returns: v.array(transferSnapshotRow),
   handler: async (ctx) => {
+    await requireAnyPermission(ctx, ["dashboard.read", "reports.read", "persons.read"]);
+
     const rows = await ctx.db.query("pastoralTransferRequests").take(5000);
     return await Promise.all(
       rows.map(async (r) => {
@@ -202,6 +211,8 @@ export const cellAttendanceDetails = query({
   args: { cellIds: v.array(v.id("cells")) },
   returns: v.array(cellAttendanceDetailRow),
   handler: async (ctx, args) => {
+    await requireAnyPermission(ctx, ["dashboard.read", "reports.read", "persons.read"]);
+
     const out: Array<{
       cellId: Id<"cells">;
       name: string;
@@ -283,6 +294,8 @@ export const integrityTwelveOrdinaryMembers = query({
   args: {},
   returns: v.array(v.id("cellMemberships")),
   handler: async (ctx) => {
+    await requireAnyPermission(ctx, ["dashboard.read", "reports.read", "persons.read"]);
+
     const twelveCells = (await ctx.db.query("cells").take(5000)).filter((c) => c.type === "twelve");
     const violations: Id<"cellMemberships">[] = [];
     for (const cell of twelveCells) {
@@ -309,6 +322,8 @@ export const integrityMultipleOpenOrgHistory = query({
   args: {},
   returns: v.array(v.id("persons")),
   handler: async (ctx) => {
+    await requireAnyPermission(ctx, ["dashboard.read", "reports.read", "persons.read"]);
+
     const rows = await ctx.db.query("personOrganizationHistory").take(20000);
     const openByPerson = new Map<Id<"persons">, number>();
     for (const r of rows) {
@@ -331,6 +346,8 @@ export const integrityClosureChecks = query({
     closureParentMismatch: v.array(v.id("persons")),
   }),
   handler: async (ctx) => {
+    await requireAnyPermission(ctx, ["dashboard.read", "reports.read", "persons.read"]);
+
     const leaders = (await ctx.db.query("personLeadership").take(10000)).filter(
       (l) => l.status === "active",
     );

@@ -2,9 +2,10 @@
  * G12 leadership metrics — derived from person_leadership + closure + cells.
  * X/12 = active direct leaders with valid cell. eligible does NOT count.
  */
-import type { Id } from "../../../convex/_generated/dataModel";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { ConvexHttpClient } from "convex/browser";
 
+import type { Id } from "../../../convex/_generated/dataModel";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { getTwelveProgress } from "@/modules/leadership/service";
 
@@ -42,7 +43,7 @@ function band(n: number): "0-3" | "4-7" | "8-11" | "12" {
 }
 
 async function scopedLeaders(scope: DashboardScope) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const [snapshot, matches] = await Promise.all([
     client.query(api.reporting.leadershipSnapshot, {}),
     buildScopeMatcher(scope),
@@ -55,7 +56,7 @@ export async function getLeadershipMetrics(
   periodFrom?: Date,
   periodTo?: Date,
 ): Promise<LeadershipMetrics> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const leaders = await scopedLeaders(scope);
 
   let active = 0;
@@ -142,7 +143,7 @@ export async function getLeadershipMetrics(
   };
 }
 
-async function scopedLeaderById(client: ReturnType<typeof getConvexHttpClient>, personId: string) {
+async function scopedLeaderById(client: ConvexHttpClient, personId: string) {
   const leadership = await client.query(api.leadership.getByPerson, { personId: personId as Id<"persons"> });
   if (!leadership) return null;
   const person = await client.query(api.persons.getById, { personId: personId as Id<"persons"> });
@@ -171,7 +172,7 @@ export async function listDirectNodeCards(
   scope: DashboardScope,
   parentPersonId: string,
 ): Promise<TreeNodeCard[]> {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   // Auth already validated via resolveDashboardScope + assertTreeAccess callers
   const [leadershipSnapshot, cellsSnapshot] = await Promise.all([
     client.query(api.reporting.leadershipSnapshot, {}),

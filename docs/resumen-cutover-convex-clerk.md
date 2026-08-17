@@ -336,10 +336,23 @@ npm run dev                  # terminal 2
 
 Rutas útiles:
 
-- Login: `/login`
-- Sign-up: `/sign-up` o modal **Crear cuenta**
-- Post-signup: `/bienvenida`
+- Login: `/login` (sin registro público)
+- Identidad Clerk sin perfil MULTIPLICA: `/acceso-denegado`
 - Smoke Convex: `/convex-dev`
+
+---
+
+## Security hardening Clerk ↔ Convex
+
+Añadido en PR #23 (hardening, no merge automático):
+
+1. **JWT server-side** — `getAuthenticatedConvexClient()` + template `convex`.
+2. **Authz Convex** — `ctx.auth.getUserIdentity()` → `users.authSubject` → RBAC/scope. Sin impersonación por `actorUserId`.
+3. **Provisioning administrado** — no auto-alta; `provisionLeaderUser` en activación de líder.
+4. **Ready** — `/api/health` liveness; `/api/ready` Clerk + Convex ping.
+5. Cadena Clerk issuer → `CLERK_JWT_ISSUER_DOMAIN` → JWT `convex` → `NEXT_PUBLIC_CONVEX_URL` debe coincidir en staging/preview.
+
+HUMAN STEPS: Convex cloud URL en Vercel Preview/staging; Restricted/Invite-only en Clerk Dashboard si la instancia no es la keyless local.
 
 ---
 

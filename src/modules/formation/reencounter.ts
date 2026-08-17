@@ -19,7 +19,7 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
-import { api, getConvexHttpClient } from "@/server/convex";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 const PROCESS = "reencuentro" as const;
 const REENCUENTRO_FAMILY = "reencuentro";
@@ -31,7 +31,7 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const org = await client.query(api.persons.getCurrentOrg, {
     personId: personId as Id<"persons">,
   });
@@ -43,7 +43,7 @@ async function currentOrg(personId: string) {
 }
 
 async function getReProgress(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const row = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: PROCESS,
@@ -61,7 +61,7 @@ async function appendEvent(params: {
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   await client
     .mutation(api.formation.appendProcessEvent, {
       progressId: params.progressId as Id<"personProcessProgress">,
@@ -70,7 +70,6 @@ async function appendEvent(params: {
       eventType: params.eventType,
       fromStatus: (params.fromStatus ?? undefined) as never,
       toStatus: (params.toStatus ?? undefined) as never,
-      actorUserId: params.actorUserId as Id<"users">,
       note: params.note ?? undefined,
       metadata: params.metadata ?? {},
     })
@@ -78,7 +77,7 @@ async function appendEvent(params: {
 }
 
 export async function ensureReencuentroProgram() {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = await client.mutation(api.formation.ensureProgram, {
     code: REENCUENTRO_PROGRAM_CODE,
     name: "Re-Encuentro",
@@ -104,7 +103,7 @@ export async function ensureReencuentroEligible(
 ) {
   const existing = await getReProgress(personId);
   if (existing && existing.status !== "pending") return existing;
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   return withId(
     await client
       .mutation(api.formation.upsertProgress, {
@@ -122,7 +121,7 @@ export async function ensureReencuentroEligible(
 }
 
 export async function assertReencuentroEligible(personId: string) {
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cd2 = await client.query(api.formation.getProgress, {
     personId: personId as Id<"persons">,
     processType: "destino_n2",
@@ -148,7 +147,7 @@ export async function isReencuentroEligible(personId: string) {
 
 async function getProgram() {
   await ensureReencuentroProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const program = await client.query(api.formation.getProgramByCode, {
     code: REENCUENTRO_PROGRAM_CODE,
   });
@@ -166,7 +165,7 @@ async function assertCycleStaffOrManage(actor: AuthContext, cycleId: string) {
   if (hasPermission(actor, "reencounter.manage") || hasPermission(actor, "school.cycles.manage")) {
     return;
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const staff = await client.query(api.formation.getCycleStaff, {
     cycleId: cycleId as Id<"trainingCycles">,
     userId: actor.userId as Id<"users">,
@@ -189,7 +188,7 @@ export async function createReencuentroEvent(
     ministryId: raw.ministryId ?? undefined,
   });
   const program = await getProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = withId(
     await client.mutation(api.formation.createCycle, {
       programId: program.id as Id<"trainingPrograms">,
@@ -197,7 +196,6 @@ export async function createReencuentroEvent(
       startDate: raw.startDate,
       endDate: raw.endDate,
       ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
-      createdByUserId: actorUserId as Id<"users">,
     }),
   );
   await writeAuditLog({
@@ -230,7 +228,7 @@ export async function enrollReencuentro(
   await assertProcessAccess(actor, raw.personId, org.ministryId);
 
   const program = await getProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: raw.cycleId as Id<"trainingCycles">,
   });
@@ -322,7 +320,7 @@ export async function recordReencuentroAttendance(
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const enrollment = await client.query(api.formation.getEnrollment, {
     enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
   });
@@ -396,7 +394,7 @@ export async function completeReencuentro(
     };
   }
 
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
     const enrollment = await client.query(api.formation.getEnrollment, {
       enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
@@ -498,7 +496,7 @@ export async function listReencuentroEligible(actorUserId: string) {
   if (!hasPermission(actor, "reencounter.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.formation.listProgressRows, {
     processTypes: ["destino_n2"],
     statuses: ["completed"],
@@ -528,7 +526,7 @@ export async function getReencuentroDashboardCounts(actorUserId: string) {
   if (!hasPermission(actor, "reencounter.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const ministryIds =
     !isSuperadmin(actor) && actor.ministryIds.length
       ? (actor.ministryIds as Id<"ministries">[])
@@ -554,7 +552,7 @@ export async function listReencuentroEvents(actorUserId: string) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
   const program = await getProgram();
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycles = await client.query(api.formation.listCycles, {
     programIds: [program.id as Id<"trainingPrograms">],
   });
@@ -566,7 +564,7 @@ export async function getReencuentroEventBoard(actorUserId: string, cycleId: str
   if (!hasPermission(actor, "reencounter.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
-  const client = getConvexHttpClient();
+  const client = await getAuthenticatedConvexClient();
   const cycle = await client.query(api.formation.getCycle, {
     cycleId: cycleId as Id<"trainingCycles">,
   });
