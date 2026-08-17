@@ -8,10 +8,15 @@
  * @module
  */
 
+import type * as authz from "../authz.js";
 import type * as foundation from "../foundation.js";
 import type * as health from "../health.js";
 import type * as lib_errors from "../lib/errors.js";
+import type * as lib_ids from "../lib/ids.js";
 import type * as lib_time from "../lib/time.js";
+import type * as organization from "../organization.js";
+import type * as seed from "../seed.js";
+import type * as users from "../users.js";
 
 import type {
   ApiFromModules,
@@ -20,10 +25,15 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  authz: typeof authz;
   foundation: typeof foundation;
   health: typeof health;
   "lib/errors": typeof lib_errors;
+  "lib/ids": typeof lib_ids;
   "lib/time": typeof lib_time;
+  organization: typeof organization;
+  seed: typeof seed;
+  users: typeof users;
 }>;
 
 /**
