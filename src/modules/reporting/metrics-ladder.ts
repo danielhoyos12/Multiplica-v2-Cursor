@@ -2,11 +2,9 @@
  * Escalera / formation funnel metrics — derived from person_process_progress.
  * Counts are CURRENT STATE by status, not historical conversion cohorts.
  */
-import { and, count, eq, inArray, sql } from "drizzle-orm";
+import { api, getConvexHttpClient } from "@/server/convex";
 
-import { getDb } from "@/db/client";
-import { personProcessProgress } from "@/db/schema";
-
+import { buildScopeMatcher } from "./convex-scope";
 import type { DashboardScope } from "./scope";
 
 export type StageStatusCounts = {
@@ -55,120 +53,58 @@ function emptyStage(): StageStatusCounts {
 }
 
 function fillStage(
-  rows: Array<{ processType: string; status: string; c: number }>,
+  rows: Array<{ processType: string; status: string }>,
   type: string,
 ): StageStatusCounts {
   const s = emptyStage();
   for (const r of rows.filter((x) => x.processType === type)) {
-    const n = r.c;
     if (r.status in s) {
-      (s as Record<string, number>)[r.status] = n;
+      (s as Record<string, number>)[r.status] += 1;
     }
-    s.total += n;
+    s.total += 1;
   }
   return s;
 }
 
-function processScopeSql(scope: DashboardScope) {
-  if (scope.mode === "subtree" && scope.rootPersonId) {
-    return sql`(
-      ${personProcessProgress.personId} IN (
-        SELECT descendant_person_id FROM leadership_closure
-        WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-      )
-      OR ${personProcessProgress.assignedLeaderPersonId} = ${scope.rootPersonId}::uuid
-    )`;
-  }
-  if (scope.mode === "ministry" && scope.ministryIds.length) {
-    return inArray(personProcessProgress.ministryId, scope.ministryIds);
-  }
-  return undefined;
-}
-
 export async function getLadderMetrics(scope: DashboardScope): Promise<LadderMetrics> {
-  const db = getDb();
-  const scopeSql = processScopeSql(scope);
-  const where = scopeSql
-    ? and(
-        scopeSql,
-        scope.networkId
-          ? eq(personProcessProgress.networkId, scope.networkId)
-          : undefined,
-      )
-    : scope.networkId
-      ? eq(personProcessProgress.networkId, scope.networkId)
-      : undefined;
+  const client = getConvexHttpClient();
+  const [rows, matches, leadershipSnapshot] = await Promise.all([
+    client.query(api.formation.listProgressRows, {}),
+    buildScopeMatcher(scope),
+    client.query(api.reporting.leadershipSnapshot, {}),
+  ]);
 
-  const rows = await db
-    .select({
-      processType: personProcessProgress.processType,
-      status: personProcessProgress.status,
-      c: count(),
-    })
-    .from(personProcessProgress)
-    .where(where)
-    .groupBy(personProcessProgress.processType, personProcessProgress.status);
+  const scoped = rows
+    .map((r) => r.progress)
+    .filter((p) => matches({ personId: p.personId, ministryId: p.ministryId, networkId: p.networkId }));
 
-  const mapped = rows.map((r) => ({
-    processType: r.processType,
-    status: r.status,
-    c: Number(r.c),
-  }));
+  const pre = fillStage(scoped, "pre_encuentro");
+  const encuentro = fillStage(scoped, "encuentro");
+  const post = fillStage(scoped, "post_encuentro");
+  const consolidarCompleted = fillStage(scoped, "consolidar").completed;
 
-  const pre = fillStage(mapped, "pre_encuentro");
-  const encuentro = fillStage(mapped, "encuentro");
-  const post = fillStage(mapped, "post_encuentro");
-  const consolidarCompleted = fillStage(mapped, "consolidar").completed;
-
-  const cd1 = fillStage(mapped, "destino_n1");
-  const cd2 = fillStage(mapped, "destino_n2");
-  const reencuentro = fillStage(mapped, "reencuentro");
-  const cd3 = fillStage(mapped, "destino_n3");
-  const em1 = fillStage(mapped, "em1");
-  const em2 = fillStage(mapped, "em2");
-  const em3 = fillStage(mapped, "em3");
-  const enviar = fillStage(mapped, "enviar");
+  const cd1 = fillStage(scoped, "destino_n1");
+  const cd2 = fillStage(scoped, "destino_n2");
+  const reencuentro = fillStage(scoped, "reencuentro");
+  const cd3 = fillStage(scoped, "destino_n3");
+  const em1 = fillStage(scoped, "em1");
+  const em2 = fillStage(scoped, "em2");
+  const em3 = fillStage(scoped, "em3");
+  const enviar = fillStage(scoped, "enviar");
 
   // Ungidos / activados among enviar-completed — via leadership join
-  const enviarCompletedPeople = sql`${personProcessProgress.personId} IN (
-    SELECT person_id FROM person_process_progress
-    WHERE process_type = 'enviar' AND status = 'completed'
-  )`;
+  const enviarCompletedPersonIds = new Set(
+    scoped.filter((p) => p.processType === "enviar" && p.status === "completed").map((p) => p.personId),
+  );
 
   let ungidos = 0;
   let activados = 0;
-  const leadScope =
-    scope.mode === "subtree" && scope.rootPersonId
-      ? sql`AND pl.person_id IN (
-          SELECT descendant_person_id FROM leadership_closure
-          WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-        )`
-      : scope.mode === "ministry" && scope.ministryIds.length
-        ? sql`AND pl.ministry_id IN (${sql.join(
-            scope.ministryIds.map((id) => sql`${id}::uuid`),
-            sql`, `,
-          )})`
-        : sql``;
-
-  const leadRows = await db.execute<{ status: string; c: string }>(sql`
-    SELECT pl.status, count(*)::text AS c
-    FROM person_leadership pl
-    WHERE pl.person_id IN (
-      SELECT person_id FROM person_process_progress
-      WHERE process_type = 'enviar' AND status = 'completed'
-    )
-    ${leadScope}
-    GROUP BY pl.status
-  `);
-  const leadList = Array.isArray(leadRows)
-    ? leadRows
-    : ((leadRows as { rows?: typeof leadRows }).rows ?? []);
-  for (const r of leadList as Array<{ status: string; c: string }>) {
-    if (r.status === "eligible") ungidos = Number(r.c);
-    if (r.status === "active") activados = Number(r.c);
+  for (const l of leadershipSnapshot) {
+    if (!enviarCompletedPersonIds.has(l.personId)) continue;
+    if (!matches({ personId: l.personId, ministryId: l.ministryId, networkId: l.networkId })) continue;
+    if (l.status === "eligible") ungidos += 1;
+    if (l.status === "active") activados += 1;
   }
-
-  void enviarCompletedPeople;
 
   const activeish = (s: StageStatusCounts) =>
     s.eligible + s.in_progress + s.academic_completed + s.completed;
@@ -190,15 +126,7 @@ export async function getLadderMetrics(scope: DashboardScope): Promise<LadderMet
       {
         code: "discipular",
         label: "DISCIPULAR",
-        count: [
-          cd1,
-          cd2,
-          reencuentro,
-          cd3,
-          em1,
-          em2,
-          em3,
-        ].reduce((a, s) => a + activeish(s), 0),
+        count: [cd1, cd2, reencuentro, cd3, em1, em2, em3].reduce((a, s) => a + activeish(s), 0),
       },
       {
         code: "enviar",

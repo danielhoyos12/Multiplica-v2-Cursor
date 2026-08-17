@@ -5,23 +5,11 @@
  * HISTORICAL NEW: persons.registered_at in period ∩ currently in scope
  *   (leader/subtree) or registered while scoped — documented in metrics defs.
  */
-import { and, count, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { api, getConvexHttpClient } from "@/server/convex";
 
-import { getDb } from "@/db/client";
-import {
-  cellMemberships,
-  personOrganizationHistory,
-  persons,
-} from "@/db/schema";
-
+import { buildScopeMatcher } from "./convex-scope";
 import { formatPctChange, type PeriodRange } from "./period";
 import type { DashboardScope } from "./scope";
-import {
-  activePersonCondition,
-  applyOrgFilters,
-  currentOrgJoinCondition,
-  personScopeCondition,
-} from "./sql-scope";
 
 export type PersonMetrics = {
   methodology: "current_state" | "historical_activity";
@@ -41,110 +29,43 @@ export async function getPersonMetrics(
   scope: DashboardScope,
   period: PeriodRange,
 ): Promise<PersonMetrics> {
-  const db = getDb();
-  const scopeCond = personScopeCondition(scope);
-
-  const base = [activePersonCondition()!];
-  if (scopeCond) base.push(scopeCond);
-
-  // CURRENT STATE totals via current org
-  const orgConds = applyOrgFilters(scope, [
-    isNull(personOrganizationHistory.effectiveTo),
-    activePersonCondition()!,
+  const client = getConvexHttpClient();
+  const [snapshot, matches] = await Promise.all([
+    client.query(api.reporting.personsSnapshot, {}),
+    buildScopeMatcher(scope),
   ]);
-  if (scopeCond) orgConds.push(scopeCond);
 
-  const [totalRow] = await db
-    .select({ c: count() })
-    .from(persons)
-    .innerJoin(personOrganizationHistory, currentOrgJoinCondition())
-    .where(and(...orgConds));
+  const inScope = snapshot.filter((p) => matches({ personId: p.personId, ministryId: p.ministryId, networkId: p.networkId }));
 
-  const withCellSql = sql`${persons.id} IN (
-    SELECT person_id FROM cell_memberships WHERE status = 'active'
-  )`;
+  const totalActive = inScope.length;
+  const withCell = inScope.filter((p) => p.hasActiveCell).length;
 
-  const [withCellRow] = await db
-    .select({ c: count() })
-    .from(persons)
-    .innerJoin(personOrganizationHistory, currentOrgJoinCondition())
-    .where(and(...orgConds, withCellSql));
+  const fromMs = period.from.getTime();
+  const toMs = period.to.getTime();
+  const prevFromMs = period.prevFrom.getTime();
+  const prevToMs = period.prevTo.getTime();
 
-  const totalActive = Number(totalRow?.c ?? 0);
-  const withCell = Number(withCellRow?.c ?? 0);
-
-  const newConds = [
-    ...orgConds,
-    gte(persons.registeredAt, period.from),
-    lte(persons.registeredAt, period.to),
-  ];
-  const prevConds = [
-    ...orgConds,
-    gte(persons.registeredAt, period.prevFrom),
-    lte(persons.registeredAt, period.prevTo),
-  ];
-
-  const [newRow] = await db
-    .select({ c: count() })
-    .from(persons)
-    .innerJoin(personOrganizationHistory, currentOrgJoinCondition())
-    .where(and(...newConds));
-  const [prevRow] = await db
-    .select({ c: count() })
-    .from(persons)
-    .innerJoin(personOrganizationHistory, currentOrgJoinCondition())
-    .where(and(...prevConds));
-
-  const newInPeriod = Number(newRow?.c ?? 0);
-  const newPreviousPeriod = Number(prevRow?.c ?? 0);
-
-  const sourceRows = await db
-    .select({ source: persons.source, c: count() })
-    .from(persons)
-    .innerJoin(personOrganizationHistory, currentOrgJoinCondition())
-    .where(and(...orgConds))
-    .groupBy(persons.source);
+  const newInPeriod = inScope.filter((p) => p.registeredAt >= fromMs && p.registeredAt <= toMs).length;
+  const newPreviousPeriod = inScope.filter(
+    (p) => p.registeredAt >= prevFromMs && p.registeredAt <= prevToMs,
+  ).length;
 
   const bySource = { public_form: 0, internal_form: 0 };
-  for (const r of sourceRows) {
-    if (r.source === "public_form") bySource.public_form = Number(r.c);
-    if (r.source === "internal_form") bySource.internal_form = Number(r.c);
+  for (const p of inScope) {
+    if (p.source === "public_form") bySource.public_form += 1;
+    if (p.source === "internal_form") bySource.internal_form += 1;
   }
 
-  // Aggregated prayer pending — count only, never text
-  const [prayerRow] = await db
-    .select({ c: count() })
-    .from(persons)
-    .innerJoin(personOrganizationHistory, currentOrgJoinCondition())
-    .where(
-      and(
-        ...orgConds,
-        sql`${persons.prayerRequest} IS NOT NULL AND length(trim(${persons.prayerRequest})) > 0`,
-      ),
-    );
+  const prayerPendingCount = inScope.filter((p) => p.hasPrayerRequest).length;
 
-  const byNetwork = await db
-    .select({
-      networkId: personOrganizationHistory.networkId,
-      c: count(),
-    })
-    .from(persons)
-    .innerJoin(personOrganizationHistory, currentOrgJoinCondition())
-    .where(and(...orgConds))
-    .groupBy(personOrganizationHistory.networkId);
-
-  const byMinistry = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      c: count(),
-    })
-    .from(persons)
-    .innerJoin(personOrganizationHistory, currentOrgJoinCondition())
-    .where(and(...orgConds))
-    .groupBy(personOrganizationHistory.ministryId);
-
-  void cellMemberships;
-  void eq;
+  const byNetworkMap = new Map<string | null, number>();
+  const byMinistryMap = new Map<string | null, number>();
+  for (const p of inScope) {
+    const networkId = p.networkId ?? null;
+    const ministryId = p.ministryId ?? null;
+    byNetworkMap.set(networkId, (byNetworkMap.get(networkId) ?? 0) + 1);
+    byMinistryMap.set(ministryId, (byMinistryMap.get(ministryId) ?? 0) + 1);
+  }
 
   return {
     methodology: "current_state",
@@ -155,15 +76,9 @@ export async function getPersonMetrics(
     newPreviousPeriod,
     newChangeLabel: formatPctChange(newInPeriod, newPreviousPeriod),
     bySource,
-    prayerPendingCount: Number(prayerRow?.c ?? 0),
-    byNetwork: byNetwork.map((r) => ({
-      networkId: r.networkId,
-      count: Number(r.c),
-    })),
-    byMinistry: byMinistry.map((r) => ({
-      ministryId: r.ministryId,
-      count: Number(r.c),
-    })),
+    prayerPendingCount,
+    byNetwork: [...byNetworkMap.entries()].map(([networkId, count]) => ({ networkId, count })),
+    byMinistry: [...byMinistryMap.entries()].map(([ministryId, count]) => ({ ministryId, count })),
   };
 }
 
@@ -172,34 +87,36 @@ export async function getNewPersonsWeeklySeries(
   scope: DashboardScope,
   weeks = 8,
 ): Promise<Array<{ weekStart: string; count: number }>> {
-  const db = getDb();
-  const scopeCond = personScopeCondition(scope);
-  const orgConds = applyOrgFilters(scope, [
-    isNull(personOrganizationHistory.effectiveTo),
-    activePersonCondition()!,
+  const client = getConvexHttpClient();
+  const [snapshot, matches] = await Promise.all([
+    client.query(api.reporting.personsSnapshot, {}),
+    buildScopeMatcher(scope),
   ]);
-  if (scopeCond) orgConds.push(scopeCond);
 
-  const rows = await db.execute<{ week_start: string; c: string }>(sql`
-    SELECT to_char(date_trunc('week', ${persons.registeredAt} AT TIME ZONE 'America/Lima'), 'YYYY-MM-DD') AS week_start,
-           count(*)::text AS c
-    FROM persons
-    INNER JOIN person_organization_history poh
-      ON poh.person_id = persons.id AND poh.effective_to IS NULL
-    WHERE persons.is_active = true
-      AND persons.deleted_at IS NULL
-      AND ${persons.registeredAt} >= (now() - (${weeks}::int || ' weeks')::interval)
-      ${scope.ministryIds.length === 1 ? sql`AND poh.ministry_id = ${scope.ministryIds[0]}::uuid` : sql``}
-      ${scope.ministryIds.length > 1 ? sql`AND poh.ministry_id IN (${sql.join(scope.ministryIds.map((id) => sql`${id}::uuid`), sql`, `)})` : sql``}
-      ${scope.networkId ? sql`AND poh.network_id = ${scope.networkId}::uuid` : sql``}
-      ${scope.mode === "subtree" && scope.rootPersonId ? sql`AND persons.id IN (SELECT descendant_person_id FROM leadership_closure WHERE ancestor_person_id = ${scope.rootPersonId}::uuid)` : sql``}
-    GROUP BY 1
-    ORDER BY 1
-  `);
+  const inScope = snapshot.filter((p) => matches({ personId: p.personId, ministryId: p.ministryId, networkId: p.networkId }));
 
-  const list = Array.isArray(rows) ? rows : (rows as { rows?: typeof rows }).rows ?? [];
-  return (list as Array<{ week_start: string; c: string }>).map((r) => ({
-    weekStart: r.week_start,
-    count: Number(r.c),
-  }));
+  const sinceMs = Date.now() - weeks * 7 * 86_400_000;
+  const counts = new Map<string, number>();
+  for (const p of inScope) {
+    if (p.registeredAt < sinceMs) continue;
+    const weekStart = mondayOfWeekLima(p.registeredAt);
+    counts.set(weekStart, (counts.get(weekStart) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([weekStart, count]) => ({ weekStart, count }));
+}
+
+const LIMA_OFFSET_HOURS = -5;
+
+function mondayOfWeekLima(epochMs: number): string {
+  const limaMs = epochMs + LIMA_OFFSET_HOURS * 3_600_000;
+  const d = new Date(limaMs);
+  const day = d.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const monday = new Date(d);
+  monday.setUTCDate(d.getUTCDate() + mondayOffset);
+  monday.setUTCHours(0, 0, 0, 0);
+  return monday.toISOString().slice(0, 10);
 }

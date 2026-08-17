@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
 
 import { DashboardBoard } from "@/components/dashboard/dashboard-board";
-import { getDb } from "@/db/client";
-import { ministries, networks } from "@/db/schema";
 import { hasPermission, isSuperadmin } from "@/modules/authorization";
+import { api, getConvexHttpClient } from "@/server/convex";
 import { DomainError } from "@/lib/errors";
 import { userFacingErrorMessage } from "@/lib/user-facing-errors";
 import { getExecutiveDashboard } from "@/modules/reporting";
@@ -38,17 +36,18 @@ export default async function DashboardPage({
   const params = await searchParams;
   const period = (params.periodo as PeriodKey | undefined) ?? "this_month";
 
-  const db = getDb();
-  const ministryRows = await db
-    .select({ id: ministries.id, code: ministries.code, name: ministries.name })
-    .from(ministries)
-    .where(eq(ministries.isActive, true))
-    .orderBy(asc(ministries.code));
-  const networkRows = await db
-    .select({ id: networks.id, code: networks.code, name: networks.name })
-    .from(networks)
-    .where(eq(networks.isActive, true))
-    .orderBy(asc(networks.sortOrder));
+  const client = getConvexHttpClient();
+  const [allMinistries, allNetworks] = await Promise.all([
+    client.query(api.organization.listMinistries, {}),
+    client.query(api.organization.listNetworks, {}),
+  ]);
+  const ministryRows = allMinistries
+    .filter((m) => m.isActive)
+    .map((m) => ({ id: m._id, code: m.code, name: m.name }))
+    .sort((a, b) => a.code.localeCompare(b.code));
+  const networkRows = allNetworks
+    .filter((n) => n.isActive)
+    .map((n) => ({ id: n._id, code: n.code, name: n.name }));
 
   const visibleMinistries = isSuperadmin(auth)
     ? ministryRows

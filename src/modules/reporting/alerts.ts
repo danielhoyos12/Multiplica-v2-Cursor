@@ -1,18 +1,12 @@
 /**
  * Lightweight derived alert engine — does NOT mutate domain state.
  */
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { api, getConvexHttpClient } from "@/server/convex";
 
-import { getDb } from "@/db/client";
-import {
-  pastoralTransferRequests,
-  personLeadership,
-  personProcessProgress,
-  persons,
-} from "@/db/schema";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { getTwelveProgress } from "@/modules/leadership/service";
 
+import { buildScopeMatcher } from "./convex-scope";
 import { listCellAttendanceDetails } from "./metrics-cells";
 import { ReportingThresholds } from "./period";
 import type { DashboardScope } from "./scope";
@@ -33,59 +27,39 @@ export async function computePastoralAlerts(
   scope: DashboardScope,
 ): Promise<PastoralAlert[]> {
   const alerts: PastoralAlert[] = [];
-  const db = getDb();
-  const stalledBefore = new Date(
-    Date.now() - ReportingThresholds.formationStalledDays * 86_400_000,
-  );
-  const eligibleBefore = new Date(
-    Date.now() - ReportingThresholds.eligibleNotActivatedDays * 86_400_000,
+  const client = getConvexHttpClient();
+  const stalledBeforeMs = Date.now() - ReportingThresholds.formationStalledDays * 86_400_000;
+  const eligibleBeforeMs = Date.now() - ReportingThresholds.eligibleNotActivatedDays * 86_400_000;
+
+  const [leadershipSnapshot, cellsSnapshot, progressRows, transfersSnapshot, matches] =
+    await Promise.all([
+      client.query(api.reporting.leadershipSnapshot, {}),
+      client.query(api.reporting.cellsSnapshot, {}),
+      client.query(api.formation.listProgressRows, {}),
+      client.query(api.reporting.transferRequestsSnapshot, {}),
+      buildScopeMatcher(scope),
+    ]);
+
+  const scopedLeaders = leadershipSnapshot.filter((l) =>
+    matches({ personId: l.personId, ministryId: l.ministryId, networkId: l.networkId }),
   );
 
   // --- Integrity critical: active without cell ---
-  const activeNoCell = await db.execute<{
-    person_id: string;
-    first_name: string;
-    last_name: string;
-  }>(sql`
-    SELECT pl.person_id, p.first_name, p.last_name
-    FROM person_leadership pl
-    INNER JOIN persons p ON p.id = pl.person_id
-    WHERE pl.status = 'active'
-      AND NOT EXISTS (
-        SELECT 1 FROM cells c
-        WHERE c.responsible_person_id = pl.person_id AND c.status <> 'closed'
-      )
-      ${
-        scope.mode === "subtree" && scope.rootPersonId
-          ? sql`AND pl.person_id IN (
-              SELECT descendant_person_id FROM leadership_closure
-              WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-            )`
-          : scope.mode === "ministry" && scope.ministryIds.length
-            ? sql`AND pl.ministry_id IN (${sql.join(
-                scope.ministryIds.map((id) => sql`${id}::uuid`),
-                sql`, `,
-              )})`
-            : sql``
-      }
-    LIMIT 20
-  `);
-  const noCellList = Array.isArray(activeNoCell)
-    ? activeNoCell
-    : ((activeNoCell as { rows?: typeof activeNoCell }).rows ?? []);
-  for (const r of noCellList as Array<{
-    person_id: string;
-    first_name: string;
-    last_name: string;
-  }>) {
+  const responsibleWithOpenCell = new Set(
+    cellsSnapshot.filter((c) => c.status !== "closed" && c.responsiblePersonId).map((c) => c.responsiblePersonId),
+  );
+  const activeNoCell = scopedLeaders
+    .filter((l) => l.status === "active" && !responsibleWithOpenCell.has(l.personId))
+    .slice(0, 20);
+  for (const l of activeNoCell) {
     alerts.push({
       code: "active_leader_without_cell",
       severity: "critical",
       title: "Líder activo sin célula",
-      detail: formatFullName(r.first_name, r.last_name),
-      href: `/liderazgo/${r.person_id}`,
+      detail: formatFullName(l.firstName, l.lastName),
+      href: `/liderazgo/${l.personId}`,
       entityType: "person_leadership",
-      entityId: r.person_id,
+      entityId: l.personId,
     });
   }
 
@@ -130,29 +104,7 @@ export async function computePastoralAlerts(
   }
 
   // --- Ready for twelve ---
-  const activeLeaders = await db
-    .select({
-      personId: personLeadership.personId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personLeadership)
-    .innerJoin(persons, eq(persons.id, personLeadership.personId))
-    .where(
-      and(
-        eq(personLeadership.status, "active"),
-        scope.mode === "subtree" && scope.rootPersonId
-          ? sql`${personLeadership.personId} IN (
-              SELECT descendant_person_id FROM leadership_closure
-              WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-            )`
-          : scope.mode === "ministry" && scope.ministryIds.length
-            ? inArray(personLeadership.ministryId, scope.ministryIds)
-            : undefined,
-      ),
-    )
-    .limit(200);
-
+  const activeLeaders = scopedLeaders.filter((l) => l.status === "active").slice(0, 200);
   for (const l of activeLeaders) {
     const p = await getTwelveProgress(l.personId);
     if (p.ready) {
@@ -169,31 +121,9 @@ export async function computePastoralAlerts(
   }
 
   // --- Eligible not activated ---
-  const eligibles = await db
-    .select({
-      personId: personLeadership.personId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-      eligibleAt: personLeadership.eligibleAt,
-    })
-    .from(personLeadership)
-    .innerJoin(persons, eq(persons.id, personLeadership.personId))
-    .where(
-      and(
-        eq(personLeadership.status, "eligible"),
-        lt(personLeadership.eligibleAt, eligibleBefore),
-        scope.mode === "subtree" && scope.rootPersonId
-          ? sql`${personLeadership.personId} IN (
-              SELECT descendant_person_id FROM leadership_closure
-              WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-            )`
-          : scope.mode === "ministry" && scope.ministryIds.length
-            ? inArray(personLeadership.ministryId, scope.ministryIds)
-            : undefined,
-      ),
-    )
-    .limit(30);
-
+  const eligibles = scopedLeaders
+    .filter((l) => l.status === "eligible" && l.eligibleAt !== undefined && l.eligibleAt < eligibleBeforeMs)
+    .slice(0, 30);
   for (const e of eligibles) {
     alerts.push({
       code: "eligible_not_activated",
@@ -207,72 +137,42 @@ export async function computePastoralAlerts(
   }
 
   // --- Formation stalled ---
-  const stalled = await db
-    .select({
-      personId: personProcessProgress.personId,
-      processType: personProcessProgress.processType,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-      updatedAt: personProcessProgress.updatedAt,
-    })
-    .from(personProcessProgress)
-    .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-    .where(
-      and(
-        eq(personProcessProgress.status, "in_progress"),
-        lt(personProcessProgress.updatedAt, stalledBefore),
-        scope.mode === "subtree" && scope.rootPersonId
-          ? sql`${personProcessProgress.personId} IN (
-              SELECT descendant_person_id FROM leadership_closure
-              WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-            )`
-          : scope.mode === "ministry" && scope.ministryIds.length
-            ? inArray(personProcessProgress.ministryId, scope.ministryIds)
-            : undefined,
-      ),
+  const stalled = progressRows
+    .filter(
+      (r) =>
+        r.progress.status === "in_progress" &&
+        r.progress.updatedAt < stalledBeforeMs &&
+        matches({ personId: r.progress.personId, ministryId: r.progress.ministryId, networkId: r.progress.networkId }),
     )
-    .limit(30);
-
+    .slice(0, 30);
   for (const s of stalled) {
     alerts.push({
       code: "formation_stalled",
       severity: "warning",
       title: "Formación sin actividad reciente",
-      detail: `${formatFullName(s.firstName, s.lastName)} · ${s.processType}`,
-      href: `/ganar/${s.personId}`,
+      detail: `${formatFullName(s.firstName, s.lastName)} · ${s.progress.processType}`,
+      href: `/ganar/${s.progress.personId}`,
       entityType: "person_process_progress",
-      entityId: s.personId,
+      entityId: s.progress.personId,
     });
   }
 
   // --- Pending transfers ---
-  const transfers = await db
-    .select()
-    .from(pastoralTransferRequests)
-    .where(
-      and(
-        inArray(pastoralTransferRequests.status, ["pending", "approved"]),
-        scope.mode === "ministry" && scope.ministryIds.length
-          ? sql`(
-              ${pastoralTransferRequests.sourceMinistryId} IN (${sql.join(
-                scope.ministryIds.map((id) => sql`${id}::uuid`),
-                sql`, `,
-              )})
-              OR ${pastoralTransferRequests.destinationMinistryId} IN (${sql.join(
-                scope.ministryIds.map((id) => sql`${id}::uuid`),
-                sql`, `,
-              )})
-            )`
-          : scope.mode === "subtree" && scope.rootPersonId
-            ? sql`${pastoralTransferRequests.personId} IN (
-                SELECT descendant_person_id FROM leadership_closure
-                WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-              )`
-            : undefined,
-      ),
-    )
-    .limit(40);
-
+  const transfers = transfersSnapshot
+    .filter((t) => t.status === "pending" || t.status === "approved")
+    .filter((t) => {
+      if (scope.mode === "ministry" && scope.ministryIds.length) {
+        return (
+          (t.sourceMinistryId && scope.ministryIds.includes(t.sourceMinistryId)) ||
+          (t.destinationMinistryId && scope.ministryIds.includes(t.destinationMinistryId))
+        );
+      }
+      if (scope.mode === "subtree" && scope.rootPersonId) {
+        return matches({ personId: t.personId, ministryId: null, networkId: null });
+      }
+      return true;
+    })
+    .slice(0, 40);
   for (const t of transfers) {
     alerts.push({
       code: "pending_transfer",
@@ -284,11 +184,10 @@ export async function computePastoralAlerts(
       detail: `${t.transferType} · ${t.status}`,
       href: `/transferencias?estado=${t.status}`,
       entityType: "pastoral_transfer_requests",
-      entityId: t.id,
+      entityId: t._id,
     });
   }
 
-  void isNull;
   return prioritizeAlerts(alerts);
 }
 

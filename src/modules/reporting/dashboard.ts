@@ -1,13 +1,12 @@
 /**
  * Unified executive / pastoral dashboard assembler.
  */
-import { and, count, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { api, getConvexHttpClient } from "@/server/convex";
 
-import { getDb } from "@/db/client";
-import { pastoralTransferRequests } from "@/db/schema";
 import { getBreadcrumbs } from "@/modules/leadership/service";
 
 import { computePastoralAlerts, type PastoralAlert } from "./alerts";
+import { resolveSubtreePersonIds } from "./convex-scope";
 import { getCellMetrics, type CellMetrics } from "./metrics-cells";
 import { getLadderMetrics, type LadderMetrics } from "./metrics-ladder";
 import {
@@ -68,84 +67,63 @@ export type ExecutiveDashboard = {
   timings: Record<string, number>;
 };
 
+function transferInScope(
+  scope: DashboardScope,
+  t: { personId: string; sourceMinistryId?: string; destinationMinistryId?: string },
+  subtreeIds: Set<string> | null,
+): boolean {
+  if (scope.mode === "subtree" && scope.rootPersonId) {
+    return Boolean(subtreeIds?.has(t.personId));
+  }
+  if (scope.mode === "ministry" && scope.ministryIds.length) {
+    return Boolean(
+      (t.sourceMinistryId && scope.ministryIds.includes(t.sourceMinistryId)) ||
+        (t.destinationMinistryId && scope.ministryIds.includes(t.destinationMinistryId)),
+    );
+  }
+  return true;
+}
+
 async function getTransferMetrics(
   scope: DashboardScope,
   period: PeriodRange,
 ): Promise<TransferMetrics> {
-  const db = getDb();
-  const scopeSql =
+  const client = getConvexHttpClient();
+  const [snapshot, subtreeIds] = await Promise.all([
+    client.query(api.reporting.transferRequestsSnapshot, {}),
     scope.mode === "subtree" && scope.rootPersonId
-      ? sql`${pastoralTransferRequests.personId} IN (
-          SELECT descendant_person_id FROM leadership_closure
-          WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-        )`
-      : scope.mode === "ministry" && scope.ministryIds.length
-        ? sql`(
-            ${pastoralTransferRequests.sourceMinistryId} IN (${sql.join(
-              scope.ministryIds.map((id) => sql`${id}::uuid`),
-              sql`, `,
-            )})
-            OR ${pastoralTransferRequests.destinationMinistryId} IN (${sql.join(
-              scope.ministryIds.map((id) => sql`${id}::uuid`),
-              sql`, `,
-            )})
-          )`
-        : undefined;
+      ? resolveSubtreePersonIds(scope.rootPersonId)
+      : Promise.resolve<Set<string> | null>(null),
+  ]);
 
-  const statusRows = await db
-    .select({ status: pastoralTransferRequests.status, c: count() })
-    .from(pastoralTransferRequests)
-    .where(scopeSql)
-    .groupBy(pastoralTransferRequests.status);
+  const scoped = snapshot.filter((t) => transferInScope(scope, t, subtreeIds));
+
+  const fromMs = period.from.getTime();
+  const toMs = period.to.getTime();
 
   let pending = 0;
   let approved = 0;
-  for (const r of statusRows) {
-    if (r.status === "pending") pending = Number(r.c);
-    if (r.status === "approved") approved = Number(r.c);
+  let executedInPeriod = 0;
+  let rejectedInPeriod = 0;
+  let crossMinistryPending = 0;
+  for (const t of scoped) {
+    if (t.status === "pending") pending += 1;
+    if (t.status === "approved") approved += 1;
+    if (t.status === "executed" && t.executedAt !== undefined && t.executedAt >= fromMs && t.executedAt <= toMs) {
+      executedInPeriod += 1;
+    }
+    if (t.status === "rejected" && t.rejectedAt !== undefined && t.rejectedAt >= fromMs && t.rejectedAt <= toMs) {
+      rejectedInPeriod += 1;
+    }
+    if (
+      (t.status === "pending" || t.status === "approved") &&
+      t.sourceMinistryId !== t.destinationMinistryId
+    ) {
+      crossMinistryPending += 1;
+    }
   }
 
-  const [exec] = await db
-    .select({ c: count() })
-    .from(pastoralTransferRequests)
-    .where(
-      and(
-        scopeSql,
-        eq(pastoralTransferRequests.status, "executed"),
-        gte(pastoralTransferRequests.executedAt, period.from),
-        lte(pastoralTransferRequests.executedAt, period.to),
-      ),
-    );
-  const [rej] = await db
-    .select({ c: count() })
-    .from(pastoralTransferRequests)
-    .where(
-      and(
-        scopeSql,
-        eq(pastoralTransferRequests.status, "rejected"),
-        gte(pastoralTransferRequests.rejectedAt, period.from),
-        lte(pastoralTransferRequests.rejectedAt, period.to),
-      ),
-    );
-
-  const [cross] = await db
-    .select({ c: count() })
-    .from(pastoralTransferRequests)
-    .where(
-      and(
-        scopeSql,
-        inArray(pastoralTransferRequests.status, ["pending", "approved"]),
-        sql`${pastoralTransferRequests.sourceMinistryId} IS DISTINCT FROM ${pastoralTransferRequests.destinationMinistryId}`,
-      ),
-    );
-
-  return {
-    pending,
-    approved,
-    executedInPeriod: Number(exec?.c ?? 0),
-    rejectedInPeriod: Number(rej?.c ?? 0),
-    crossMinistryPending: Number(cross?.c ?? 0),
-  };
+  return { pending, approved, executedInPeriod, rejectedInPeriod, crossMinistryPending };
 }
 
 function timed<T>(timings: Record<string, number>, name: string, fn: () => Promise<T>) {

@@ -1,25 +1,16 @@
 /**
  * Operational reports — same scope as dashboards. Paginated. No prayer text.
  */
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { api, getConvexHttpClient } from "@/server/convex";
 
-import { getDb } from "@/db/client";
-import {
-  cellMemberships,
-  cells,
-  leadershipClosure,
-  pastoralTransferRequests,
-  personLeadership,
-  personOrganizationHistory,
-  personProcessProgress,
-  persons,
-} from "@/db/schema";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
 import { hasPermission } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 
 import { rowsToCsv, stripSensitiveFields } from "./csv";
+import { buildScopeMatcher } from "./convex-scope";
 import type { DashboardScope } from "./scope";
 import { resolveDashboardScope, type ScopeFilters } from "./scope";
 
@@ -62,24 +53,9 @@ async function assertReportsAccess(scope: DashboardScope, exportMode = false) {
   }
 }
 
-function personScopeSql(scope: DashboardScope) {
-  if (scope.mode === "subtree" && scope.rootPersonId) {
-    return sql`${persons.id} IN (
-      SELECT descendant_person_id FROM leadership_closure
-      WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-    )`;
-  }
-  if (scope.mode === "ministry" && scope.ministryIds.length) {
-    return sql`${persons.id} IN (
-      SELECT person_id FROM person_organization_history
-      WHERE effective_to IS NULL
-        AND ministry_id IN (${sql.join(
-          scope.ministryIds.map((id) => sql`${id}::uuid`),
-          sql`, `,
-        )})
-    )`;
-  }
-  return undefined;
+function paginate<T>(rows: T[], page: number, pageSize: number): T[] {
+  const offset = (page - 1) * pageSize;
+  return rows.slice(offset, offset + pageSize);
 }
 
 export async function runReport(
@@ -91,291 +67,145 @@ export async function runReport(
   await assertReportsAccess(scope);
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 50));
-  const offset = (page - 1) * pageSize;
-  const db = getDb();
+  const client = getConvexHttpClient();
+  const matches = await buildScopeMatcher(scope);
 
   if (type === "persons") {
-    const scopeSql = personScopeSql(scope);
-    const where = and(
-      eq(persons.isActive, true),
-      sql`${persons.deletedAt} IS NULL`,
-      scopeSql,
-      scope.networkId
-        ? sql`EXISTS (
-            SELECT 1 FROM person_organization_history poh
-            WHERE poh.person_id = ${persons.id}
-              AND poh.effective_to IS NULL
-              AND poh.network_id = ${scope.networkId}::uuid
-          )`
-        : undefined,
-    );
-    const [{ total }] = await db.select({ total: count() }).from(persons).where(where);
-    const rows = await db
-      .select({
-        personId: persons.id,
-        firstName: persons.firstName,
-        lastName: persons.lastName,
-        ministryId: personOrganizationHistory.ministryId,
-        networkId: personOrganizationHistory.networkId,
-        leadershipStatus: personLeadership.status,
-        leaderCode: personLeadership.humanLeaderCode,
-      })
-      .from(persons)
-      .leftJoin(
-        personOrganizationHistory,
-        and(
-          eq(personOrganizationHistory.personId, persons.id),
-          sql`${personOrganizationHistory.effectiveTo} IS NULL`,
-        ),
-      )
-      .leftJoin(personLeadership, eq(personLeadership.personId, persons.id))
-      .where(where)
-      .orderBy(persons.lastName, persons.firstName)
-      .limit(pageSize)
-      .offset(offset);
+    const snapshot = await client.query(api.reporting.personsSnapshot, {});
+    const filtered = snapshot
+      .filter((p) => matches({ personId: p.personId, ministryId: p.ministryId, networkId: p.networkId }))
+      .sort((a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
 
+    const leadershipSnapshot = await client.query(api.reporting.leadershipSnapshot, {});
+    const leadershipByPerson = new Map(leadershipSnapshot.map((l) => [l.personId, l]));
+
+    const pageRows = paginate(filtered, page, pageSize);
     return {
       type,
-      total: Number(total),
+      total: filtered.length,
       page,
       pageSize,
-      rows: rows.map((r) =>
-        stripSensitiveFields({
-          persona: formatFullName(r.firstName, r.lastName),
-          personId: r.personId,
-          ministryId: r.ministryId,
-          networkId: r.networkId,
-          liderazgo: r.leadershipStatus ?? "none",
-          codigoLider: r.leaderCode,
-        }),
-      ),
+      rows: pageRows.map((p) => {
+        const lead = leadershipByPerson.get(p.personId);
+        return stripSensitiveFields({
+          persona: formatFullName(p.firstName, p.lastName),
+          personId: p.personId,
+          ministryId: p.ministryId ?? null,
+          networkId: p.networkId ?? null,
+          liderazgo: lead?.status ?? "none",
+          codigoLider: lead?.humanLeaderCode ?? null,
+        });
+      }),
     };
   }
 
   if (type === "cells") {
-    const scopeSql =
-      scope.mode === "subtree" && scope.rootPersonId
-        ? sql`${cells.responsiblePersonId} IN (
-            SELECT descendant_person_id FROM leadership_closure
-            WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-          )`
-        : scope.mode === "ministry" && scope.ministryIds.length
-          ? sql`${cells.ministryId} IN (${sql.join(
-              scope.ministryIds.map((id) => sql`${id}::uuid`),
-              sql`, `,
-            )})`
-          : undefined;
-    const where = and(scopeSql, scope.networkId ? eq(cells.networkId, scope.networkId) : undefined);
-    const [{ total }] = await db.select({ total: count() }).from(cells).where(where);
-    const rows = await db
-      .select({
-        id: cells.id,
-        code: cells.code,
-        name: cells.name,
-        type: cells.type,
-        status: cells.status,
-        ministryId: cells.ministryId,
-        networkId: cells.networkId,
-        responsiblePersonId: cells.responsiblePersonId,
-      })
-      .from(cells)
-      .where(where)
-      .orderBy(cells.name)
-      .limit(pageSize)
-      .offset(offset);
+    const snapshot = await client.query(api.reporting.cellsSnapshot, {});
+    const filtered = snapshot
+      .filter((c) =>
+        matches({ personId: c.responsiblePersonId ?? null, ministryId: c.ministryId, networkId: c.networkId }),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
 
+    const pageRows = paginate(filtered, page, pageSize);
     const enriched = [];
-    for (const r of rows) {
-      const [{ members }] = await db
-        .select({ members: count() })
-        .from(cellMemberships)
-        .where(
-          and(eq(cellMemberships.cellId, r.id), eq(cellMemberships.status, "active")),
-        );
+    for (const c of pageRows) {
+      const detail = await client.query(api.cells.getDetail, { cellId: c.cellId });
+      const members = detail?.activeMemberCount ?? 0;
       enriched.push(
         stripSensitiveFields({
-          codigo: r.code,
-          nombre: r.name,
-          tipo: r.type,
-          estado: r.status,
-          ministryId: r.ministryId,
-          networkId: r.networkId,
-          responsableId: r.responsiblePersonId,
-          miembrosActivos: Number(members),
+          codigo: detail?.cell.code ?? "",
+          nombre: c.name,
+          tipo: c.type,
+          estado: c.status,
+          ministryId: c.ministryId,
+          networkId: c.networkId,
+          responsableId: c.responsiblePersonId ?? null,
+          miembrosActivos: members,
         }),
       );
     }
-    return { type, total: Number(total), page, pageSize, rows: enriched };
+    return { type, total: filtered.length, page, pageSize, rows: enriched };
   }
 
   if (type === "leadership") {
-    const scopeSql =
-      scope.mode === "subtree" && scope.rootPersonId
-        ? sql`${personLeadership.personId} IN (
-            SELECT descendant_person_id FROM leadership_closure
-            WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-          )`
-        : scope.mode === "ministry" && scope.ministryIds.length
-          ? sql`${personLeadership.ministryId} IN (${sql.join(
-              scope.ministryIds.map((id) => sql`${id}::uuid`),
-              sql`, `,
-            )})`
-          : undefined;
-    const where = scopeSql;
-    const [{ total }] = await db
-      .select({ total: count() })
-      .from(personLeadership)
-      .where(where);
-    const rows = await db
-      .select({
-        personId: personLeadership.personId,
-        status: personLeadership.status,
-        code: personLeadership.humanLeaderCode,
-        firstName: persons.firstName,
-        lastName: persons.lastName,
-      })
-      .from(personLeadership)
-      .innerJoin(persons, eq(persons.id, personLeadership.personId))
-      .where(where)
-      .orderBy(personLeadership.humanLeaderCode)
-      .limit(pageSize)
-      .offset(offset);
+    const snapshot = await client.query(api.reporting.leadershipSnapshot, {});
+    const filtered = snapshot
+      .filter((l) => matches({ personId: l.personId, ministryId: l.ministryId, networkId: l.networkId }))
+      .sort((a, b) => (a.humanLeaderCode ?? "").localeCompare(b.humanLeaderCode ?? ""));
 
+    const pageRows = paginate(filtered, page, pageSize);
     const enriched = [];
-    for (const r of rows) {
-      const [{ directs }] = await db
-        .select({ directs: count() })
-        .from(personLeadership)
-        .where(
-          and(
-            eq(personLeadership.directLeaderPersonId, r.personId),
-            eq(personLeadership.status, "active"),
-          ),
-        );
-      const [{ descendants }] = await db
-        .select({ descendants: count() })
-        .from(leadershipClosure)
-        .where(
-          and(
-            eq(leadershipClosure.ancestorPersonId, r.personId),
-            sql`${leadershipClosure.depth} > 0`,
-          ),
-        );
+    for (const l of pageRows) {
+      const [directs, descendants] = await Promise.all([
+        client.query(api.leadership.countActiveDirectLeadersFor, { leaderPersonId: l.personId as Id<"persons"> }),
+        client.query(api.leadership.listDescendants, { ancestorPersonId: l.personId as Id<"persons"> }),
+      ]);
       enriched.push({
-        lider: formatFullName(r.firstName, r.lastName),
-        codigo: r.code,
-        estado: r.status,
-        directos: Number(directs),
-        progreso12: `${Number(directs)} / 12`,
-        descendientes: Number(descendants),
+        lider: formatFullName(l.firstName, l.lastName),
+        codigo: l.humanLeaderCode ?? null,
+        estado: l.status,
+        directos: directs,
+        progreso12: `${directs} / 12`,
+        descendientes: descendants.length,
       });
     }
-    return { type, total: Number(total), page, pageSize, rows: enriched };
+    return { type, total: filtered.length, page, pageSize, rows: enriched };
   }
 
   if (type === "formation") {
-    const scopeSql =
-      scope.mode === "subtree" && scope.rootPersonId
-        ? sql`${personProcessProgress.personId} IN (
-            SELECT descendant_person_id FROM leadership_closure
-            WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-          )`
-        : scope.mode === "ministry" && scope.ministryIds.length
-          ? sql`${personProcessProgress.ministryId} IN (${sql.join(
-              scope.ministryIds.map((id) => sql`${id}::uuid`),
-              sql`, `,
-            )})`
-          : undefined;
-    const where = scopeSql;
-    const [{ total }] = await db
-      .select({ total: count() })
-      .from(personProcessProgress)
-      .where(where);
-    const rows = await db
-      .select({
-        personId: personProcessProgress.personId,
-        processType: personProcessProgress.processType,
-        status: personProcessProgress.status,
-        stage: personProcessProgress.stage,
-        firstName: persons.firstName,
-        lastName: persons.lastName,
-      })
-      .from(personProcessProgress)
-      .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-      .where(where)
-      .orderBy(desc(personProcessProgress.updatedAt))
-      .limit(pageSize)
-      .offset(offset);
+    const rows = await client.query(api.formation.listProgressRows, {});
+    const filtered = rows
+      .filter((r) =>
+        matches({ personId: r.progress.personId, ministryId: r.progress.ministryId, networkId: r.progress.networkId }),
+      )
+      .sort((a, b) => b.progress.updatedAt - a.progress.updatedAt);
 
+    const pageRows = paginate(filtered, page, pageSize);
     return {
       type,
-      total: Number(total),
+      total: filtered.length,
       page,
       pageSize,
-      rows: rows.map((r) => ({
+      rows: pageRows.map((r) => ({
         persona: formatFullName(r.firstName, r.lastName),
-        etapa: r.processType,
-        estado: r.status,
-        stage: r.stage,
+        etapa: r.progress.processType,
+        estado: r.progress.status,
+        stage: r.progress.stage ?? null,
       })),
     };
   }
 
   // transfers
-  const scopeSql =
-    scope.mode === "subtree" && scope.rootPersonId
-      ? sql`${pastoralTransferRequests.personId} IN (
-          SELECT descendant_person_id FROM leadership_closure
-          WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-        )`
-      : scope.mode === "ministry" && scope.ministryIds.length
-        ? sql`(
-            ${pastoralTransferRequests.sourceMinistryId} IN (${sql.join(
-              scope.ministryIds.map((id) => sql`${id}::uuid`),
-              sql`, `,
-            )})
-            OR ${pastoralTransferRequests.destinationMinistryId} IN (${sql.join(
-              scope.ministryIds.map((id) => sql`${id}::uuid`),
-              sql`, `,
-            )})
-          )`
-        : undefined;
-  const where = scopeSql;
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(pastoralTransferRequests)
-    .where(where);
-  const rows = await db
-    .select({
-      id: pastoralTransferRequests.id,
-      personId: pastoralTransferRequests.personId,
-      transferType: pastoralTransferRequests.transferType,
-      status: pastoralTransferRequests.status,
-      sourceMinistryId: pastoralTransferRequests.sourceMinistryId,
-      destinationMinistryId: pastoralTransferRequests.destinationMinistryId,
-      createdAt: pastoralTransferRequests.createdAt,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
+  const transfersSnapshot = await client.query(api.reporting.transferRequestsSnapshot, {});
+  const filtered = transfersSnapshot
+    .filter((t) => {
+      if (scope.mode === "ministry" && scope.ministryIds.length) {
+        return (
+          (t.sourceMinistryId && scope.ministryIds.includes(t.sourceMinistryId)) ||
+          (t.destinationMinistryId && scope.ministryIds.includes(t.destinationMinistryId))
+        );
+      }
+      if (scope.mode === "subtree" && scope.rootPersonId) {
+        return matches({ personId: t.personId, ministryId: null, networkId: null });
+      }
+      return true;
     })
-    .from(pastoralTransferRequests)
-    .innerJoin(persons, eq(persons.id, pastoralTransferRequests.personId))
-    .where(where)
-    .orderBy(desc(pastoralTransferRequests.createdAt))
-    .limit(pageSize)
-    .offset(offset);
+    .sort((a, b) => b.createdAt - a.createdAt);
 
+  const pageRows = paginate(filtered, page, pageSize);
   return {
     type,
-    total: Number(total),
+    total: filtered.length,
     page,
     pageSize,
-    rows: rows.map((r) => ({
-      persona: formatFullName(r.firstName, r.lastName),
-      tipo: r.transferType,
-      estado: r.status,
-      origenMinistryId: r.sourceMinistryId,
-      destinoMinistryId: r.destinationMinistryId,
-      fecha: r.createdAt?.toISOString?.() ?? String(r.createdAt),
+    rows: pageRows.map((t) => ({
+      persona: formatFullName(t.firstName, t.lastName),
+      tipo: t.transferType,
+      estado: t.status,
+      origenMinistryId: t.sourceMinistryId ?? null,
+      destinoMinistryId: t.destinationMinistryId ?? null,
+      fecha: new Date(t.createdAt).toISOString(),
     })),
   };
 }
