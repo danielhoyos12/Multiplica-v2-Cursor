@@ -192,6 +192,7 @@ export const activate = mutation({
     directLeaderPersonId: v.optional(v.id("persons")),
     primaryCellId: v.id("cells"),
     isMinistryRoot: v.optional(v.boolean()),
+    humanLeaderCode: v.optional(v.string()),
     actorUserId: v.id("users"),
   },
   returns: personLeadershipDoc,
@@ -243,6 +244,7 @@ export const activate = mutation({
       status: "active",
       directLeaderPersonId,
       primaryCellId: args.primaryCellId,
+      humanLeaderCode: args.humanLeaderCode ?? leadership.humanLeaderCode,
       isMinistryRoot: isRoot,
       activatedAt: ts,
       activatedByUserId: args.actorUserId,
@@ -357,6 +359,41 @@ export const getByPerson = query({
   returns: v.union(personLeadershipDoc, v.null()),
   handler: async (ctx, args) => {
     return await getLeadership(ctx.db, args.personId);
+  },
+});
+
+/** All `personLeadership` rows (any status) with this `directLeaderPersonId` — for human-code allocation. */
+export const listChildrenAny = query({
+  args: { directLeaderPersonId: v.id("persons") },
+  returns: v.array(v.object({ personId: v.id("persons"), humanLeaderCode: v.optional(v.string()) })),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("personLeadership")
+      .withIndex("by_directLeader", (q) => q.eq("directLeaderPersonId", args.directLeaderPersonId))
+      .collect();
+    return rows.map((r) => ({ personId: r.personId, humanLeaderCode: r.humanLeaderCode }));
+  },
+});
+
+/** Whether a `humanLeaderCode` is already taken — for root/collision allocation. */
+export const isHumanCodeTaken = query({
+  args: { code: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("personLeadership")
+      .withIndex("by_humanLeaderCode", (q) => q.eq("humanLeaderCode", args.code))
+      .unique();
+    return row !== null;
+  },
+});
+
+/** Active direct-leader count for a person — used by `deactivateLeader` guard. */
+export const countActiveDirectLeadersFor = query({
+  args: { leaderPersonId: v.id("persons") },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    return await countActiveDirectLeaders(ctx.db, args.leaderPersonId);
   },
 });
 

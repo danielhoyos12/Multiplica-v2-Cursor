@@ -101,6 +101,85 @@ export const getById = query({
   },
 });
 
+export const getByUsername = query({
+  args: { username: v.string() },
+  returns: v.union(userDoc, v.null()),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("users")
+      .withIndex("by_username", (q) => q.eq("username", args.username))
+      .unique();
+  },
+});
+
+export const getByPersonId = query({
+  args: { personId: v.id("persons") },
+  returns: v.union(userDoc, v.null()),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("users")
+      .withIndex("by_personId", (q) => q.eq("personId", args.personId))
+      .unique();
+  },
+});
+
+/**
+ * Creates (or, if a `users` row already exists for `personId`, updates) the
+ * app profile provisioned during leader activation. Credential creation
+ * itself (Clerk `authSubject`) happens in the Next layer — this mutation
+ * only persists the resulting profile.
+ */
+export const provisionLeaderUser = mutation({
+  args: {
+    personId: v.id("persons"),
+    authSubject: v.string(),
+    email: v.string(),
+    username: v.string(),
+    displayName: v.optional(v.string()),
+  },
+  returns: userDoc,
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_personId", (q) => q.eq("personId", args.personId))
+      .unique();
+    const ts = now();
+
+    if (existing) {
+      await ctx.db.patch("users", existing._id, {
+        username: existing.username ?? args.username,
+        email: existing.email || args.email,
+        displayName: args.displayName ?? existing.displayName,
+        updatedAt: ts,
+      });
+      return (await ctx.db.get("users", existing._id))!;
+    }
+
+    const userId = await ctx.db.insert("users", {
+      authSubject: args.authSubject,
+      personId: args.personId,
+      email: args.email,
+      username: args.username,
+      displayName: args.displayName,
+      isActive: true,
+      mustChangePassword: true,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    return (await ctx.db.get("users", userId))!;
+  },
+});
+
+/** Best-effort rollback of a `users` row provisioned during a failed leader activation. */
+export const remove = mutation({
+  args: { userId: v.id("users") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.delete("users", args.userId);
+    return null;
+  },
+});
+
 export const setMustChangePassword = mutation({
   args: {
     userId: v.id("users"),

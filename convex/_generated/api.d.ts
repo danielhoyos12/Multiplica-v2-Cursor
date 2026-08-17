@@ -11,6 +11,7 @@
 import type * as audit from "../audit.js";
 import type * as authz from "../authz.js";
 import type * as cells from "../cells.js";
+import type * as formation from "../formation.js";
 import type * as foundation from "../foundation.js";
 import type * as health from "../health.js";
 import type * as leadership from "../leadership.js";
@@ -20,6 +21,8 @@ import type * as lib_time from "../lib/time.js";
 import type * as organization from "../organization.js";
 import type * as persons from "../persons.js";
 import type * as seed from "../seed.js";
+import type * as send from "../send.js";
+import type * as transfers from "../transfers.js";
 import type * as users from "../users.js";
 
 import type {
@@ -32,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   audit: typeof audit;
   authz: typeof authz;
   cells: typeof cells;
+  formation: typeof formation;
   foundation: typeof foundation;
   health: typeof health;
   leadership: typeof leadership;
@@ -41,6 +45,8 @@ declare const fullApi: ApiFromModules<{
   organization: typeof organization;
   persons: typeof persons;
   seed: typeof seed;
+  send: typeof send;
+  transfers: typeof transfers;
   users: typeof users;
 }>;
 

@@ -19,15 +19,15 @@ export const ganarPersonInputSchema = z.object({
     .trim()
     .min(3, "Ingresa la dirección.")
     .max(240, "La dirección es demasiado larga."),
-  districtId: z.string().uuid("Selecciona un distrito."),
+  districtId: z.string().min(1, "Selecciona un distrito."),
   prayerRequest: z
     .string()
     .trim()
     .max(2000, "La petición de oración es demasiado larga.")
     .optional()
     .or(z.literal("")),
-  ministryId: z.string().uuid("Selecciona un ministerio."),
-  networkId: z.string().uuid("Selecciona una red."),
+  ministryId: z.string().min(1, "Selecciona un ministerio."),
+  networkId: z.string().min(1, "Selecciona una red."),
   email: z
     .string()
     .trim()

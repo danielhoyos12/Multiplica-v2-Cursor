@@ -139,6 +139,29 @@ async function logIntakeEvent(
   });
 }
 
+async function getCurrentOrgForPerson(
+  ctx: QueryCtx | MutationCtx,
+  personId: Id<"persons">,
+): Promise<{
+  ministryId?: Id<"ministries">;
+  networkId?: Id<"networks">;
+  effectiveFrom: number;
+} | null> {
+  const rows = await ctx.db
+    .query("personOrganizationHistory")
+    .withIndex("by_person", (q) => q.eq("personId", personId))
+    .collect();
+  const current = rows
+    .filter((r) => r.effectiveTo === undefined)
+    .sort((a, b) => b.effectiveFrom - a.effectiveFrom)[0];
+  if (!current) return null;
+  return {
+    ministryId: current.ministryId,
+    networkId: current.networkId,
+    effectiveFrom: current.effectiveFrom,
+  };
+}
+
 // ---------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------
@@ -202,6 +225,216 @@ export const getById = query({
     const person = await ctx.db.get("persons", args.personId);
     if (!person || person.deletedAt !== undefined) return null;
     return person;
+  },
+});
+
+/** Batch lookup — used by callers needing display names for a set of ids. */
+export const getManyByIds = query({
+  args: { personIds: v.array(v.id("persons")) },
+  returns: v.array(personDoc),
+  handler: async (ctx, args) => {
+    const rows = await Promise.all(args.personIds.map((id) => ctx.db.get("persons", id)));
+    return rows.filter((p): p is NonNullable<typeof p> => p !== null);
+  },
+});
+
+/** Current (effectiveTo = undefined) Ministry/Red assignment for a person, or `null`. */
+export const getCurrentOrg = query({
+  args: { personId: v.id("persons") },
+  returns: v.union(
+    v.object({
+      ministryId: v.optional(v.id("ministries")),
+      networkId: v.optional(v.id("networks")),
+      effectiveFrom: v.number(),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    return await getCurrentOrgForPerson(ctx, args.personId);
+  },
+});
+
+/** Full organizational history for a person, most recent first. */
+export const getOrgHistory = query({
+  args: { personId: v.id("persons") },
+  returns: v.array(
+    v.object({
+      _id: v.id("personOrganizationHistory"),
+      ministryId: v.optional(v.id("ministries")),
+      networkId: v.optional(v.id("networks")),
+      effectiveFrom: v.number(),
+      effectiveTo: v.optional(v.number()),
+      changeReason: v.optional(v.string()),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("personOrganizationHistory")
+      .withIndex("by_person", (q) => q.eq("personId", args.personId))
+      .collect();
+    return rows
+      .sort((a, b) => b.effectiveFrom - a.effectiveFrom)
+      .map((r) => ({
+        _id: r._id,
+        ministryId: r.ministryId,
+        networkId: r.networkId,
+        effectiveFrom: r.effectiveFrom,
+        effectiveTo: r.effectiveTo,
+        changeReason: r.changeReason,
+      }));
+  },
+});
+
+/**
+ * Candidate rows for GANAR duplicate detection: exact `phoneNormalized`
+ * match plus a broader last-9-digit suffix scan (mirrors the Drizzle
+ * `eq OR right(..., 9) = ...` query). Strength scoring stays in the Next
+ * layer (`modules/ganar/normalize.ts`).
+ */
+export const findDuplicateCandidates = query({
+  args: { phoneNormalized: v.string(), limit: v.optional(v.number()) },
+  returns: v.array(
+    v.object({
+      _id: v.id("persons"),
+      firstName: v.string(),
+      lastName: v.string(),
+      phone: v.optional(v.string()),
+      phoneNormalized: v.optional(v.string()),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
+    const suffix = args.phoneNormalized.slice(-9);
+
+    const exact = await ctx.db
+      .query("persons")
+      .withIndex("by_phoneNormalized", (q) => q.eq("phoneNormalized", args.phoneNormalized))
+      .collect();
+
+    const active = await ctx.db
+      .query("persons")
+      .withIndex("by_active", (q) => q.eq("isActive", true))
+      .collect();
+    const suffixMatches = active.filter(
+      (p) =>
+        p.deletedAt === undefined &&
+        p.phoneNormalized !== undefined &&
+        p.phoneNormalized !== args.phoneNormalized &&
+        p.phoneNormalized.slice(-9) === suffix,
+    );
+
+    const byId = new Map<Id<"persons">, (typeof exact)[number]>();
+    for (const row of [...exact, ...suffixMatches]) {
+      if (row.deletedAt !== undefined) continue;
+      byId.set(row._id, row);
+    }
+
+    return [...byId.values()].slice(0, limit).map((row) => ({
+      _id: row._id,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      phone: row.phone,
+      phoneNormalized: row.phoneNormalized,
+    }));
+  },
+});
+
+/**
+ * All active persons with their current Ministry/Red assignment attached
+ * (only persons that have one, matching the Drizzle inner-join semantics).
+ * Bounded scan — filtering, sorting, pagination and stats are computed in
+ * the Next layer (`modules/ganar/service.ts`), mirroring the MVP approach
+ * used elsewhere in this module.
+ */
+export const listActiveWithOrg = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id("persons"),
+      firstName: v.string(),
+      lastName: v.string(),
+      phone: v.optional(v.string()),
+      phoneNormalized: v.optional(v.string()),
+      email: v.optional(v.string()),
+      districtId: v.optional(v.id("districts")),
+      prayerRequest: v.optional(v.string()),
+      source: personSource,
+      registeredAt: v.number(),
+      ministryId: v.id("ministries"),
+      networkId: v.id("networks"),
+    }),
+  ),
+  handler: async (ctx) => {
+    const rows = await ctx.db
+      .query("persons")
+      .withIndex("by_active", (q) => q.eq("isActive", true))
+      .collect();
+    const active = rows.filter((p) => p.deletedAt === undefined);
+
+    const results = [];
+    for (const person of active) {
+      const org = await getCurrentOrgForPerson(ctx, person._id);
+      if (!org?.ministryId || !org.networkId) continue;
+      results.push({
+        _id: person._id,
+        firstName: person.firstName,
+        lastName: person.lastName,
+        phone: person.phone,
+        phoneNormalized: person.phoneNormalized,
+        email: person.email,
+        districtId: person.districtId,
+        prayerRequest: person.prayerRequest,
+        source: person.source,
+        registeredAt: person.registeredAt,
+        ministryId: org.ministryId,
+        networkId: org.networkId,
+      });
+    }
+    return results;
+  },
+});
+
+/**
+ * Active persons whose current Ministry matches `ministryId`, filtered by a
+ * case-insensitive name/phone substring. Used by Célula member search.
+ */
+export const searchActiveInMinistry = query({
+  args: { ministryId: v.id("ministries"), search: v.string(), limit: v.optional(v.number()) },
+  returns: v.array(
+    v.object({
+      _id: v.id("persons"),
+      firstName: v.string(),
+      lastName: v.string(),
+      phone: v.optional(v.string()),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(args.limit ?? 20, 1), 50);
+    const needle = args.search.trim().toLowerCase();
+    if (needle.length < 2) return [];
+
+    const inMinistry = await personIdsWithCurrentMinistry(ctx, args.ministryId);
+    const rows = await ctx.db
+      .query("persons")
+      .withIndex("by_active", (q) => q.eq("isActive", true))
+      .collect();
+
+    const matches = rows.filter((p) => {
+      if (p.deletedAt !== undefined) return false;
+      if (!inMinistry.has(p._id)) return false;
+      const haystacks = [p.firstName, p.lastName, p.phone, `${p.firstName} ${p.lastName}`].filter(
+        (v): v is string => Boolean(v),
+      );
+      return haystacks.some((h) => h.toLowerCase().includes(needle));
+    });
+
+    matches.sort((a, b) => a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
+    return matches.slice(0, limit).map((p) => ({
+      _id: p._id,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      phone: p.phone,
+    }));
   },
 });
 
@@ -422,6 +655,19 @@ export const recordIntakeEvent = mutation({
       metadata: args.metadata,
       createdAt: now(),
     });
+  },
+});
+
+/** Counts `personIntakeEvents` for an `ipHash`/`source` since `sinceMs` — public-form rate limiting. */
+export const countRecentIntakeEvents = query({
+  args: { ipHash: v.string(), source: personSource, sinceMs: v.number() },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("personIntakeEvents")
+      .withIndex("by_ipHash", (q) => q.eq("ipHash", args.ipHash))
+      .collect();
+    return rows.filter((r) => r.source === args.source && r.createdAt >= args.sinceMs).length;
   },
 });
 

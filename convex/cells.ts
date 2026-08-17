@@ -336,6 +336,37 @@ export const addMember = mutation({
   },
 });
 
+export const getMembershipById = query({
+  args: { membershipId: v.id("cellMemberships") },
+  returns: v.union(cellMembershipDoc, v.null()),
+  handler: async (ctx, args) => {
+    return await ctx.db.get("cellMemberships", args.membershipId);
+  },
+});
+
+/** Present/total attendance counts for a batch of sessions. */
+export const sessionAttendanceCounts = query({
+  args: { sessionIds: v.array(v.id("cellAttendanceSessions")) },
+  returns: v.array(
+    v.object({ sessionId: v.id("cellAttendanceSessions"), present: v.number(), total: v.number() }),
+  ),
+  handler: async (ctx, args) => {
+    const results = [];
+    for (const sessionId of args.sessionIds) {
+      const records = await ctx.db
+        .query("cellAttendance")
+        .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
+        .collect();
+      results.push({
+        sessionId,
+        present: records.filter((r) => r.status === "present").length,
+        total: records.length,
+      });
+    }
+    return results;
+  },
+});
+
 export const removeMember = mutation({
   args: { membershipId: v.id("cellMemberships"), reason: v.optional(v.string()) },
   returns: cellMembershipDoc,
@@ -600,6 +631,88 @@ export const getDetail = query({
         status: s.status,
       })),
     };
+  },
+});
+
+export const getById = query({
+  args: { cellId: v.id("cells") },
+  returns: v.union(cellDoc, v.null()),
+  handler: async (ctx, args) => {
+    return await ctx.db.get("cells", args.cellId);
+  },
+});
+
+/** Every cell (any status) with `responsiblePersonId`. Used for capacity/compat checks. */
+export const listByResponsible = query({
+  args: { responsiblePersonId: v.id("persons") },
+  returns: v.array(cellDoc),
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("cells")
+      .withIndex("by_responsiblePersonId", (q) => q.eq("responsiblePersonId", args.responsiblePersonId))
+      .collect();
+  },
+});
+
+/**
+ * Full cell catalog (any status/ministry). Bounded scan — filtering, joins,
+ * pagination and stats are computed in the Next layer
+ * (`modules/cells/service.ts`), mirroring the MVP approach used elsewhere.
+ */
+export const listAll = query({
+  args: {},
+  returns: v.array(cellDoc),
+  handler: async (ctx) => {
+    return await ctx.db.query("cells").take(5000);
+  },
+});
+
+/** Active `cellMemberships` count per requested cell. */
+export const countActiveMembers = query({
+  args: { cellIds: v.array(v.id("cells")) },
+  returns: v.array(v.object({ cellId: v.id("cells"), count: v.number() })),
+  handler: async (ctx, args) => {
+    const counts = new Map<Id<"cells">, number>();
+    for (const cellId of args.cellIds) {
+      const memberships = await ctx.db
+        .query("cellMemberships")
+        .withIndex("by_cell", (q) => q.eq("cellId", cellId))
+        .collect();
+      counts.set(cellId, memberships.filter((m) => m.status === "active").length);
+    }
+    return [...counts.entries()].map(([cellId, count]) => ({ cellId, count }));
+  },
+});
+
+/**
+ * Average attendance % across the most recent sessions (default 20) among
+ * the requested cells — mirrors the Drizzle `recentAttendanceAvg` KPI.
+ */
+export const recentAttendanceAvg = query({
+  args: { cellIds: v.array(v.id("cells")), limit: v.optional(v.number()) },
+  returns: v.union(v.number(), v.null()),
+  handler: async (ctx, args) => {
+    const cellIdSet = new Set(args.cellIds);
+    if (cellIdSet.size === 0) return null;
+    const limit = args.limit ?? 20;
+
+    const sessions = (
+      await ctx.db.query("cellAttendanceSessions").withIndex("by_sessionDate").order("desc").take(1000)
+    ).filter((s) => cellIdSet.has(s.cellId));
+
+    const pcts: number[] = [];
+    for (const session of sessions.slice(0, limit)) {
+      const records = await ctx.db
+        .query("cellAttendance")
+        .withIndex("by_session", (q) => q.eq("sessionId", session._id))
+        .collect();
+      if (records.length === 0) continue;
+      const present = records.filter((r) => r.status === "present").length;
+      pcts.push((present / records.length) * 100);
+    }
+
+    if (pcts.length === 0) return null;
+    return Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
   },
 });
 
