@@ -30,8 +30,7 @@ describe("AuthenticatedLayout must not mutate cookies on render", () => {
     );
     expect(src).toContain("MUST_CHANGE_PASSWORD_COOKIE");
     expect(src).toMatch(/cookies\.set\s*\(/);
-    expect(src).toContain("mustChangePassword: true");
-    expect(src).toContain("must_change_password: true");
+    expect(src).toContain("mustChangePassword");
   });
 
   it("clearMustChangePasswordAction clears cookie + DB flag", () => {
@@ -41,7 +40,7 @@ describe("AuthenticatedLayout must not mutate cookies on render", () => {
     );
     expect(src).toContain("mustChangePassword: false");
     expect(src).toContain("MUST_CHANGE_PASSWORD_COOKIE");
-    expect(src).toContain("must_change_password: false");
+    expect(src).toContain("mustChangePassword: false");
   });
 });
 
@@ -52,10 +51,10 @@ describe("password gate shell", () => {
 });
 
 describe("password change gate helpers", () => {
-  it("reads must_change_password from user_metadata", () => {
+  it("reads mustChangePassword from Clerk publicMetadata", () => {
     expect(
       authUserRequiresPasswordChange({
-        user_metadata: { must_change_password: true },
+        publicMetadata: { mustChangePassword: true },
       }),
     ).toBe(true);
   });
@@ -68,7 +67,7 @@ describe("password change gate helpers", () => {
   it("combines cookie and metadata", () => {
     expect(
       sessionRequiresPasswordChange({
-        user: { user_metadata: { must_change_password: true } },
+        user: { publicMetadata: { mustChangePassword: true } },
         cookieValue: undefined,
       }),
     ).toBe(true);

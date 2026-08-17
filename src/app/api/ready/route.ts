@@ -1,32 +1,38 @@
 import { NextResponse } from "next/server";
 
-import { getDb } from "@/db/client";
-import { hasDatabaseUrl, hasSupabasePublicConfig } from "@/lib/env";
-import { sql } from "drizzle-orm";
+import {
+  hasClerkPublicConfig,
+  hasConvexPublicConfig,
+  hasDatabaseUrl,
+} from "@/lib/env";
 
 /**
- * Readiness — checks config + lightweight DB connectivity.
- * Does not return connection strings, schema, or secrets.
+ * Readiness — Clerk + Convex required. Interim Postgres optional (non-Supabase).
  */
 export async function GET() {
-  const checks = {
-    publicConfig: hasSupabasePublicConfig(),
-    databaseConfigured: hasDatabaseUrl(),
-    databaseReachable: false,
-  };
-
-  if (checks.databaseConfigured) {
+  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  let convexReachable = false;
+  if (convexUrl) {
     try {
-      const db = getDb();
-      await db.execute(sql`select 1`);
-      checks.databaseReachable = true;
+      const res = await fetch(new URL("/version", convexUrl), {
+        signal: AbortSignal.timeout(3000),
+      });
+      convexReachable = res.ok;
     } catch {
-      checks.databaseReachable = false;
+      convexReachable = false;
     }
   }
 
+  const checks = {
+    clerkConfigured: hasClerkPublicConfig(),
+    convexConfigured: hasConvexPublicConfig(),
+    convexReachable,
+    /** Interim only — rejected if host is supabase.co */
+    legacyPostgresConfigured: hasDatabaseUrl(),
+  };
+
   const ready =
-    checks.publicConfig && checks.databaseConfigured && checks.databaseReachable;
+    checks.clerkConfigured && checks.convexConfigured && checks.convexReachable;
 
   return NextResponse.json(
     {

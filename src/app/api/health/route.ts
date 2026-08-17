@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { hasSupabasePublicConfig } from "@/lib/env";
+import { hasClerkPublicConfig, hasConvexPublicConfig } from "@/lib/env";
 
 /**
- * Liveness probe — no secrets, no schema dump.
- * Deep readiness (DB) is /api/ready.
+ * Liveness probe — Clerk + Convex public config (no secrets).
  */
 export async function GET() {
-  const ok = hasSupabasePublicConfig();
+  const ok = hasClerkPublicConfig() && hasConvexPublicConfig();
   return NextResponse.json(
     {
       status: ok ? "ok" : "degraded",

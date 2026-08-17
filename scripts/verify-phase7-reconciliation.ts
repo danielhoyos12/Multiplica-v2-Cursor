@@ -6,8 +6,10 @@
  * CD1 → CD2 → Re-Encuentro → CD3 → EM1 → EM2 → EM3 → NEXT_STAGE_ELIGIBLE
  */
 import { randomBytes } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import { and, eq, sql } from "drizzle-orm";
+
+import { recordInterimDatabaseReady } from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 
 import { getDb } from "../src/db/client";
 import {
@@ -106,10 +108,13 @@ async function markEmDone(actorId: string, personId: string, level: 1 | 2 | 3) {
 
 async function main() {
   const results: Result[] = [];
-  const db = getDb();
-
-  record(results, "service_role present", Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
   record(results, "DATABASE_URL not public", !process.env.NEXT_PUBLIC_DATABASE_URL);
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 7 reconciliation verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
+  const db = getDb();
 
   await ensureOfficialCatalog();
   const expect = countCatalogExpectation();
@@ -182,18 +187,6 @@ async function main() {
     console.error("Missing ministry/network");
     process.exit(1);
   }
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const anon = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const anonProg = await anon.from("person_process_progress").select("id").limit(3);
-  record(
-    results,
-    "anonymous process DENY/empty",
-    Boolean(anonProg.error) || (anonProg.data?.length ?? 0) === 0,
-  );
 
   const [superRole] = await db.select().from(roles).where(eq(roles.code, "superadmin")).limit(1);
   const [superAssign] = await db

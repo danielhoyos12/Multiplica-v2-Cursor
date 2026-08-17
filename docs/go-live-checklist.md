@@ -4,16 +4,15 @@ Human approval required for production. Cursor never auto-approves.
 
 ## Gates
 
-- [ ] Staging PASS (deploy + migrate + RLS + seed + auth URLs + health + smoke + E2E critical)
+- [ ] Staging PASS (deploy + Convex + Clerk URLs + health + smoke + E2E critical)
 - [ ] UAT checklist executed on staging
-- [ ] Backups / snapshot confirmed on production project
-- [ ] Production Supabase project created (not multiplica-dev)
-- [ ] Migrations applied (`0000`–`0010`)
-- [ ] RLS applied (`apply-rls.sh`)
+- [ ] Backups / snapshot confirmed on production Convex (and interim DB if used)
+- [ ] Production Clerk + Convex projects created (not shared dev)
+- [ ] Clerk JWT template `convex` + `CLERK_JWT_ISSUER_DOMAIN` on Convex prod
+- [ ] Interim Postgres migrations/RLS only if still required (never Supabase hosts)
 - [ ] Production seed = catalogs/permissions **only** (no Phase* fixtures)
 - [ ] Env vars on Vercel (public vs server separated)
-- [ ] Auth Site URL + redirect URLs (staging/prod)
-- [ ] SMTP configured for password reset emails
+- [ ] Clerk allowed origins / redirect URLs (staging/prod)
 - [ ] Superadmin bootstrap completed and credentials secured
 - [ ] `/api/health` and `/api/ready` OK
 - [ ] System health critical=0

@@ -1,5 +1,6 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { users } from "@/db/schema";
@@ -8,46 +9,43 @@ import {
   passwordGateCookieOptions,
 } from "@/lib/password-change-gate";
 import { safeInternalPath } from "@/lib/safe-redirect";
-import { createClient } from "@/server/supabase/server";
 
+/**
+ * Post-auth landing (e.g. password recovery). Clerk owns the OAuth/code exchange;
+ * this route syncs the password-gate cookie from the DB profile.
+ */
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
-  const code = searchParams.get("code");
+  const { searchParams } = new URL(request.url);
   const next = safeInternalPath(searchParams.get("next"), "/dashboard");
 
-  if (code) {
-    const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
 
-      const isPasswordChangeFlow = next.startsWith("/cuenta/cambiar-password");
-
-      if (user && isPasswordChangeFlow) {
-        // Reuse existing users.must_change_password — mark recovery/first-login gate.
-        await getDb()
-          .update(users)
-          .set({ mustChangePassword: true, updatedAt: new Date() })
-          .where(eq(users.id, user.id));
-
-        await supabase.auth.updateUser({
-          data: { must_change_password: true },
-        });
-
-        const res = NextResponse.redirect(`${origin}${next}`);
-        res.cookies.set(
-          MUST_CHANGE_PASSWORD_COOKIE,
-          "1",
-          passwordGateCookieOptions(),
-        );
-        return res;
-      }
-
-      return NextResponse.redirect(`${origin}${next}`);
+  let mustChange = false;
+  if (process.env.DATABASE_URL) {
+    try {
+      const db = getDb();
+      const [profile] = await db
+        .select({ mustChangePassword: users.mustChangePassword })
+        .from(users)
+        .where(eq(users.clerkUserId, userId))
+        .limit(1);
+      mustChange = Boolean(profile?.mustChangePassword);
+    } catch {
+      mustChange = false;
     }
   }
 
-  return NextResponse.redirect(`${origin}/login?error=auth_callback`);
+  const destination = mustChange ? "/cuenta/cambiar-password" : next;
+  const response = NextResponse.redirect(new URL(destination, request.url));
+  if (mustChange) {
+    response.cookies.set(
+      MUST_CHANGE_PASSWORD_COOKIE,
+      "1",
+      passwordGateCookieOptions(),
+    );
+  }
+  return response;
 }

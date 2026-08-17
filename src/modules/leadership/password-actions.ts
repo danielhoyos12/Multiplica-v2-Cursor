@@ -1,5 +1,6 @@
 "use server";
 
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 
@@ -11,7 +12,6 @@ import {
   passwordGateCookieOptions,
 } from "@/lib/password-change-gate";
 import { requireSessionUser } from "@/server/auth";
-import { createClient } from "@/server/supabase/server";
 
 export async function clearMustChangePasswordAction() {
   try {
@@ -22,10 +22,16 @@ export async function clearMustChangePasswordAction() {
       .set({ mustChangePassword: false, updatedAt: new Date() })
       .where(eq(users.id, user.id));
 
-    const supabase = await createClient();
-    await supabase.auth.updateUser({
-      data: { must_change_password: false },
-    });
+    if (process.env.CLERK_SECRET_KEY) {
+      try {
+        const client = await clerkClient();
+        await client.users.updateUser(user.clerkUserId, {
+          publicMetadata: { mustChangePassword: false },
+        });
+      } catch {
+        // DB flag is source of truth for the app gate
+      }
+    }
 
     const cookieStore = await cookies();
     cookieStore.set(MUST_CHANGE_PASSWORD_COOKIE, "", {
@@ -41,6 +47,37 @@ export async function clearMustChangePasswordAction() {
     return {
       ok: false as const,
       error: error instanceof Error ? error.message : "Error al actualizar perfil.",
+    };
+  }
+}
+
+export async function setNewPasswordAction(password: string) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return { ok: false as const, error: "Debes iniciar sesión." };
+    }
+    if (password.length < 10) {
+      return {
+        ok: false as const,
+        error: "La contraseña debe tener al menos 10 caracteres.",
+      };
+    }
+
+    const client = await clerkClient();
+    await client.users.updateUser(userId, {
+      password,
+      publicMetadata: { mustChangePassword: false },
+    });
+
+    return clearMustChangePasswordAction();
+  } catch (error) {
+    return {
+      ok: false as const,
+      error:
+        error instanceof Error
+          ? error.message
+          : "No se pudo actualizar la contraseña.",
     };
   }
 }

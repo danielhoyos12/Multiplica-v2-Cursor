@@ -1,10 +1,10 @@
 "use client";
 
+import { useSignIn } from "@clerk/nextjs/legacy";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { createClient } from "@/server/supabase/client";
 import { ErrorState } from "@/components/ui/error-state";
 import { safeInternalPath } from "@/lib/safe-redirect";
 
@@ -12,6 +12,7 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = safeInternalPath(searchParams.get("next"), "/dashboard");
+  const { isLoaded, signIn, setActive } = useSignIn();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,28 +21,30 @@ export function LoginForm() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!isLoaded || !signIn || !setActive) {
+      setError("Clerk aún no está listo. Revisa las claves de entorno.");
+      return;
+    }
     setLoading(true);
     setError(null);
 
     try {
-      const supabase = createClient();
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
+      const result = await signIn.create({
+        identifier: email,
         password,
       });
 
-      if (signInError) {
-        setError("No se pudo iniciar sesión. Verifica tus credenciales.");
-        setLoading(false);
+      if (result.status === "complete" && result.createdSessionId) {
+        await setActive({ session: result.createdSessionId });
+        router.replace(nextPath);
+        router.refresh();
         return;
       }
 
-      router.replace(nextPath);
-      router.refresh();
+      setError("No se pudo completar el inicio de sesión.");
+      setLoading(false);
     } catch {
-      setError(
-        "La autenticación no está configurada o no se pudo conectar con Supabase.",
-      );
+      setError("No se pudo iniciar sesión. Verifica tus credenciales.");
       setLoading(false);
     }
   }
@@ -84,7 +87,7 @@ export function LoginForm() {
       {error ? <ErrorState message={error} title="Inicio de sesión" /> : null}
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || !isLoaded}
         className="w-full rounded-[var(--radius-sm)] bg-[var(--brand)] px-4 py-2.5 text-sm font-medium text-white transition-opacity disabled:opacity-60"
       >
         {loading ? "Ingresando…" : "Ingresar"}
@@ -92,6 +95,12 @@ export function LoginForm() {
       <p className="text-center text-sm">
         <Link href="/recuperar" className="underline">
           ¿Olvidaste tu contraseña?
+        </Link>
+      </p>
+      <p className="text-center text-sm text-[var(--muted)]">
+        ¿No tienes cuenta?{" "}
+        <Link href="/sign-up" className="underline text-[var(--ink)]">
+          Crear cuenta
         </Link>
       </p>
     </form>

@@ -2,11 +2,13 @@
  * Live Phase 8 verification against multiplica-dev.
  *
  * Enviar + ungimiento (≠ active) + transfers + subtree/closure +
- * deactivation plan + max-2-cells + idempotency + anon RLS.
+ * deactivation plan + max-2-cells + idempotency.
  */
 import { randomBytes } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import { and, count, eq, isNull, sql } from "drizzle-orm";
+
+import { recordInterimDatabaseReady } from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 
 import { getDb } from "../src/db/client";
 import {
@@ -99,33 +101,17 @@ async function markEm3Completed(
 
 async function main() {
   const results: Result[] = [];
-  const db = getDb();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  record(results, "service_role present", Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
   record(results, "DATABASE_URL not public", !process.env.NEXT_PUBLIC_DATABASE_URL);
   record(results, "SendRules: completing ≠ activate", SendRules.completingDoesNotActivateLeader);
   record(results, "SendRules: completing ≠ cell", SendRules.completingDoesNotCreateCell);
   record(results, "TransferRules: never lose persons", TransferRules.neverLosePersons);
   record(results, "TransferRules: max 2 cells", TransferRules.maxDirectCells === 2);
-
-  const anon = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const anonTransfers = await anon.from("pastoral_transfer_requests").select("id").limit(3);
-  record(
-    results,
-    "anonymous pastoral_transfer_requests DENY/empty",
-    Boolean(anonTransfers.error) || (anonTransfers.data?.length ?? 0) === 0,
-    anonTransfers.error?.message ?? `rows=${anonTransfers.data?.length ?? 0}`,
-  );
-  const anonHist = await anon.from("leadership_relationship_history").select("id").limit(3);
-  record(
-    results,
-    "anonymous leadership_relationship_history DENY/empty",
-    Boolean(anonHist.error) || (anonHist.data?.length ?? 0) === 0,
-  );
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 8 verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
+  const db = getDb();
 
   const ministryRows = await db
     .select()

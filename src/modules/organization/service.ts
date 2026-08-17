@@ -363,32 +363,58 @@ export async function listUserRoleAssignments(actorUserId: string) {
  * Ensures app `users` row exists for the authenticated Auth user (idempotent).
  */
 export async function ensureAppUserProfile(input: {
-  id: string;
+  clerkUserId: string;
   email: string;
   displayName?: string | null;
 }) {
   const db = getDb();
-  const [existing] = await db.select().from(users).where(eq(users.id, input.id)).limit(1);
-  if (existing) {
-    if (existing.email !== input.email || (input.displayName && !existing.displayName)) {
+
+  const [byClerk] = await db
+    .select()
+    .from(users)
+    .where(eq(users.clerkUserId, input.clerkUserId))
+    .limit(1);
+  if (byClerk) {
+    if (
+      byClerk.email !== input.email ||
+      (input.displayName && !byClerk.displayName)
+    ) {
       const [updated] = await db
         .update(users)
         .set({
           email: input.email,
-          displayName: input.displayName ?? existing.displayName,
+          displayName: input.displayName ?? byClerk.displayName,
           updatedAt: new Date(),
         })
-        .where(eq(users.id, input.id))
+        .where(eq(users.id, byClerk.id))
         .returning();
       return updated;
     }
-    return existing;
+    return byClerk;
+  }
+
+  const [byEmail] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, input.email))
+    .limit(1);
+  if (byEmail) {
+    const [linked] = await db
+      .update(users)
+      .set({
+        clerkUserId: input.clerkUserId,
+        displayName: input.displayName ?? byEmail.displayName,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, byEmail.id))
+      .returning();
+    return linked;
   }
 
   const [created] = await db
     .insert(users)
     .values({
-      id: input.id,
+      clerkUserId: input.clerkUserId,
       email: input.email,
       displayName: input.displayName ?? null,
       isActive: true,

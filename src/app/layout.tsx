@@ -1,5 +1,8 @@
+import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Archivo, Inter } from "next/font/google";
+
+import { ConvexClientProvider } from "@/components/convex/convex-client-provider";
 
 import "./globals.css";
 
@@ -29,6 +32,17 @@ export const metadata: Metadata = {
   applicationName: "MULTIPLICA",
 };
 
+function resolveConvexUrlForProvider(): string | undefined {
+  if (process.env.NEXT_PUBLIC_CONVEX_URL) {
+    return process.env.NEXT_PUBLIC_CONVEX_URL;
+  }
+  // Keep ConvexProvider in the tree during `npm run build` prerender.
+  if (process.env.MULTIPLICA_ALLOW_PLACEHOLDER_ENV === "1") {
+    return "http://127.0.0.1:3210";
+  }
+  return undefined;
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -39,7 +53,19 @@ export default function RootLayout({
       lang="es"
       className={`${inter.variable} ${archivo.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        <ClerkProvider
+          signInUrl="/login"
+          signUpUrl="/sign-up"
+          signInFallbackRedirectUrl="/dashboard"
+          signUpFallbackRedirectUrl="/bienvenida"
+          afterSignOutUrl="/login"
+        >
+          <ConvexClientProvider convexUrl={resolveConvexUrlForProvider()}>
+            {children}
+          </ConvexClientProvider>
+        </ClerkProvider>
+      </body>
     </html>
   );
 }

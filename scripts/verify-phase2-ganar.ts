@@ -3,7 +3,13 @@
  * Run: npx tsx --env-file=.env.local scripts/verify-phase2-ganar.ts
  */
 import { createHash } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
+
+import {
+  createEphemeralClerkUser,
+  deleteClerkUser,
+  recordInterimDatabaseReady,
+} from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "../src/db/client";
@@ -36,10 +42,13 @@ function record(results: Result[], name: string, pass: boolean, detail?: string)
 
 async function main() {
   const results: Result[] = [];
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 2 verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
   const db = getDb();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceKey = process.env.CLERK_SECRET_KEY;
 
   const [ministryA, ministryB] = await db
     .select()
@@ -61,27 +70,6 @@ async function main() {
 
   record(results, "catalogs ready", Boolean(ministryA && network && district));
   record(results, "Niños inactive", ninos?.isActive === false);
-
-  const anon = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const anonSelect = await anon.from("persons").select("id").limit(5);
-  record(
-    results,
-    "anonymous direct SELECT persons DENY/empty",
-    Boolean(anonSelect.error) || (anonSelect.data?.length ?? 0) === 0,
-    anonSelect.error?.message ?? `rows=${anonSelect.data?.length ?? 0}`,
-  );
-  const anonInsert = await anon.from("persons").insert({
-    first_name: "Anon",
-    last_name: "Hack",
-  });
-  record(
-    results,
-    "anonymous direct INSERT persons DENY",
-    Boolean(anonInsert.error),
-    anonInsert.error?.message ?? "unexpected ok",
-  );
 
   // Find a superadmin actor
   const [superRole] = await db.select().from(roles).where(eq(roles.code, "superadmin")).limit(1);
@@ -206,24 +194,20 @@ async function main() {
 
     // Cross-ministry deny with synthetic leader context if second ministry exists
     if (ministryB && serviceKey) {
-      const admin = createClient(supabaseUrl, serviceKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
       const email = `phase2-leader-${Date.now()}@example.com`;
       const password = createHash("sha256").update(email).digest("hex").slice(0, 24) + "Aa1!";
-      const createdUser = await admin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      });
-      const leaderId = createdUser.data.user?.id;
-      if (leaderId) {
-        await db.insert(users).values({
-          id: leaderId,
-          email,
-          displayName: "Leader Phase2",
-          isActive: true,
-        });
+      try {
+        const ephemeral = await createEphemeralClerkUser(email, password);
+        const [inserted] = await db
+          .insert(users)
+          .values({
+            clerkUserId: ephemeral.clerkUserId,
+            email,
+            displayName: "Leader Phase2",
+            isActive: true,
+          })
+          .returning({ id: users.id });
+        const leaderId = inserted.id;
         const [leaderRole] = await db
           .select()
           .from(roles)
@@ -260,16 +244,16 @@ async function main() {
         const leaked = scopedList.rows.some((r) => r.id === created.personId);
         record(results, "cross-ministry list isolation", !leaked, `rows=${scopedList.total}`);
 
-        await admin.auth.admin.deleteUser(leaderId);
-      } else {
-        record(results, "leader user create", false, createdUser.error?.message);
+        await deleteClerkUser(ephemeral.clerkUserId);
+      } catch (e) {
+        record(results, "leader user create", false, e instanceof Error ? e.message : String(e));
       }
     } else {
       record(
         results,
         "cross-ministry probes",
         false,
-        "need second ministry + service role",
+        "need second ministry + CLERK_SECRET_KEY",
       );
     }
   }
@@ -278,7 +262,7 @@ async function main() {
   const { readdirSync, readFileSync, existsSync } = await import("node:fs");
   const { join } = await import("node:path");
   let secretHit = false;
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRole = process.env.CLERK_SECRET_KEY;
   const databaseUrl = process.env.DATABASE_URL;
   const scanRoot = ".next/static";
   if (existsSync(scanRoot)) {

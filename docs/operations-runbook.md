@@ -2,7 +2,7 @@
 
 ## Create user (leader)
 
-1. Activate leadership from Persona Maestra (creates Auth user + temp password once).
+1. Activate leadership from Persona Maestra (creates Clerk user + temp password once).
 2. User must change password on first access (`must_change_password`).
 3. Assign roles in Admin → Usuarios if needed beyond default leader role.
 
@@ -13,21 +13,21 @@
 
 ## Bootstrap Superadmin
 
-1. Create Auth user in Supabase (staging/prod project).
-2. Ensure `users` row exists (`ensureAppUserProfile` on first login or seed bootstrap).
+1. Create user in **Clerk** (staging/prod instance).
+2. Ensure app `users` row exists (`ensureAppUserProfile` on first login or seed bootstrap).
 3. Assign `superadmin` role via controlled seed/script — no hardcoded backdoor.
 4. Document the human owner of the account offline (not in git).
 
 ## Reset password
 
-- Self-service: `/recuperar` (Supabase email).
-- Configure SMTP + redirect URLs for staging/prod (not localhost-only).
-- Operator: Supabase Auth → user → send reset; never store passwords in app DB.
+- Self-service: `/recuperar` (Clerk).
+- Configure Clerk allowed origins / redirect URLs for staging/prod.
+- Operator: Clerk Dashboard → user → reset password; never store passwords in app DB.
 
 ## Review system health
 
 1. `/admin/system-health` (Superadmin).
-2. Or `CRITICAL_FAIL=1 npm run verify:invariants` against staging/dev.
+2. Or `CRITICAL_FAIL=1 npm run verify:invariants` against staging/dev (interim Postgres only).
 
 ## Transferencias
 
@@ -39,11 +39,11 @@
 
 | Symptom | First check |
 | --- | --- |
-| Login broken | Auth URL, cookies, Supabase status |
-| Empty pastoral data | Actor scope / RLS / role assignments |
-| Health 503 | `/api/ready` DB connectivity / pooler |
-| Suspected leak | Rotate secrets; revoke sessions |
+| Login broken | Clerk keys, redirect URLs, Clerk status |
+| Empty pastoral data | Actor scope / roles; Convex URL; interim DB if still used |
+| Health 503 | `/api/ready` Clerk + Convex reachability |
+| Suspected leak | Rotate Clerk secret + Convex deploy key; revoke sessions |
 
 ## Session revocation
 
-Supabase Auth: sign out user / ban / reset password. App `is_active=false` blocks shell access.
+Clerk: sign out / ban / reset password. App `is_active=false` blocks shell access.

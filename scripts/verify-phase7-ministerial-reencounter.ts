@@ -2,8 +2,10 @@
  * Live Phase 7 verification — Escuela Ministerial + Re-Encuentro on multiplica-dev.
  */
 import { randomBytes } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import { and, eq, isNull } from "drizzle-orm";
+
+import { recordInterimDatabaseReady } from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 
 import { getDb } from "../src/db/client";
 import {
@@ -115,14 +117,15 @@ async function seedLadderUpTo(
 
 async function main() {
   const results: Result[] = [];
-  const db = getDb();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  record(results, "service_role present", Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
   record(results, "DATABASE_URL not public", !process.env.NEXT_PUBLIC_DATABASE_URL);
   record(results, "rule EM needs N3", MinisterialRules.canEnter("completed"));
   record(results, "rule RE needs EM", ReencuentroRules.canEnter("completed"));
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 7 EM/RE verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
+  const db = getDb();
 
   const [ministryA, ministryB] = await db
     .select()
@@ -136,16 +139,6 @@ async function main() {
     .where(eq(networks.code, "hombres"))
     .limit(1);
   record(results, "catalogs ready", Boolean(ministryA && ministryB && networkH));
-
-  const anon = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const anonProg = await anon.from("person_process_progress").select("id").limit(3);
-  record(
-    results,
-    "anonymous process DENY/empty",
-    Boolean(anonProg.error) || (anonProg.data?.length ?? 0) === 0,
-  );
 
   const [superRole] = await db.select().from(roles).where(eq(roles.code, "superadmin")).limit(1);
   const [superAssign] = superRole

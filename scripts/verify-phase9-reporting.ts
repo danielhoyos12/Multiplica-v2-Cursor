@@ -1,8 +1,10 @@
 /**
  * Live Phase 9 reporting verification against multiplica-dev.
  */
-import { createClient } from "@supabase/supabase-js";
 import { and, eq, isNull } from "drizzle-orm";
+
+import { recordInterimDatabaseReady } from "./lib/verify-env";
+import { hasClerkSecret } from "../src/lib/env";
 
 import { getDb } from "../src/db/client";
 import {
@@ -31,23 +33,14 @@ function record(results: Result[], name: string, pass: boolean, detail?: string)
 
 async function main() {
   const results: Result[] = [];
-  const db = getDb();
-
-  record(results, "service_role present", Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
+  record(results, "CLERK_SECRET_KEY present", hasClerkSecret());
   record(results, "DATABASE_URL not public", !process.env.NEXT_PUBLIC_DATABASE_URL);
   record(results, "CSV formula sanitize", sanitizeCsvCell("=cmd").startsWith("'"));
-
-  const anon = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
-  const anonPersons = await anon.from("persons").select("id").limit(3);
-  record(
-    results,
-    "anonymous persons DENY/empty",
-    Boolean(anonPersons.error) || (anonPersons.data?.length ?? 0) === 0,
-  );
+  if (!recordInterimDatabaseReady(results)) {
+    console.log("\nPhase 9 verify skipped — interim DB unavailable");
+    process.exit(1);
+  }
+  const db = getDb();
 
   const [superRole] = await db.select().from(roles).where(eq(roles.code, "superadmin")).limit(1);
   const [superAssign] = superRole

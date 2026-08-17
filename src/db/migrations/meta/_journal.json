@@ -78,6 +78,13 @@
       "when": 1786759000000,
       "tag": "0010_phase8_send_transfers",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786760000000,
+      "tag": "0011_clerk_user_id",
+      "breakpoints": true
     }
   ]
 }

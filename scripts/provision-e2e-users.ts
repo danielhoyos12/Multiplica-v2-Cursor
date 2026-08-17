@@ -1,12 +1,17 @@
 /**
- * Provision ephemeral E2E users for Phase 5 pre-prod validation.
+ * Provision ephemeral E2E users via Clerk + interim Postgres (`users.clerk_user_id`).
  * Refuses APP_ENV=production. Writes credentials to .env.e2e.local (gitignored).
+ *
+ * Requires:
+ * - CLERK_SECRET_KEY
+ * - DATABASE_URL pointing at non-Supabase Postgres (interim pastoral modules)
+ *
+ * Once pastoral data is fully on Convex, replace the Drizzle section with Convex mutations.
  *
  * Usage: npx tsx --env-file=.env.local scripts/provision-e2e-users.ts
  */
 import { createHash, randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { createClient } from "@supabase/supabase-js";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
@@ -16,6 +21,9 @@ import {
   userRoleAssignments,
   users,
 } from "@/db/schema";
+import { hasClerkSecret, hasDatabaseUrl } from "@/lib/env";
+
+import { upsertClerkUserPassword } from "./lib/verify-env";
 
 const APP_ENV = process.env.APP_ENV ?? "local";
 
@@ -61,16 +69,24 @@ async function main() {
     process.exit(1);
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) {
-    console.error("Missing Supabase env");
+  if (!hasClerkSecret()) {
+    console.error(
+      "Missing CLERK_SECRET_KEY. E2E provision requires Clerk Backend API.",
+    );
     process.exit(1);
   }
 
-  const admin = createClient(url, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  if (!hasDatabaseUrl()) {
+    console.error(
+      [
+        "E2E provision requires interim non-Supabase DATABASE_URL to link",
+        "users.clerk_user_id + roles (or a Convex-based provision path once cutover completes).",
+        "Set DATABASE_URL to Neon/etc., or migrate pastoral users to Convex first.",
+      ].join(" "),
+    );
+    process.exit(1);
+  }
+
   const db = getDb();
 
   const [ministry] = await db
@@ -99,41 +115,57 @@ async function main() {
       process.exit(1);
     }
 
-    const list = await admin.auth.admin.listUsers({ perPage: 200 });
-    let userId = list.data.users.find((u) => u.email === account.email)?.id;
-
-    if (!userId) {
-      const created = await admin.auth.admin.createUser({
-        email: account.email,
-        password,
-        email_confirm: true,
+    let clerkUserId: string;
+    try {
+      clerkUserId = await upsertClerkUserPassword(account.email, password, {
+        mustChangePassword: false,
+        e2e: true,
+        role: account.role,
       });
-      if (!created.data.user) {
-        console.error(account.email, created.error?.message);
-        process.exit(1);
-      }
-      userId = created.data.user.id;
-    } else {
-      await admin.auth.admin.updateUserById(userId, {
-        password,
-        email_confirm: true,
-      });
+    } catch (e) {
+      console.error(account.email, e instanceof Error ? e.message : e);
+      process.exit(1);
     }
 
     const [existing] = await db
       .select()
       .from(users)
-      .where(eq(users.id, userId))
+      .where(eq(users.clerkUserId, clerkUserId))
       .limit(1);
+
+    let appUserId: string;
     if (!existing) {
-      await db.insert(users).values({
-        id: userId,
-        email: account.email,
-        displayName: account.displayName,
-        isActive: true,
-        mustChangePassword: false,
-        username: `e2e_${account.role}_${randomBytes(2).toString("hex")}`,
-      });
+      const [byEmail] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, account.email))
+        .limit(1);
+      if (byEmail) {
+        await db
+          .update(users)
+          .set({
+            clerkUserId,
+            displayName: account.displayName,
+            isActive: true,
+            mustChangePassword: false,
+            email: account.email,
+          })
+          .where(eq(users.id, byEmail.id));
+        appUserId = byEmail.id;
+      } else {
+        const [inserted] = await db
+          .insert(users)
+          .values({
+            clerkUserId,
+            email: account.email,
+            displayName: account.displayName,
+            isActive: true,
+            mustChangePassword: false,
+            username: `e2e_${account.role}_${randomBytes(2).toString("hex")}`,
+          })
+          .returning({ id: users.id });
+        appUserId = inserted.id;
+      }
     } else {
       await db
         .update(users)
@@ -143,19 +175,20 @@ async function main() {
           mustChangePassword: false,
           email: account.email,
         })
-        .where(eq(users.id, userId));
+        .where(eq(users.id, existing.id));
+      appUserId = existing.id;
     }
 
     const assignments = await db
       .select()
       .from(userRoleAssignments)
-      .where(eq(userRoleAssignments.userId, userId));
+      .where(eq(userRoleAssignments.userId, appUserId));
     const active = assignments.find(
       (a) => a.roleId === role.id && (a.endsAt == null || a.endsAt > new Date()),
     );
     if (!active) {
       await db.insert(userRoleAssignments).values({
-        userId,
+        userId: appUserId,
         roleId: role.id,
         ministryId: account.ministryScoped ? ministry.id : null,
       });
@@ -163,8 +196,9 @@ async function main() {
 
     lines.push(`E2E_${account.key}_EMAIL=${account.email}`);
     lines.push(`E2E_${account.key}_PASSWORD=${password}`);
-    lines.push(`E2E_${account.key}_USER_ID=${userId}`);
-    console.log(`OK ${account.role} ${account.email}`);
+    lines.push(`E2E_${account.key}_USER_ID=${appUserId}`);
+    lines.push(`E2E_${account.key}_CLERK_USER_ID=${clerkUserId}`);
+    console.log(`OK ${account.role} ${account.email} app=${appUserId} clerk=${clerkUserId}`);
   }
 
   writeFileSync(".env.e2e.local", `${lines.join("\n")}\n`, "utf8");

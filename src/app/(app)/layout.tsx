@@ -1,3 +1,4 @@
+import { auth as clerkAuth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -7,7 +8,7 @@ import { filterSecondaryGroups } from "@/components/layout/nav-config";
 import { PasswordGateShell } from "@/components/layout/password-gate-shell";
 import { getDb } from "@/db/client";
 import { users } from "@/db/schema";
-import { hasSupabasePublicConfig } from "@/lib/env";
+import { hasClerkPublicConfig } from "@/lib/env";
 import { isPasswordChangeAllowedPath } from "@/lib/safe-redirect";
 import {
   hasPermission,
@@ -22,25 +23,34 @@ export const dynamic = "force-dynamic";
 
 /**
  * Authenticated layout — READ-ONLY regarding cookies / Auth metadata.
- * Gate cookie + metadata are set in /auth/callback (and cleared in server actions).
- * Middleware may refresh the cookie from Auth metadata on the response.
+ * Gate cookie is set in middleware / password actions (not during RSC render).
  */
 export default async function AuthenticatedLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  if (!hasSupabasePublicConfig()) {
+  if (!hasClerkPublicConfig()) {
     redirect("/login");
   }
 
+  const { userId } = await clerkAuth();
   const user = await getSessionUser();
   if (!user) {
+    // Signed into Clerk but no app profile yet (often missing interim DB).
+    // Avoid /login ↔ /dashboard redirect loops.
+    if (userId) {
+      redirect("/bienvenida");
+    }
     redirect("/login");
   }
 
+
   if (user.email) {
-    await ensureAppUserProfile({ id: user.id, email: user.email });
+    await ensureAppUserProfile({
+      clerkUserId: user.clerkUserId,
+      email: user.email,
+    });
   }
 
   const [profile] = await getDb()

@@ -14,56 +14,42 @@ GANAR
 | Layer | Choice |
 | --- | --- |
 | Web | Next.js App Router + TypeScript + Tailwind |
-| Backend | Modular monolith (server actions + domain modules) |
-| Database | PostgreSQL (Supabase) |
-| Authn | Supabase Auth |
-| Authz | Domain policies + RLS deny-by-default |
-| ORM | Drizzle + versioned SQL migrations `0000`–`0010` |
-| Deploy | Vercel + Supabase (recommended) |
+| Backend | Domain modules → **Convex** queries/mutations |
+| Database | **Convex** (Supabase removed) |
+| Authn | **Clerk** |
+| Authz | Domain policies in app / Convex |
+| Realtime | Convex subscriptions |
+| Deploy | Vercel + Clerk + Convex |
+
+Cutover: [`docs/supabase-removal.md`](./supabase-removal.md) · Convex plan: [`docs/convex-full-cutover-plan.md`](./convex-full-cutover-plan.md) · Auth: [`docs/clerk-auth-cutover.md`](./clerk-auth-cutover.md)
 
 ## Modules (implemented)
 
-Persona Maestra · Ministerios/Redes · Células/membresías/asistencia · Liderazgo G12 + closure · Formación · Enviar/ungimiento · Transferencias · Dashboards/reportes/alertas · System health · RLS/authz · Auditoría
+Persona Maestra · Ministerios/Redes · Células/membresías/asistencia · Liderazgo G12 + closure · Formación · Enviar/ungimiento · Transferencias · Dashboards/reportes/alertas · System health · Authz · Auditoría
 
 ## Folder structure
 
 ```text
 src/app/          # routes (auth, public intake, app shell, api)
 src/components/   # UI
-src/modules/      # domain services + actions
-src/db/           # schema, migrations, seeds, rls/
+src/modules/      # domain services + actions (Convex-backed)
+convex/           # schema + Convex functions
 src/lib/          # env, errors, redirects, prod-guard
-src/server/       # supabase session/admin helpers
-docs/             # architecture, security, ops, phase cierres
+src/server/       # Clerk session + Convex HTTP client
+docs/             # architecture, security, ops
 e2e/              # Playwright smoke
 ```
 
 ## Server / client
 
-- Browser: anon key only (`NEXT_PUBLIC_*`).
-- Server Components / Actions: cookie session.
-- Privileged: service role server-only (`@/server/supabase/admin`).
-- SQL: Drizzle via `DATABASE_URL` after domain authorization.
-
-## Auth hardening (Phase 10)
-
-- Protected pastoral prefixes in middleware.
-- `must_change_password` hard gate in app layout.
-- Safe internal redirects; forgot password at `/recuperar`.
-- `/api/health` (liveness) and `/api/ready` (DB readiness).
-
-## RLS pipeline
-
-```bash
-npm run db:migrate
-./scripts/apply-rls.sh   # idempotent DROP IF EXISTS + CREATE
-npm run db:seed          # catalogs; production: no Phase fixtures
-```
+- Browser: Clerk publishable key + `NEXT_PUBLIC_CONVEX_URL`
+- Server: Clerk `auth()` / `clerkClient`; Convex `ConvexHttpClient`
+- **No Supabase** (Auth, SDK, or hosted DB)
 
 ## Observability
 
-Minimal: structured server errors, audit for business actions, health endpoints. Sentry optional post-go-live (not required for RC).
+Minimal: structured server errors, audit for business actions, health endpoints.
 
-## Non-goals (out of Phase 10)
+## Non-goals
 
-New pastoral workflows · microservices · second database · native mobile · auto production deploy · WhatsApp/push/ML/billing.
+Microservices · native mobile · auto production deploy · WhatsApp/push/ML/billing.
