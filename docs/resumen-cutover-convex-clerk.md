@@ -358,6 +358,7 @@ HUMAN STEPS: Convex cloud URL en Vercel Preview/staging; Restricted/Invite-only 
 
 ## 14. Documentos relacionados en el repo
 
+- [docs/hardening-clerk-convex-pr23.md](./hardening-clerk-convex-pr23.md) — informe exacto del hardening pass
 - [docs/convex-full-cutover-plan.md](./convex-full-cutover-plan.md)
 - [docs/supabase-removal.md](./supabase-removal.md)
 - [docs/clerk-auth-cutover.md](./clerk-auth-cutover.md)
