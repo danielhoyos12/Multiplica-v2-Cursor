@@ -70,7 +70,10 @@ describe("Security hardening Clerk ↔ Convex — source contracts", () => {
   });
 
   it("seed catalogs are internal-only", () => {
-    expect(readSrc("convex/seed.ts")).toMatch(/internalMutation/);
+    const seed = readSrc("convex/seed.ts");
+    expect(seed).toMatch(/export const seedCatalogs = internalMutation/);
+    expect(seed).toMatch(/export const bootstrapPreview = internalMutation/);
+    expect(seed).toMatch(/import \{ internalMutation \} from "\.\/_generated\/server"/);
     expect(readSrc("convex/authz.ts")).toMatch(/seedSuperadminRole = internalMutation/);
   });
 
