@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { conflict, invalidArgument, notFound } from "./lib/errors";
 import { now } from "./lib/time";
 
@@ -71,38 +71,38 @@ export const transferRequestDoc = v.object({
   updatedAt: v.number(),
 });
 
-async function getLeadershipInternal(db: any, personId: Id<"persons">) {
+async function getLeadershipInternal(db: QueryCtx["db"], personId: Id<"persons">) {
   return await db
     .query("personLeadership")
-    .withIndex("by_person", (q: any) => q.eq("personId", personId))
+    .withIndex("by_person", (q) => q.eq("personId", personId))
     .unique();
 }
 
-async function currentOrgInternal(db: any, personId: Id<"persons">) {
+async function currentOrgInternal(db: QueryCtx["db"], personId: Id<"persons">) {
   const rows = await db
     .query("personOrganizationHistory")
-    .withIndex("by_person", (q: any) => q.eq("personId", personId))
+    .withIndex("by_person", (q) => q.eq("personId", personId))
     .collect();
-  return rows.find((r: any) => r.effectiveTo === undefined) ?? null;
+  return rows.find((r) => r.effectiveTo === undefined) ?? null;
 }
 
-async function countActiveDirectLeaders(db: any, leaderPersonId: Id<"persons">) {
+async function countActiveDirectLeaders(db: QueryCtx["db"], leaderPersonId: Id<"persons">) {
   const rows = await db
     .query("personLeadership")
-    .withIndex("by_directLeader", (q: any) => q.eq("directLeaderPersonId", leaderPersonId))
+    .withIndex("by_directLeader", (q) => q.eq("directLeaderPersonId", leaderPersonId))
     .collect();
-  return rows.filter((r: any) => r.status === "active").length;
+  return rows.filter((r) => r.status === "active").length;
 }
 
 async function isDescendantInternal(
-  db: any,
+  db: QueryCtx["db"],
   ancestorPersonId: Id<"persons">,
   descendantPersonId: Id<"persons">,
 ): Promise<boolean> {
   if (ancestorPersonId === descendantPersonId) return true;
   const row = await db
     .query("leadershipClosure")
-    .withIndex("by_ancestor_descendant", (q: any) =>
+    .withIndex("by_ancestor_descendant", (q) =>
       q.eq("ancestorPersonId", ancestorPersonId).eq("descendantPersonId", descendantPersonId),
     )
     .unique();
@@ -110,10 +110,10 @@ async function isDescendantInternal(
 }
 
 /** Full Ministry closure rebuild — reused after any leadership tree edit. */
-async function rebuildMinistryClosure(ctx: any, ministryId: Id<"ministries">) {
+async function rebuildMinistryClosure(ctx: MutationCtx, ministryId: Id<"ministries">) {
   const existingClosureRows = await ctx.db
     .query("leadershipClosure")
-    .withIndex("by_ministry", (q: any) => q.eq("ministryId", ministryId))
+    .withIndex("by_ministry", (q) => q.eq("ministryId", ministryId))
     .collect();
   for (const row of existingClosureRows) {
     await ctx.db.delete("leadershipClosure", row._id);
@@ -122,10 +122,10 @@ async function rebuildMinistryClosure(ctx: any, ministryId: Id<"ministries">) {
   const leaders = (
     await ctx.db
       .query("personLeadership")
-      .withIndex("by_ministry", (q: any) => q.eq("ministryId", ministryId))
+      .withIndex("by_ministry", (q) => q.eq("ministryId", ministryId))
       .collect()
-  ).filter((l: any) => l.status === "active");
-  const byPerson = new Map(leaders.map((l: any) => [l.personId, l]));
+  ).filter((l) => l.status === "active");
+  const byPerson = new Map(leaders.map((l) => [l.personId, l]));
 
   for (const leader of leaders) {
     await ctx.db.insert("leadershipClosure", {
@@ -146,7 +146,7 @@ async function rebuildMinistryClosure(ctx: any, ministryId: Id<"ministries">) {
         depth,
         ministryId,
       });
-      current = (byPerson.get(current) as any).directLeaderPersonId;
+      current = byPerson.get(current)?.directLeaderPersonId;
       depth += 1;
     }
   }
@@ -233,14 +233,14 @@ export const getPersonSnapshot = query({
         .query("cells")
         .withIndex("by_responsiblePersonId", (q) => q.eq("responsiblePersonId", args.personId))
         .collect()
-    ).filter((c: any) => c.status !== "closed");
+    ).filter((c) => c.status !== "closed");
     let activeMembersInOwnCells = 0;
     for (const cell of openCells) {
       const members = await ctx.db
         .query("cellMemberships")
         .withIndex("by_cell_person", (q) => q.eq("cellId", cell._id))
         .collect();
-      activeMembersInOwnCells += members.filter((m: any) => m.status === "active").length;
+      activeMembersInOwnCells += members.filter((m) => m.status === "active").length;
     }
     const descendants = await ctx.db
       .query("leadershipClosure")
@@ -259,7 +259,7 @@ export const getPersonSnapshot = query({
             directLeaderPersonId: leadership.directLeaderPersonId,
           }
         : null,
-      openCells: openCells.map((c: any) => ({ id: c._id, name: c.name, type: c.type })),
+      openCells: openCells.map((c) => ({ id: c._id, name: c.name, type: c.type })),
       descendantCount: descendants.length,
       activeMembersInOwnCells,
       activeDirectLeaderCount,
@@ -553,13 +553,13 @@ export const execute = mutation({
           .query("cells")
           .withIndex("by_responsiblePersonId", (q) => q.eq("responsiblePersonId", req.personId))
           .collect()
-      ).filter((c: any) => c.status !== "closed");
+      ).filter((c) => c.status !== "closed");
       for (const cell of openCells) {
         const members = await ctx.db
           .query("cellMemberships")
           .withIndex("by_cell_person", (q) => q.eq("cellId", cell._id))
           .collect();
-        const activeCount = members.filter((m: any) => m.status === "active").length;
+        const activeCount = members.filter((m) => m.status === "active").length;
         if (activeCount > 0) {
           return conflict(`Célula ${cell._id} aún tiene miembros activos.`);
         }

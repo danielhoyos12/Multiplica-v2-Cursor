@@ -1,8 +1,7 @@
 import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query } from "./_generated/server";
-import { invalidArgument, notFound } from "./lib/errors";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { now } from "./lib/time";
 
 /**
@@ -41,17 +40,21 @@ export const sendProgressDoc = v.object({
   updatedAt: v.number(),
 });
 
-async function getSendProgressInternal(db: any, personId: Id<"persons">) {
+async function getSendProgressInternal(db: QueryCtx["db"], personId: Id<"persons">) {
   return await db
     .query("personProcessProgress")
-    .withIndex("by_person_processType", (q: any) => q.eq("personId", personId).eq("processType", PROCESS))
+    .withIndex("by_person_processType", (q) =>
+      q.eq("personId", personId).eq("processType", PROCESS),
+    )
     .unique();
 }
 
-async function getEm3StatusInternal(db: any, personId: Id<"persons">) {
+async function getEm3StatusInternal(db: QueryCtx["db"], personId: Id<"persons">) {
   const row = await db
     .query("personProcessProgress")
-    .withIndex("by_person_processType", (q: any) => q.eq("personId", personId).eq("processType", "em3"))
+    .withIndex("by_person_processType", (q) =>
+      q.eq("personId", personId).eq("processType", "em3"),
+    )
     .unique();
   return row?.status ?? null;
 }

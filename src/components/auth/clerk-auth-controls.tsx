@@ -6,7 +6,6 @@ import {
   SignUpButton,
   UserButton,
 } from "@clerk/nextjs";
-import Link from "next/link";
 
 /**
  * Clear Clerk auth controls for signed-out / signed-in states.

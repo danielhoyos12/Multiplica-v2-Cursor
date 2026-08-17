@@ -7,7 +7,11 @@
 export function withId<T extends Record<string, unknown> & { _id: unknown; _creationTime?: unknown }>(
   doc: T,
 ): Omit<T, "_id" | "_creationTime"> & { id: string } {
-  const { _id, _creationTime, ...rest } = doc as Record<string, unknown>;
+  const { _id, _creationTime: _creationTimeUnused, ...rest } = doc as Record<
+    string,
+    unknown
+  >;
+  void _creationTimeUnused;
   return { id: _id as string, ...rest } as Omit<T, "_id" | "_creationTime"> & { id: string };
 }
 

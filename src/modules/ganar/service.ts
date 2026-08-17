@@ -186,7 +186,6 @@ export async function createPersonInternal(
   await assertDistrictActive(input.districtId);
 
   const { firstName, lastName } = splitFullName(input.fullName);
-  const phoneNormalized = normalizePhone(input.phone);
   const duplicates = await findDuplicateCandidates({
     phone: input.phone,
     firstName,
