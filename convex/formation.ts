@@ -612,6 +612,12 @@ export const getAttendance = query({
   },
 });
 
+export const getAttendanceById = query({
+  args: { attendanceId: v.id("trainingAttendance") },
+  returns: v.union(attendanceDoc, v.null()),
+  handler: async (ctx, args) => await ctx.db.get("trainingAttendance", args.attendanceId),
+});
+
 // ---------------------------------------------------------------------
 // Mutations — progress
 // ---------------------------------------------------------------------

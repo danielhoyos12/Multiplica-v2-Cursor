@@ -31,21 +31,21 @@ import { markPersonEligible } from "@/modules/leadership/service";
 const PROCESS = "enviar" as const;
 
 export const startSendInputSchema = z.object({
-  personId: z.string().uuid(),
+  personId: z.string().min(1),
   note: z.string().trim().max(500).optional(),
 });
 
 export const completeSendInputSchema = z.object({
-  personId: z.string().uuid(),
+  personId: z.string().min(1),
   note: z.string().trim().max(500).optional(),
   markEligible: z.boolean().optional().default(false),
 });
 
 export const anointAfterSendInputSchema = z.object({
-  personId: z.string().uuid(),
-  ministryId: z.string().uuid(),
-  networkId: z.string().uuid(),
-  directLeaderPersonId: z.string().uuid().optional().nullable(),
+  personId: z.string().min(1),
+  ministryId: z.string().min(1),
+  networkId: z.string().min(1),
+  directLeaderPersonId: z.string().min(1).optional().nullable(),
 });
 
 async function requireActor(userId: string) {

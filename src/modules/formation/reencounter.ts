@@ -3,23 +3,9 @@
  * Modeled as training program with a single event module (RE-EVENT).
  * Completing does NOT activate leadership / create cell / credentials.
  */
-import { and, asc, count, desc, eq, inArray, isNull } from "drizzle-orm";
-
-import { getDb } from "@/db/client";
-import {
-  personOrganizationHistory,
-  personProcessEvents,
-  personProcessProgress,
-  persons,
-  REENCUENTRO_FAMILY,
-  REENCUENTRO_PROGRAM_CODE,
-  trainingAttendance,
-  trainingCycles,
-  trainingCycleStaff,
-  trainingEnrollments,
-  trainingModules,
-  trainingPrograms,
-} from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { withId } from "@/lib/convex-doc";
+import { mapConvexError } from "@/lib/convex-errors";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
 import {
@@ -33,8 +19,11 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
+import { api, getConvexHttpClient } from "@/server/convex";
 
 const PROCESS = "reencuentro" as const;
+const REENCUENTRO_FAMILY = "reencuentro";
+const REENCUENTRO_PROGRAM_CODE = "reencuentro";
 const EVENT_MODULE_CODE = "RE-EVENT";
 
 async function requireActor(userId: string) {
@@ -42,36 +31,24 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-    })
-    .from(personOrganizationHistory)
-    .where(
-      and(
-        eq(personOrganizationHistory.personId, personId),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = getConvexHttpClient();
+  const org = await client.query(api.persons.getCurrentOrg, {
+    personId: personId as Id<"persons">,
+  });
+  if (!org) return null;
+  return {
+    ministryId: (org.ministryId as string | undefined) ?? null,
+    networkId: (org.networkId as string | undefined) ?? null,
+  };
 }
 
 async function getReProgress(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, PROCESS),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = getConvexHttpClient();
+  const row = await client.query(api.formation.getProgress, {
+    personId: personId as Id<"persons">,
+    processType: PROCESS,
+  });
+  return row ? withId(row) : null;
 }
 
 async function appendEvent(params: {
@@ -84,65 +61,40 @@ async function appendEvent(params: {
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const db = getDb();
-  await db.insert(personProcessEvents).values({
-    progressId: params.progressId,
-    personId: params.personId,
-    processType: PROCESS,
-    eventType: params.eventType,
-    fromStatus: (params.fromStatus as never) ?? null,
-    toStatus: (params.toStatus as never) ?? null,
-    actorUserId: params.actorUserId,
-    note: params.note ?? null,
-    metadata: params.metadata ?? {},
-  });
+  const client = getConvexHttpClient();
+  await client
+    .mutation(api.formation.appendProcessEvent, {
+      progressId: params.progressId as Id<"personProcessProgress">,
+      personId: params.personId as Id<"persons">,
+      processType: PROCESS,
+      eventType: params.eventType,
+      fromStatus: (params.fromStatus ?? undefined) as never,
+      toStatus: (params.toStatus ?? undefined) as never,
+      actorUserId: params.actorUserId as Id<"users">,
+      note: params.note ?? undefined,
+      metadata: params.metadata ?? {},
+    })
+    .catch(mapConvexError);
 }
 
 export async function ensureReencuentroProgram() {
-  const db = getDb();
-  let [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.code, REENCUENTRO_PROGRAM_CODE))
-    .limit(1);
-  if (!program) {
-    [program] = await db
-      .insert(trainingPrograms)
-      .values({
-        code: REENCUENTRO_PROGRAM_CODE,
-        name: "Re-Encuentro",
-        description: "Evento pastoral posterior a Escuela Ministerial (módulo único).",
-        family: REENCUENTRO_FAMILY,
-        isActive: true,
-      })
-      .returning();
-  } else if (program.family !== REENCUENTRO_FAMILY) {
-    [program] = await db
-      .update(trainingPrograms)
-      .set({
-        family: REENCUENTRO_FAMILY,
-        name: "Re-Encuentro",
-        updatedAt: new Date(),
-      })
-      .where(eq(trainingPrograms.id, program.id))
-      .returning();
-  }
-
-  const modules = await db
-    .select()
-    .from(trainingModules)
-    .where(eq(trainingModules.programId, program.id));
+  const client = getConvexHttpClient();
+  const program = await client.mutation(api.formation.ensureProgram, {
+    code: REENCUENTRO_PROGRAM_CODE,
+    name: "Re-Encuentro",
+    description: "Evento pastoral posterior a Escuela Ministerial (módulo único).",
+    family: REENCUENTRO_FAMILY,
+  });
+  const modules = await client.query(api.formation.listModules, { programId: program._id });
   if (modules.length === 0) {
-    await db.insert(trainingModules).values({
-      programId: program.id,
-      code: EVENT_MODULE_CODE,
-      name: "Evento Re-Encuentro",
-      orderIndex: 1,
-      isActive: true,
-      isRequired: true,
+    await client.mutation(api.formation.syncModules, {
+      programId: program._id,
+      modules: [
+        { code: EVENT_MODULE_CODE, name: "Evento Re-Encuentro", orderIndex: 1 },
+      ],
     });
   }
-  return program;
+  return withId(program);
 }
 
 export async function ensureReencuentroEligible(
@@ -151,53 +103,30 @@ export async function ensureReencuentroEligible(
   networkId: string | null,
 ) {
   const existing = await getReProgress(personId);
-  if (existing) {
-    if (existing.status === "pending") {
-      const db = getDb();
-      const [row] = await db
-        .update(personProcessProgress)
-        .set({
-          status: "eligible",
-          currentStep: "apto_reencuentro",
-          updatedAt: new Date(),
-          metadata: { ...(existing.metadata ?? {}), eligible_for_reencuentro: true },
-        })
-        .where(eq(personProcessProgress.id, existing.id))
-        .returning();
-      return row;
-    }
-    return existing;
-  }
-  const db = getDb();
-  const [row] = await db
-    .insert(personProcessProgress)
-    .values({
-      personId,
-      processType: PROCESS,
-      status: "eligible",
-      stage: "reencuentro",
-      currentStep: "apto_reencuentro",
-      ministryId,
-      networkId,
-      metadata: { eligible_for_reencuentro: true },
-    })
-    .returning();
-  return row;
+  if (existing && existing.status !== "pending") return existing;
+  const client = getConvexHttpClient();
+  return withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: personId as Id<"persons">,
+        processType: PROCESS,
+        status: "eligible",
+        stage: "reencuentro",
+        currentStep: "apto_reencuentro",
+        ministryId: ministryId as Id<"ministries">,
+        networkId: (networkId ?? undefined) as Id<"networks"> | undefined,
+        metadata: { ...(existing?.metadata ?? {}), eligible_for_reencuentro: true },
+      })
+      .catch(mapConvexError),
+  );
 }
 
 export async function assertReencuentroEligible(personId: string) {
-  // Official: CD2 completed — NOT Escuela Ministerial
-  const db = getDb();
-  const [cd2] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, "destino_n2"),
-      ),
-    )
-    .limit(1);
+  const client = getConvexHttpClient();
+  const cd2 = await client.query(api.formation.getProgress, {
+    personId: personId as Id<"persons">,
+    processType: "destino_n2",
+  });
   if (!cd2 || cd2.status !== "completed") {
     throw new DomainError(
       DomainErrorCode.REENCOUNTER_NOT_ELIGIBLE,
@@ -219,37 +148,29 @@ export async function isReencuentroEligible(personId: string) {
 
 async function getProgram() {
   await ensureReencuentroProgram();
-  const db = getDb();
-  const [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.code, REENCUENTRO_PROGRAM_CODE))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const program = await client.query(api.formation.getProgramByCode, {
+    code: REENCUENTRO_PROGRAM_CODE,
+  });
   if (!program) {
     throw new DomainError(
       DomainErrorCode.CONFIGURATION_ERROR,
       "Programa Re-Encuentro no configurado.",
     );
   }
-  return program;
+  return withId(program);
 }
 
 async function assertCycleStaffOrManage(actor: AuthContext, cycleId: string) {
   if (isSuperadmin(actor)) return;
-  if (
-    hasPermission(actor, "reencounter.manage") ||
-    hasPermission(actor, "school.cycles.manage")
-  ) {
+  if (hasPermission(actor, "reencounter.manage") || hasPermission(actor, "school.cycles.manage")) {
     return;
   }
-  const db = getDb();
-  const [staff] = await db
-    .select()
-    .from(trainingCycleStaff)
-    .where(
-      and(eq(trainingCycleStaff.cycleId, cycleId), eq(trainingCycleStaff.userId, actor.userId)),
-    )
-    .limit(1);
+  const client = getConvexHttpClient();
+  const staff = await client.query(api.formation.getCycleStaff, {
+    cycleId: cycleId as Id<"trainingCycles">,
+    userId: actor.userId as Id<"users">,
+  });
   if (!staff) {
     throw new DomainError(
       DomainErrorCode.REENCOUNTER_ACCESS_DENIED,
@@ -260,12 +181,7 @@ async function assertCycleStaffOrManage(actor: AuthContext, cycleId: string) {
 
 export async function createReencuentroEvent(
   actorUserId: string,
-  raw: {
-    name: string;
-    startDate: string;
-    endDate: string;
-    ministryId?: string | null;
-  },
+  raw: { name: string; startDate: string; endDate: string; ministryId?: string | null },
 ) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "school.cycles.manage", {
@@ -273,19 +189,17 @@ export async function createReencuentroEvent(
     ministryId: raw.ministryId ?? undefined,
   });
   const program = await getProgram();
-  const db = getDb();
-  const [cycle] = await db
-    .insert(trainingCycles)
-    .values({
-      programId: program.id,
+  const client = getConvexHttpClient();
+  const cycle = withId(
+    await client.mutation(api.formation.createCycle, {
+      programId: program.id as Id<"trainingPrograms">,
       name: raw.name.trim(),
       startDate: raw.startDate,
       endDate: raw.endDate,
-      status: "planned",
-      ministryId: raw.ministryId || null,
-      createdByUserId: actorUserId,
-    })
-    .returning();
+      ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
+      createdByUserId: actorUserId as Id<"users">,
+    }),
+  );
   await writeAuditLog({
     actorUserId,
     action: "school.cycle.created",
@@ -301,10 +215,7 @@ export async function enrollReencuentro(
   raw: { personId: string; cycleId: string },
 ) {
   const actor = await requireActor(actorUserId);
-  assertCanMutate(actor, "reencounter.manage", {
-    type: "training",
-    personId: raw.personId,
-  });
+  assertCanMutate(actor, "reencounter.manage", { type: "training", personId: raw.personId });
   await assertReencuentroEligible(raw.personId);
   const org = await currentOrg(raw.personId);
   if (!org?.ministryId) {
@@ -319,12 +230,10 @@ export async function enrollReencuentro(
   await assertProcessAccess(actor, raw.personId, org.ministryId);
 
   const program = await getProgram();
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, raw.cycleId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: raw.cycleId as Id<"trainingCycles">,
+  });
   if (!cycle || cycle.status !== "active") {
     throw new DomainError(
       DomainErrorCode.REENCOUNTER_EVENT_NOT_ACTIVE,
@@ -343,16 +252,10 @@ export async function enrollReencuentro(
     );
   }
 
-  const [existing] = await db
-    .select()
-    .from(trainingEnrollments)
-    .where(
-      and(
-        eq(trainingEnrollments.cycleId, raw.cycleId),
-        eq(trainingEnrollments.personId, raw.personId),
-      ),
-    )
-    .limit(1);
+  const existing = await client.query(api.formation.getEnrollmentByCycleAndPerson, {
+    cycleId: raw.cycleId as Id<"trainingCycles">,
+    personId: raw.personId as Id<"persons">,
+  });
   if (existing) {
     throw new DomainError(
       DomainErrorCode.REENCOUNTER_ALREADY_ENROLLED,
@@ -360,46 +263,30 @@ export async function enrollReencuentro(
     );
   }
 
-  const [enrollment] = await db
-    .insert(trainingEnrollments)
-    .values({
-      cycleId: raw.cycleId,
-      personId: raw.personId,
-      status: "in_progress",
-    })
-    .returning();
+  const enrollment = withId(
+    await client
+      .mutation(api.formation.enroll, {
+        cycleId: raw.cycleId as Id<"trainingCycles">,
+        personId: raw.personId as Id<"persons">,
+      })
+      .catch(mapConvexError),
+  );
 
-  let updatedProgress = progress;
-  if (!updatedProgress) {
-    const [created] = await db
-      .insert(personProcessProgress)
-      .values({
-        personId: raw.personId,
+  const updatedProgress = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
         processType: PROCESS,
         status: "in_progress",
         stage: "reencuentro",
         currentStep: "inscrito",
-        ministryId: org.ministryId,
-        networkId: org.networkId,
-        startedAt: new Date(),
-        metadata: { cycleId: cycle.id },
+        ministryId: org.ministryId as Id<"ministries">,
+        networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
+        startedAt: progress?.startedAt ?? Date.now(),
+        metadata: { ...(progress?.metadata ?? {}), cycleId: cycle._id },
       })
-      .returning();
-    updatedProgress = created;
-  } else {
-    const [row] = await db
-      .update(personProcessProgress)
-      .set({
-        status: "in_progress",
-        startedAt: updatedProgress.startedAt ?? new Date(),
-        currentStep: "inscrito",
-        metadata: { ...(updatedProgress.metadata ?? {}), cycleId: cycle.id },
-        updatedAt: new Date(),
-      })
-      .where(eq(personProcessProgress.id, updatedProgress.id))
-      .returning();
-    updatedProgress = row;
-  }
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: updatedProgress.id,
@@ -408,14 +295,14 @@ export async function enrollReencuentro(
     fromStatus: progress?.status ?? null,
     toStatus: "in_progress",
     actorUserId,
-    metadata: { cycleId: cycle.id, enrollmentId: enrollment.id },
+    metadata: { cycleId: cycle._id, enrollmentId: enrollment.id },
   });
   await writeAuditLog({
     actorUserId,
     action: "reencounter.enrolled",
     entityType: "training_enrollment",
     entityId: enrollment.id,
-    metadata: { personId: raw.personId, cycleId: cycle.id },
+    metadata: { personId: raw.personId, cycleId: cycle._id },
   });
   return { enrollment, progress: updatedProgress };
 }
@@ -431,19 +318,14 @@ export async function recordReencuentroAttendance(
   },
 ) {
   const actor = await requireActor(actorUserId);
-  if (
-    !hasPermission(actor, "reencounter.attendance") &&
-    !hasPermission(actor, "reencounter.manage")
-  ) {
+  if (!hasPermission(actor, "reencounter.attendance") && !hasPermission(actor, "reencounter.manage")) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
 
-  const db = getDb();
-  const [enrollment] = await db
-    .select()
-    .from(trainingEnrollments)
-    .where(eq(trainingEnrollments.id, raw.enrollmentId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const enrollment = await client.query(api.formation.getEnrollment, {
+    enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
+  });
   if (!enrollment) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Inscripción no encontrada.");
   }
@@ -454,79 +336,36 @@ export async function recordReencuentroAttendance(
     await assertProcessAccess(actor, enrollment.personId, org.ministryId);
   }
 
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, enrollment.cycleId))
-    .limit(1);
+  const cycle = await client.query(api.formation.getCycle, { cycleId: enrollment.cycleId });
   if (!cycle || cycle.status !== "active") {
-    throw new DomainError(
-      DomainErrorCode.REENCOUNTER_EVENT_NOT_ACTIVE,
-      "Evento no activo.",
-    );
+    throw new DomainError(DomainErrorCode.REENCOUNTER_EVENT_NOT_ACTIVE, "Evento no activo.");
   }
 
-  const [module] = await db
-    .select()
-    .from(trainingModules)
-    .where(
-      and(
-        eq(trainingModules.programId, cycle.programId),
-        eq(trainingModules.code, EVENT_MODULE_CODE),
-      ),
-    )
-    .limit(1);
-  if (!module) {
+  const modules = await client.query(api.formation.listModules, { programId: cycle.programId });
+  const trainingModule = modules.find((m) => m.code === EVENT_MODULE_CODE);
+  if (!trainingModule) {
     throw new DomainError(DomainErrorCode.TRAINING_MODULE_INACTIVE, "Módulo evento ausente.");
   }
 
-  const [existing] = await db
-    .select()
-    .from(trainingAttendance)
-    .where(
-      and(
-        eq(trainingAttendance.enrollmentId, raw.enrollmentId),
-        eq(trainingAttendance.moduleId, module.id),
-      ),
-    )
-    .limit(1);
-
-  let row;
-  if (existing) {
-    [row] = await db
-      .update(trainingAttendance)
-      .set({
-        status: raw.status,
-        attendanceDate: raw.attendanceDate,
-        recordedByUserId: actorUserId,
-        recordedAt: new Date(),
-        notes: raw.notes ?? existing.notes,
-      })
-      .where(eq(trainingAttendance.id, existing.id))
-      .returning();
-  } else {
-    [row] = await db
-      .insert(trainingAttendance)
-      .values({
-        enrollmentId: raw.enrollmentId,
-        moduleId: module.id,
+  const row = withId(
+    await client
+      .mutation(api.formation.recordAttendance, {
+        enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
+        moduleId: trainingModule._id,
         attendanceDate: raw.attendanceDate,
         status: raw.status,
-        recordedByUserId: actorUserId,
-        notes: raw.notes ?? null,
+        recordedByUserId: actorUserId as Id<"users">,
+        notes: raw.notes || undefined,
       })
-      .returning();
-  }
+      .catch(mapConvexError),
+  );
 
   await writeAuditLog({
     actorUserId,
     action: "reencounter.attendance_recorded",
     entityType: "training_attendance",
     entityId: row.id,
-    metadata: {
-      enrollmentId: raw.enrollmentId,
-      status: raw.status,
-    },
+    metadata: { enrollmentId: raw.enrollmentId, status: raw.status },
   });
   return row;
 }
@@ -536,10 +375,7 @@ export async function completeReencuentro(
   raw: { personId: string; enrollmentId?: string; note?: string },
 ) {
   const actor = await requireActor(actorUserId);
-  assertCanMutate(actor, "reencounter.complete", {
-    type: "training",
-    personId: raw.personId,
-  });
+  assertCanMutate(actor, "reencounter.complete", { type: "training", personId: raw.personId });
   await assertReencuentroEligible(raw.personId);
   const org = await currentOrg(raw.personId);
   if (!org?.ministryId) {
@@ -560,44 +396,39 @@ export async function completeReencuentro(
     };
   }
 
-  const db = getDb();
+  const client = getConvexHttpClient();
   if (raw.enrollmentId) {
-    const [enrollment] = await db
-      .select()
-      .from(trainingEnrollments)
-      .where(eq(trainingEnrollments.id, raw.enrollmentId))
-      .limit(1);
+    const enrollment = await client.query(api.formation.getEnrollment, {
+      enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
+    });
     if (enrollment) {
       await assertCycleStaffOrManage(actor, enrollment.cycleId);
-      await db
-        .update(trainingEnrollments)
-        .set({
-          status: "completed",
-          completedAt: new Date(),
-          completedByUserId: actorUserId,
-          updatedAt: new Date(),
-        })
-        .where(eq(trainingEnrollments.id, enrollment.id));
+      await client.mutation(api.formation.updateEnrollmentStatus, {
+        enrollmentId: enrollment._id,
+        status: "completed",
+        completedByUserId: actorUserId as Id<"users">,
+      });
     }
   }
 
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "completed",
-      completedAt: new Date(),
-      completedByUserId: actorUserId,
-      currentStep: "completado",
-      updatedAt: new Date(),
-      metadata: {
-        ...(progress.metadata ?? {}),
-        formally_completed: true,
-        next_stage: "destino_n3",
-        leadership_activated: false,
-      },
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
+        processType: PROCESS,
+        status: "completed",
+        currentStep: "completado",
+        completedAt: Date.now(),
+        completedByUserId: actorUserId as Id<"users">,
+        metadata: {
+          ...(progress.metadata ?? {}),
+          formally_completed: true,
+          next_stage: "destino_n3",
+          leadership_activated: false,
+        },
+      })
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: row.id,
@@ -622,33 +453,28 @@ export async function completeReencuentro(
     },
   });
 
-  // Re-Encuentro → CD3 eligible
-  const [cd3] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, raw.personId),
-        eq(personProcessProgress.processType, "destino_n3"),
-      ),
-    )
-    .limit(1);
+  const cd3 = await client.query(api.formation.getProgress, {
+    personId: raw.personId as Id<"persons">,
+    processType: "destino_n3",
+  });
   if (!cd3) {
-    await db.insert(personProcessProgress).values({
-      personId: raw.personId,
+    await client.mutation(api.formation.upsertProgress, {
+      personId: raw.personId as Id<"persons">,
       processType: "destino_n3",
       status: "eligible",
       stage: "n3",
       currentStep: "apto_n3",
-      ministryId: org.ministryId,
-      networkId: org.networkId,
+      ministryId: org.ministryId as Id<"ministries">,
+      networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
       metadata: { eligible_from: "reencuentro" },
     });
   } else if (cd3.status === "pending") {
-    await db
-      .update(personProcessProgress)
-      .set({ status: "eligible", currentStep: "apto_n3", updatedAt: new Date() })
-      .where(eq(personProcessProgress.id, cd3.id));
+    await client.mutation(api.formation.upsertProgress, {
+      personId: raw.personId as Id<"persons">,
+      processType: "destino_n3",
+      status: "eligible",
+      currentStep: "apto_n3",
+    });
   }
 
   await writeAuditLog({
@@ -656,11 +482,7 @@ export async function completeReencuentro(
     action: "reencounter.next_stage_eligible",
     entityType: "person_process_progress",
     entityId: row.id,
-    metadata: {
-      personId: raw.personId,
-      nextStage: "destino_n3",
-      implemented: true,
-    },
+    metadata: { personId: raw.personId, nextStage: "destino_n3", implemented: true },
   });
 
   return {
@@ -676,34 +498,24 @@ export async function listReencuentroEligible(actorUserId: string) {
   if (!hasPermission(actor, "reencounter.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const cd2Done = await db
-    .select({
-      personId: personProcessProgress.personId,
-      ministryId: personProcessProgress.ministryId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personProcessProgress)
-    .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-    .where(
-      and(
-        eq(personProcessProgress.processType, "destino_n2"),
-        eq(personProcessProgress.status, "completed"),
-      ),
-    );
+  const client = getConvexHttpClient();
+  const rows = await client.query(api.formation.listProgressRows, {
+    processTypes: ["destino_n2"],
+    statuses: ["completed"],
+  });
   const result = [];
-  for (const row of cd2Done) {
-    if (!isSuperadmin(actor) && !canAccessMinistry(actor, row.ministryId)) continue;
+  for (const row of rows) {
+    const p = row.progress;
+    if (!isSuperadmin(actor) && !canAccessMinistry(actor, p.ministryId)) continue;
     try {
-      await assertProcessAccess(actor, row.personId, row.ministryId);
+      await assertProcessAccess(actor, p.personId, p.ministryId);
     } catch {
       continue;
     }
-    const re = await getReProgress(row.personId);
+    const re = await getReProgress(p.personId);
     if (re?.status === "completed") continue;
     result.push({
-      personId: row.personId,
+      personId: p.personId as string,
       fullName: formatFullName(row.firstName, row.lastName),
       status: re?.status ?? "eligible",
     });
@@ -716,18 +528,17 @@ export async function getReencuentroDashboardCounts(actorUserId: string) {
   if (!hasPermission(actor, "reencounter.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const conditions = [eq(personProcessProgress.processType, PROCESS)];
-  if (!isSuperadmin(actor) && actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
-  }
-  const rows = await db
-    .select({ status: personProcessProgress.status, c: count() })
-    .from(personProcessProgress)
-    .where(and(...conditions))
-    .groupBy(personProcessProgress.status);
+  const client = getConvexHttpClient();
+  const ministryIds =
+    !isSuperadmin(actor) && actor.ministryIds.length
+      ? (actor.ministryIds as Id<"ministries">[])
+      : undefined;
+  const rows = await client.query(api.formation.listProgressRows, {
+    processTypes: [PROCESS],
+    ministryIds,
+  });
   const pick = (statuses: string[]) =>
-    rows.filter((r) => statuses.includes(r.status)).reduce((a, r) => a + Number(r.c), 0);
+    rows.filter((r) => statuses.includes(r.progress.status)).length;
   const eligible = await listReencuentroEligible(actorUserId);
   return {
     eligible: eligible.length,
@@ -743,12 +554,11 @@ export async function listReencuentroEvents(actorUserId: string) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
   const program = await getProgram();
-  const db = getDb();
-  return db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.programId, program.id))
-    .orderBy(desc(trainingCycles.startDate));
+  const client = getConvexHttpClient();
+  const cycles = await client.query(api.formation.listCycles, {
+    programIds: [program.id as Id<"trainingPrograms">],
+  });
+  return cycles.map(withId);
 }
 
 export async function getReencuentroEventBoard(actorUserId: string, cycleId: string) {
@@ -756,33 +566,20 @@ export async function getReencuentroEventBoard(actorUserId: string, cycleId: str
   if (!hasPermission(actor, "reencounter.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.REENCOUNTER_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, cycleId))
-    .limit(1);
+  const client = getConvexHttpClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
   if (!cycle) throw new DomainError(DomainErrorCode.NOT_FOUND, "Evento no encontrado.");
-  const [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.id, cycle.programId))
-    .limit(1);
-  const modules = await db
-    .select()
-    .from(trainingModules)
-    .where(eq(trainingModules.programId, cycle.programId))
-    .orderBy(asc(trainingModules.orderIndex));
-  const enrollments = await db
-    .select({
-      enrollment: trainingEnrollments,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(trainingEnrollments)
-    .innerJoin(persons, eq(persons.id, trainingEnrollments.personId))
-    .where(eq(trainingEnrollments.cycleId, cycleId))
-    .orderBy(asc(persons.lastName));
+  const program = await client.query(api.formation.getProgramByCode, {
+    code: REENCUENTRO_PROGRAM_CODE,
+  });
+  const modules = (await client.query(api.formation.listModules, { programId: cycle.programId })).map(
+    withId,
+  );
+  const enrollments = await client.query(api.formation.listEnrollmentsByCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
 
   const scoped = [];
   for (const row of enrollments) {
@@ -798,33 +595,30 @@ export async function getReencuentroEventBoard(actorUserId: string, cycleId: str
       // skip
     }
   }
-  const enrollmentIds = scoped.map((s) => s.enrollment.id);
+  const enrollmentIds = scoped.map((s) => s.enrollment._id);
   const attendanceRows =
     enrollmentIds.length === 0
       ? []
-      : await db
-          .select()
-          .from(trainingAttendance)
-          .where(inArray(trainingAttendance.enrollmentId, enrollmentIds));
+      : await client.query(api.formation.listAttendanceByEnrollments, { enrollmentIds });
   const eventModule = modules.find((m) => m.code === EVENT_MODULE_CODE) ?? modules[0];
 
   return {
-    cycle,
-    program,
+    cycle: withId(cycle),
+    program: program ? withId(program) : null,
     eventModule,
     participants: scoped.map((s) => {
       const att = eventModule
         ? attendanceRows.find(
-            (a) => a.enrollmentId === s.enrollment.id && a.moduleId === eventModule.id,
+            (a) => a.enrollmentId === s.enrollment._id && a.moduleId === (eventModule.id as unknown),
           )
         : undefined;
       return {
-        enrollmentId: s.enrollment.id,
-        personId: s.enrollment.personId,
+        enrollmentId: s.enrollment._id as string,
+        personId: s.enrollment.personId as string,
         fullName: formatFullName(s.firstName, s.lastName),
         status: s.enrollment.status,
         attendanceStatus: att?.status ?? null,
-        attendanceId: att?.id ?? null,
+        attendanceId: (att?._id as string | undefined) ?? null,
       };
     }),
   };
@@ -836,7 +630,7 @@ export async function getPersonReencuentroSummary(personId: string) {
     ? {
         status: re.status,
         label: statusLabel(re.status),
-        completedAt: re.completedAt,
+        completedAt: re.completedAt ?? null,
         eligibleForSend: Boolean(re.metadata?.eligible_for_send),
       }
     : {

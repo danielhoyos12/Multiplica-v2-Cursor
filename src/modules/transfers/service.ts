@@ -42,7 +42,7 @@ import {
 const MAX_DIRECT_LEADERS = 12;
 
 export const createTransferInputSchema = z.object({
-  personId: z.string().uuid(),
+  personId: z.string().min(1),
   transferType: z.enum([
     "network_change",
     "ministry_change",
@@ -60,17 +60,17 @@ export const createTransferInputSchema = z.object({
     ])
     .optional()
     .default("not_applicable"),
-  destinationMinistryId: z.string().uuid().optional().nullable(),
-  destinationNetworkId: z.string().uuid().optional().nullable(),
-  proposedDirectLeaderPersonId: z.string().uuid().optional().nullable(),
-  targetCellId: z.string().uuid().optional().nullable(),
+  destinationMinistryId: z.string().min(1).optional().nullable(),
+  destinationNetworkId: z.string().min(1).optional().nullable(),
+  proposedDirectLeaderPersonId: z.string().min(1).optional().nullable(),
+  targetCellId: z.string().min(1).optional().nullable(),
   reason: z.string().trim().min(5).max(1000),
   /** Member reassignment map for deactivation / saturated receptor */
   memberResolutions: z
     .array(
       z.object({
-        personId: z.string().uuid(),
-        targetCellId: z.string().uuid(),
+        personId: z.string().min(1),
+        targetCellId: z.string().min(1),
       }),
     )
     .optional()
@@ -79,8 +79,8 @@ export const createTransferInputSchema = z.object({
   directLeaderResolutions: z
     .array(
       z.object({
-        personId: z.string().uuid(),
-        newDirectLeaderPersonId: z.string().uuid(),
+        personId: z.string().min(1),
+        newDirectLeaderPersonId: z.string().min(1),
       }),
     )
     .optional()
