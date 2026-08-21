@@ -13,16 +13,23 @@ let client: ReturnType<typeof postgres> | null = null;
 let dbInstance: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 /**
- * Interim Drizzle client for legacy pastoral modules not yet on Convex.
- * Supabase-hosted Postgres is rejected — use Convex or a non-Supabase Postgres.
+ * Legacy-only Drizzle client. The MULTIPLICA pastoral data plane is Convex
+ * (`src/server/convex.ts`) — auth (Clerk), organization, and all pastoral
+ * modules (persons, cells, leadership, formation, transfers, reporting)
+ * read/write Convex. `getDb()` must not be used by `src/modules/*` or
+ * `src/app/*`. It remains solely for historical Postgres seeds
+ * (`src/db/seeds/run.ts`) and unused verify scripts. Supabase-hosted
+ * Postgres is rejected regardless.
  * Never import from client components.
  */
 export function getDb() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error(
-      "Legacy DATABASE_URL is not set. Prefer Convex (NEXT_PUBLIC_CONVEX_URL). " +
-        "Interim Postgres (non-Supabase) is only for modules not yet migrated.",
+      "Legacy DATABASE_URL is not set. The pastoral data plane is Convex " +
+        "(NEXT_PUBLIC_CONVEX_URL) — getDb() is legacy-only and should not be used by " +
+        "modules already migrated (auth, organization, authorization). Interim " +
+        "Postgres (non-Supabase) is only for modules not yet migrated.",
     );
   }
 

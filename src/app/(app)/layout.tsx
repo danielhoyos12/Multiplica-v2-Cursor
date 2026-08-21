@@ -1,13 +1,10 @@
 import { auth as clerkAuth } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { filterSecondaryGroups } from "@/components/layout/nav-config";
 import { PasswordGateShell } from "@/components/layout/password-gate-shell";
-import { getDb } from "@/db/client";
-import { users } from "@/db/schema";
 import { hasClerkPublicConfig } from "@/lib/env";
 import { isPasswordChangeAllowedPath } from "@/lib/safe-redirect";
 import {
@@ -15,15 +12,15 @@ import {
   isSuperadmin,
   loadAuthContext,
 } from "@/modules/authorization";
-import { ensureAppUserProfile } from "@/modules/organization";
 import { signOut } from "@/server/actions/auth";
 import { getSessionUser } from "@/server/auth";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Authenticated layout — READ-ONLY regarding cookies / Auth metadata.
- * Gate cookie is set in middleware / password actions (not during RSC render).
+ * Authenticated pastoral shell. Clerk-signed-in users without a provisioned
+ * MULTIPLICA profile never auto-create one and never enter the dashboard.
  */
 export default async function AuthenticatedLayout({
   children,
@@ -37,38 +34,22 @@ export default async function AuthenticatedLayout({
   const { userId } = await clerkAuth();
   const user = await getSessionUser();
   if (!user) {
-    // Signed into Clerk but no app profile yet (often missing interim DB).
-    // Avoid /login ↔ /dashboard redirect loops.
     if (userId) {
-      redirect("/bienvenida");
+      redirect("/acceso-denegado");
     }
     redirect("/login");
   }
 
+  const client = await getAuthenticatedConvexClient();
+  const profile = await client.query(api.users.getMe, {});
 
-  if (user.email) {
-    await ensureAppUserProfile({
-      clerkUserId: user.clerkUserId,
-      email: user.email,
-    });
-  }
-
-  const [profile] = await getDb()
-    .select({
-      mustChangePassword: users.mustChangePassword,
-      isActive: users.isActive,
-    })
-    .from(users)
-    .where(eq(users.id, user.id))
-    .limit(1);
-
-  if (profile && profile.isActive === false) {
-    redirect("/login?error=inactive");
+  if (!profile || profile.isActive === false) {
+    redirect("/acceso-denegado");
   }
 
   const headerList = await headers();
   const pathname = headerList.get("x-multiplica-pathname") ?? "";
-  const mustChange = Boolean(profile?.mustChangePassword);
+  const mustChange = Boolean(profile.mustChangePassword);
 
   if (mustChange && pathname && !isPasswordChangeAllowedPath(pathname)) {
     redirect("/cuenta/cambiar-password");

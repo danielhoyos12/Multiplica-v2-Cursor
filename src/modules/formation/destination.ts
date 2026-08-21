@@ -3,28 +3,14 @@
  * Reuses training_* + person_process_*. Never creates person silos.
  * 12 active cell members ≠ 12 G12 leaders.
  */
-import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-
-import { getDb } from "@/db/client";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { withId } from "@/lib/convex-doc";
+import { mapConvexError } from "@/lib/convex-errors";
 import {
-  cellMemberships,
-  cells,
   DESTINO_FAMILY,
   DESTINO_N1_CODE,
   DESTINO_N2_CODE,
   DESTINO_N3_CODE,
-  personOrganizationHistory,
-  personProcessEvents,
-  personProcessProgress,
-  persons,
-  trainingAttendance,
-  trainingCompletionRequirements,
-  trainingCycles,
-  trainingCycleStaff,
-  trainingEnrollments,
-  trainingModules,
-  trainingPrograms,
-  trainingRequirementOverrides,
 } from "@/db/schema";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
@@ -39,6 +25,7 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export type DestinoLevel = 1 | 2 | 3;
 
@@ -59,36 +46,24 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-    })
-    .from(personOrganizationHistory)
-    .where(
-      and(
-        eq(personOrganizationHistory.personId, personId),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const org = await client.query(api.persons.getCurrentOrg, {
+    personId: personId as Id<"persons">,
+  });
+  if (!org) return null;
+  return {
+    ministryId: (org.ministryId as string | undefined) ?? null,
+    networkId: (org.networkId as string | undefined) ?? null,
+  };
 }
 
 async function getLevelProgress(personId: string, level: DestinoLevel) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, LEVEL_PROCESS[level]),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const row = await client.query(api.formation.getProgress, {
+    personId: personId as Id<"persons">,
+    processType: LEVEL_PROCESS[level],
+  });
+  return row ? withId(row) : null;
 }
 
 async function appendEvent(params: {
@@ -102,22 +77,23 @@ async function appendEvent(params: {
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const db = getDb();
-  await db.insert(personProcessEvents).values({
-    progressId: params.progressId,
-    personId: params.personId,
-    processType: params.processType,
-    eventType: params.eventType,
-    fromStatus: (params.fromStatus as never) ?? null,
-    toStatus: (params.toStatus as never) ?? null,
-    actorUserId: params.actorUserId,
-    note: params.note ?? null,
-    metadata: params.metadata ?? {},
-  });
+  const client = await getAuthenticatedConvexClient();
+  await client
+    .mutation(api.formation.appendProcessEvent, {
+      progressId: params.progressId as Id<"personProcessProgress">,
+      personId: params.personId as Id<"persons">,
+      processType: params.processType,
+      eventType: params.eventType,
+      fromStatus: (params.fromStatus ?? undefined) as never,
+      toStatus: (params.toStatus ?? undefined) as never,
+      note: params.note ?? undefined,
+      metadata: params.metadata ?? {},
+    })
+    .catch(mapConvexError);
 }
 
 export async function ensureDestinoPrograms() {
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   const defs = [
     {
       code: DESTINO_N1_CODE,
@@ -141,77 +117,46 @@ export async function ensureDestinoPrograms() {
 
   const programs = [];
   for (const def of defs) {
-    let [program] = await db
-      .select()
-      .from(trainingPrograms)
-      .where(eq(trainingPrograms.code, def.code))
-      .limit(1);
-    if (!program) {
-      [program] = await db
-        .insert(trainingPrograms)
-        .values({
-          code: def.code,
-          name: def.name,
-          description: def.description,
-          level: def.level,
-          family: DESTINO_FAMILY,
-          isActive: true,
-        })
-        .returning();
-    } else if (program.family !== DESTINO_FAMILY || program.level !== def.level) {
-      [program] = await db
-        .update(trainingPrograms)
-        .set({
-          family: DESTINO_FAMILY,
-          level: def.level,
-          name: def.name,
-          updatedAt: new Date(),
-        })
-        .where(eq(trainingPrograms.id, program.id))
-        .returning();
-    }
+    const program = withId(
+      await client.mutation(api.formation.ensureProgram, {
+        code: def.code,
+        name: def.name,
+        description: def.description,
+        level: def.level,
+        family: DESTINO_FAMILY,
+      }),
+    );
 
-    const modules = await db
-      .select()
-      .from(trainingModules)
-      .where(eq(trainingModules.programId, program.id));
+    const modules = await client.query(api.formation.listModules, {
+      programId: program.id as Id<"trainingPrograms">,
+    });
     if (modules.length === 0) {
-      await db.insert(trainingModules).values(
-        [1, 2, 3, 4].map((n) => ({
-          programId: program.id,
-          code: `M${n}`,
-          name: `Módulo ${n}`,
-          orderIndex: n,
-          isActive: true,
-          isRequired: true,
-        })),
-      );
+      await client.mutation(api.formation.syncModules, {
+        programId: program.id as Id<"trainingPrograms">,
+        modules: [1, 2, 3, 4].map((n) => ({ code: `M${n}`, name: `Módulo ${n}`, orderIndex: n })),
+      });
     }
 
-    const reqs = await db
-      .select()
-      .from(trainingCompletionRequirements)
-      .where(eq(trainingCompletionRequirements.programId, program.id));
+    const reqs = await client.query(api.formation.listRequirements, {
+      programId: program.id as Id<"trainingPrograms">,
+    });
     if (reqs.length === 0) {
-      await db.insert(trainingCompletionRequirements).values([
-        {
-          programId: program.id,
-          requirementType: "manual_approval",
-          category: "academic",
-          label: "Componente académico aprobado",
-          isRequired: true,
-          isActive: true,
-        },
-        {
-          programId: program.id,
-          requirementType: "active_cell_members",
-          numericValue: 12,
-          category: "pastoral",
-          label: "12 personas activas en célula evangelística",
-          isRequired: true,
-          isActive: true,
-        },
-      ]);
+      await client.mutation(api.formation.syncRequirements, {
+        programId: program.id as Id<"trainingPrograms">,
+        requirements: [
+          {
+            requirementType: "manual_approval",
+            category: "academic",
+            label: "Componente académico aprobado",
+          },
+          {
+            requirementType: "active_cell_members",
+            numericValue: 12,
+            category: "pastoral",
+            label: "12 personas activas en célula evangelística",
+          },
+        ],
+      });
     }
     programs.push(program);
   }
@@ -224,54 +169,32 @@ export async function ensureDestinoN1Eligible(
   networkId: string | null,
 ) {
   const existing = await getLevelProgress(personId, 1);
-  if (existing) {
-    if (existing.status === "pending") {
-      const db = getDb();
-      const [row] = await db
-        .update(personProcessProgress)
-        .set({
-          status: "eligible",
-          currentStep: "apto_n1",
-          updatedAt: new Date(),
-          metadata: { ...(existing.metadata ?? {}), eligible_for_destino_n1: true },
-        })
-        .where(eq(personProcessProgress.id, existing.id))
-        .returning();
-      return row;
-    }
-    return existing;
-  }
-  const db = getDb();
-  const [row] = await db
-    .insert(personProcessProgress)
-    .values({
-      personId,
-      processType: "destino_n1",
-      status: "eligible",
-      stage: "n1",
-      currentStep: "apto_n1",
-      ministryId,
-      networkId,
-      metadata: { eligible_for_destino_n1: true },
-    })
-    .returning();
-  return row;
+  if (existing && existing.status !== "pending") return existing;
+  const client = await getAuthenticatedConvexClient();
+  return withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: personId as Id<"persons">,
+        processType: "destino_n1",
+        status: "eligible",
+        stage: existing ? undefined : "n1",
+        currentStep: "apto_n1",
+        ministryId: ministryId as Id<"ministries">,
+        networkId: (networkId ?? undefined) as Id<"networks"> | undefined,
+        metadata: { ...(existing?.metadata ?? {}), eligible_for_destino_n1: true },
+      })
+      .catch(mapConvexError),
+  );
 }
 
 export async function assertDestinoEligible(personId: string, level: DestinoLevel) {
   if (level === 1) {
     // Official: Consolidar completed (Pre+Encuentro+Post). UDV is NOT a gate.
-    const db = getDb();
-    const [consolidar] = await db
-      .select()
-      .from(personProcessProgress)
-      .where(
-        and(
-          eq(personProcessProgress.personId, personId),
-          eq(personProcessProgress.processType, "consolidar"),
-        ),
-      )
-      .limit(1);
+    const client = await getAuthenticatedConvexClient();
+    const consolidar = await client.query(api.formation.getProgress, {
+      personId: personId as Id<"persons">,
+      processType: "consolidar",
+    });
     if (!consolidar || consolidar.status !== "completed") {
       throw new DomainError(
         DomainErrorCode.DESTINATION_LEVEL_1_NOT_ELIGIBLE,
@@ -298,17 +221,11 @@ export async function assertDestinoEligible(personId: string, level: DestinoLeve
       "Capacitación Destino 2 debe estar formalmente completada.",
     );
   }
-  const db = getDb();
-  const [re] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, "reencuentro"),
-      ),
-    )
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const re = await client.query(api.formation.getProgress, {
+    personId: personId as Id<"persons">,
+    processType: "reencuentro",
+  });
   if (!re || re.status !== "completed") {
     throw new DomainError(
       DomainErrorCode.DESTINATION_LEVEL_3_NOT_ELIGIBLE,
@@ -330,16 +247,12 @@ export async function isDestinoLevelEligible(personId: string, level: DestinoLev
 
 async function getProgramByLevel(level: DestinoLevel) {
   await ensureDestinoPrograms();
-  const db = getDb();
-  const [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.code, LEVEL_CODE[level]))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const program = await client.query(api.formation.getProgramByCode, { code: LEVEL_CODE[level] });
   if (!program) {
     throw new DomainError(DomainErrorCode.CONFIGURATION_ERROR, "Programa Destino no configurado.");
   }
-  return program;
+  return withId(program);
 }
 
 async function assertCycleStaffOrManage(
@@ -351,14 +264,11 @@ async function assertCycleStaffOrManage(
   if (hasPermission(actor, "destination.manage") || hasPermission(actor, "school.cycles.manage")) {
     return;
   }
-  const db = getDb();
-  const [staff] = await db
-    .select()
-    .from(trainingCycleStaff)
-    .where(
-      and(eq(trainingCycleStaff.cycleId, cycleId), eq(trainingCycleStaff.userId, actor.userId)),
-    )
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const staff = await client.query(api.formation.getCycleStaff, {
+    cycleId: cycleId as Id<"trainingCycles">,
+    userId: actor.userId as Id<"users">,
+  });
   if (!staff) {
     throw new DomainError(
       DomainErrorCode.DESTINATION_ACCESS_DENIED,
@@ -388,48 +298,23 @@ async function assertCycleStaffOrManage(
  * Does NOT count leaders of the 12 — this is PERSONS, not G12 leaders.
  */
 export async function countActiveCellMembersForPerson(personId: string) {
-  const db = getDb();
-  const ownCells = await db
-    .select()
-    .from(cells)
-    .where(
-      and(eq(cells.responsiblePersonId, personId), sql`${cells.status} <> 'closed'`),
-    );
-  const evangelistic = ownCells.find((c) => c.type === "evangelistic" && c.status === "active");
-  const cell = evangelistic ?? ownCells.find((c) => c.status === "active") ?? null;
-  if (!cell) {
-    return { cellId: null as string | null, count: 0, cellType: null as string | null };
-  }
-  const [{ c }] = await db
-    .select({ c: count() })
-    .from(cellMemberships)
-    .where(and(eq(cellMemberships.cellId, cell.id), eq(cellMemberships.status, "active")));
-  return { cellId: cell.id, count: Number(c), cellType: cell.type };
+  const client = await getAuthenticatedConvexClient();
+  return client.query(api.formation.countActiveCellMembers, {
+    personId: personId as Id<"persons">,
+  });
 }
 
 export async function evaluateLevelRequirements(personId: string, level: DestinoLevel) {
   const program = await getProgramByLevel(level);
-  const db = getDb();
-  const requirements = await db
-    .select()
-    .from(trainingCompletionRequirements)
-    .where(
-      and(
-        eq(trainingCompletionRequirements.programId, program.id),
-        eq(trainingCompletionRequirements.isActive, true),
-        eq(trainingCompletionRequirements.isRequired, true),
-      ),
-    );
+  const client = await getAuthenticatedConvexClient();
+  const requirements = (
+    await client.query(api.formation.listRequirements, { programId: program.id as Id<"trainingPrograms"> })
+  ).filter((r) => r.isActive && r.isRequired);
 
-  const overrides = await db
-    .select()
-    .from(trainingRequirementOverrides)
-    .where(
-      and(
-        eq(trainingRequirementOverrides.personId, personId),
-        eq(trainingRequirementOverrides.programId, program.id),
-      ),
-    );
+  const overrides = await client.query(api.formation.listOverrides, {
+    personId: personId as Id<"persons">,
+    programId: program.id as Id<"trainingPrograms">,
+  });
   const overriddenIds = new Set(overrides.map((o) => o.requirementId).filter(Boolean));
 
   const progress = await getLevelProgress(personId, level);
@@ -438,13 +323,13 @@ export async function evaluateLevelRequirements(personId: string, level: Destino
 
   const results = [];
   for (const req of requirements) {
-    if (overriddenIds.has(req.id)) {
+    if (overriddenIds.has(req._id)) {
       results.push({
-        requirementId: req.id,
+        requirementId: req._id as string,
         type: req.requirementType,
         category: req.category,
         label: req.label ?? req.requirementType,
-        required: req.numericValue,
+        required: req.numericValue ?? null,
         actual: null as number | null,
         passed: true,
         overridden: true,
@@ -454,7 +339,7 @@ export async function evaluateLevelRequirements(personId: string, level: Destino
 
     if (req.requirementType === "manual_approval" || req.requirementType === "modules_completed") {
       results.push({
-        requirementId: req.id,
+        requirementId: req._id as string,
         type: req.requirementType,
         category: req.category,
         label: req.label ?? "Componente académico",
@@ -470,7 +355,7 @@ export async function evaluateLevelRequirements(personId: string, level: Destino
       const needed = req.numericValue ?? 12;
       const members = await countActiveCellMembersForPerson(personId);
       results.push({
-        requirementId: req.id,
+        requirementId: req._id as string,
         type: req.requirementType,
         category: req.category,
         label: req.label ?? `${needed} personas activas en célula`,
@@ -478,7 +363,7 @@ export async function evaluateLevelRequirements(personId: string, level: Destino
         actual: members.count,
         passed: members.count >= needed,
         overridden: false,
-        cellId: members.cellId,
+        cellId: members.cellId as string | null,
         cellType: members.cellType,
         note: "Cuenta memberships activas (personas), NO líderes G12.",
       });
@@ -486,11 +371,11 @@ export async function evaluateLevelRequirements(personId: string, level: Destino
     }
 
     results.push({
-      requirementId: req.id,
+      requirementId: req._id as string,
       type: req.requirementType,
       category: req.category,
       label: req.label ?? req.requirementType,
-      required: req.numericValue,
+      required: req.numericValue ?? null,
       actual: null,
       passed: false,
       overridden: false,
@@ -501,7 +386,7 @@ export async function evaluateLevelRequirements(personId: string, level: Destino
   const pastoral = results.filter((r) => r.category === "pastoral");
   return {
     level,
-    programId: program.id,
+    programId: program.id as string,
     academicPassed: academic.every((r) => r.passed),
     pastoralPassed: pastoral.every((r) => r.passed),
     allPassed: results.every((r) => r.passed),
@@ -528,19 +413,18 @@ export async function createDestinoCycle(
     throw new DomainError(DomainErrorCode.DESTINATION_INVALID_LEVEL, "Nivel inválido.");
   }
   const program = await getProgramByLevel(raw.level);
-  const db = getDb();
-  const [cycle] = await db
-    .insert(trainingCycles)
-    .values({
-      programId: program.id,
-      name: raw.name.trim(),
-      startDate: raw.startDate,
-      endDate: raw.endDate,
-      status: "planned",
-      ministryId: raw.ministryId || null,
-      createdByUserId: actorUserId,
-    })
-    .returning();
+  const client = await getAuthenticatedConvexClient();
+  const cycle = withId(
+    await client
+      .mutation(api.formation.createCycle, {
+        programId: program.id as Id<"trainingPrograms">,
+        name: raw.name.trim(),
+        startDate: raw.startDate,
+        endDate: raw.endDate,
+        ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
+      })
+      .catch(mapConvexError),
+  );
   await writeAuditLog({
     actorUserId,
     action: "school.cycle.created",
@@ -562,41 +446,17 @@ export async function assignCycleStaff(
 ) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "training.cycles.assign_staff", { type: "training" });
-  const db = getDb();
-  const [existing] = await db
-    .select()
-    .from(trainingCycleStaff)
-    .where(
-      and(
-        eq(trainingCycleStaff.cycleId, raw.cycleId),
-        eq(trainingCycleStaff.userId, raw.userId),
-      ),
-    )
-    .limit(1);
-  if (existing) {
-    const [updated] = await db
-      .update(trainingCycleStaff)
-      .set({
-        role: raw.role ?? existing.role,
-        canCompleteLevel:
-          raw.canCompleteLevel === undefined
-            ? existing.canCompleteLevel
-            : Boolean(raw.canCompleteLevel),
+  const client = await getAuthenticatedConvexClient();
+  return withId(
+    await client
+      .mutation(api.formation.assignCycleStaff, {
+        cycleId: raw.cycleId as Id<"trainingCycles">,
+        userId: raw.userId as Id<"users">,
+        role: raw.role,
+        canCompleteLevel: raw.canCompleteLevel,
       })
-      .where(eq(trainingCycleStaff.id, existing.id))
-      .returning();
-    return updated;
-  }
-  const [row] = await db
-    .insert(trainingCycleStaff)
-    .values({
-      cycleId: raw.cycleId,
-      userId: raw.userId,
-      role: raw.role ?? "teacher",
-      canCompleteLevel: Boolean(raw.canCompleteLevel),
-    })
-    .returning();
-  return row;
+      .catch(mapConvexError),
+  );
 }
 
 export async function enrollDestino(
@@ -617,19 +477,17 @@ export async function enrollDestino(
   await assertProcessAccess(actor, raw.personId, org.ministryId);
 
   const program = await getProgramByLevel(raw.level);
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, raw.cycleId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: raw.cycleId as Id<"trainingCycles">,
+  });
   if (!cycle || cycle.status !== "active") {
     throw new DomainError(
       DomainErrorCode.DESTINATION_CYCLE_NOT_ACTIVE,
       "Solo ciclos activos admiten inscripción.",
     );
   }
-  if (cycle.programId !== program.id) {
+  if (cycle.programId !== (program.id as Id<"trainingPrograms">)) {
     throw new DomainError(
       DomainErrorCode.DESTINATION_INVALID_LEVEL,
       "El ciclo no corresponde al nivel indicado.",
@@ -644,63 +502,38 @@ export async function enrollDestino(
     );
   }
 
-  const [existing] = await db
-    .select()
-    .from(trainingEnrollments)
-    .where(
-      and(
-        eq(trainingEnrollments.cycleId, raw.cycleId),
-        eq(trainingEnrollments.personId, raw.personId),
-      ),
-    )
-    .limit(1);
+  const existing = await client.query(api.formation.getEnrollmentByCycleAndPerson, {
+    cycleId: raw.cycleId as Id<"trainingCycles">,
+    personId: raw.personId as Id<"persons">,
+  });
   if (existing) {
-    throw new DomainError(
-      DomainErrorCode.DESTINATION_ALREADY_ENROLLED,
-      "Ya inscrito en este ciclo.",
-    );
+    throw new DomainError(DomainErrorCode.DESTINATION_ALREADY_ENROLLED, "Ya inscrito en este ciclo.");
   }
 
-  const [enrollment] = await db
-    .insert(trainingEnrollments)
-    .values({
-      cycleId: raw.cycleId,
-      personId: raw.personId,
-      status: "in_progress",
-    })
-    .returning();
+  const enrollment = withId(
+    await client
+      .mutation(api.formation.enroll, {
+        cycleId: raw.cycleId as Id<"trainingCycles">,
+        personId: raw.personId as Id<"persons">,
+      })
+      .catch(mapConvexError),
+  );
 
-  let updatedProgress = progress;
-  if (!updatedProgress) {
-    const [created] = await db
-      .insert(personProcessProgress)
-      .values({
-        personId: raw.personId,
+  const updatedProgress = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
         processType: LEVEL_PROCESS[raw.level],
         status: "in_progress",
-        stage: `n${raw.level}`,
+        stage: progress ? undefined : `n${raw.level}`,
         currentStep: "cursando",
-        ministryId: org.ministryId,
-        networkId: org.networkId,
-        startedAt: new Date(),
-        metadata: { cycleId: cycle.id },
+        ministryId: org.ministryId as Id<"ministries">,
+        networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
+        startedAt: progress?.startedAt ?? Date.now(),
+        metadata: { ...(progress?.metadata ?? {}), cycleId: cycle._id },
       })
-      .returning();
-    updatedProgress = created;
-  } else {
-    const [row] = await db
-      .update(personProcessProgress)
-      .set({
-        status: "in_progress",
-        startedAt: updatedProgress.startedAt ?? new Date(),
-        currentStep: "cursando",
-        metadata: { ...(updatedProgress.metadata ?? {}), cycleId: cycle.id },
-        updatedAt: new Date(),
-      })
-      .where(eq(personProcessProgress.id, updatedProgress.id))
-      .returning();
-    updatedProgress = row;
-  }
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: updatedProgress.id,
@@ -710,14 +543,14 @@ export async function enrollDestino(
     fromStatus: progress?.status ?? null,
     toStatus: "in_progress",
     actorUserId,
-    metadata: { cycleId: cycle.id, enrollmentId: enrollment.id, level: raw.level },
+    metadata: { cycleId: cycle._id, enrollmentId: enrollment.id, level: raw.level },
   });
   await writeAuditLog({
     actorUserId,
     action: "destination.enrolled",
     entityType: "training_enrollment",
     entityId: enrollment.id,
-    metadata: { personId: raw.personId, level: raw.level, cycleId: cycle.id },
+    metadata: { personId: raw.personId, level: raw.level, cycleId: cycle._id },
   });
 
   return { enrollment, progress: updatedProgress };
@@ -750,38 +583,34 @@ export async function markAcademicCompleted(
     throw new DomainError(DomainErrorCode.DESTINATION_ALREADY_COMPLETED, "Nivel ya completado.");
   }
 
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
-    const [enrollment] = await db
-      .select()
-      .from(trainingEnrollments)
-      .where(eq(trainingEnrollments.id, raw.enrollmentId))
-      .limit(1);
+    const enrollment = await client.query(api.formation.getEnrollment, {
+      enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
+    });
     if (enrollment) {
       await assertCycleStaffOrManage(actor, enrollment.cycleId, "academic");
-      await db
-        .update(trainingEnrollments)
-        .set({
-          status: "academic_completed",
-          updatedAt: new Date(),
-        })
-        .where(eq(trainingEnrollments.id, enrollment.id));
+      await client.mutation(api.formation.updateEnrollmentStatus, {
+        enrollmentId: enrollment._id,
+        status: "academic_completed",
+      });
     }
   }
 
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "academic_completed",
-      currentStep: "academic_completed",
-      updatedAt: new Date(),
-      metadata: {
-        ...(progress.metadata ?? {}),
-        academic_completed_at: new Date().toISOString(),
-      },
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
+        processType: LEVEL_PROCESS[raw.level],
+        status: "academic_completed",
+        currentStep: "academic_completed",
+        metadata: {
+          ...(progress.metadata ?? {}),
+          academic_completed_at: new Date().toISOString(),
+        },
+      })
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: row.id,
@@ -839,6 +668,8 @@ export async function completeDestinoLevel(
     );
   }
 
+  const client = await getAuthenticatedConvexClient();
+
   // Apply overrides if requested
   if (raw.overrideRequirementIds?.length) {
     if (!hasPermission(actor, "destination.override_requirement") && !isSuperadmin(actor)) {
@@ -854,15 +685,15 @@ export async function completeDestinoLevel(
       );
     }
     const program = await getProgramByLevel(raw.level);
-    const db = getDb();
     for (const requirementId of raw.overrideRequirementIds) {
-      await db.insert(trainingRequirementOverrides).values({
-        personId: raw.personId,
-        programId: program.id,
-        requirementId,
-        reason: raw.overrideReason.trim(),
-        actorUserId,
-      });
+      await client
+        .mutation(api.formation.insertOverride, {
+          personId: raw.personId as Id<"persons">,
+          programId: program.id as Id<"trainingPrograms">,
+          requirementId: requirementId as Id<"trainingCompletionRequirements">,
+          reason: raw.overrideReason.trim(),
+        })
+        .catch(mapConvexError);
       await writeAuditLog({
         actorUserId,
         action: "destination.requirement_overridden",
@@ -910,50 +741,40 @@ export async function completeDestinoLevel(
     );
   }
 
-  const db = getDb();
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "completed",
-      completedAt: new Date(),
-      completedByUserId: actorUserId,
-      currentStep: "completado",
-      updatedAt: new Date(),
-      metadata: {
-        ...(progress.metadata ?? {}),
-        formally_completed: true,
-        leadership_activated: false,
-      },
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
+        processType: LEVEL_PROCESS[raw.level],
+        status: "completed",
+        currentStep: "completado",
+        completedAt: Date.now(),
+        completedByUserId: actorUserId as Id<"users">,
+        metadata: {
+          ...(progress.metadata ?? {}),
+          formally_completed: true,
+          leadership_activated: false,
+        },
+      })
+      .catch(mapConvexError),
+  );
 
   const program = await getProgramByLevel(raw.level);
-  const programCycles = await db
-    .select({ id: trainingCycles.id })
-    .from(trainingCycles)
-    .where(eq(trainingCycles.programId, program.id));
-  const cycleIds = programCycles.map((c) => c.id);
-  if (cycleIds.length > 0) {
-    await db
-      .update(trainingEnrollments)
-      .set({
+  const programCycles = await client.query(api.formation.listCycles, {
+    programIds: [program.id as Id<"trainingPrograms">],
+  });
+  for (const cycle of programCycles) {
+    const enrollment = await client.query(api.formation.getEnrollmentByCycleAndPerson, {
+      cycleId: cycle._id,
+      personId: raw.personId as Id<"persons">,
+    });
+    if (enrollment && ["enrolled", "in_progress", "academic_completed"].includes(enrollment.status)) {
+      await client.mutation(api.formation.updateEnrollmentStatus, {
+        enrollmentId: enrollment._id,
         status: "completed",
-        completedAt: new Date(),
-        completedByUserId: actorUserId,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(trainingEnrollments.personId, raw.personId),
-          inArray(trainingEnrollments.cycleId, cycleIds),
-          inArray(trainingEnrollments.status, [
-            "enrolled",
-            "in_progress",
-            "academic_completed",
-          ]),
-        ),
-      );
+        completedByUserId: actorUserId as Id<"users">,
+      });
+    }
   }
 
   await appendEvent({
@@ -987,21 +808,23 @@ export async function completeDestinoLevel(
     nextEligible = 2;
     const nextProgress = await getLevelProgress(raw.personId, 2);
     if (!nextProgress) {
-      await db.insert(personProcessProgress).values({
-        personId: raw.personId,
+      await client.mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
         processType: "destino_n2",
         status: "eligible",
         stage: "n2",
         currentStep: "apto_n2",
-        ministryId: org.ministryId,
-        networkId: org.networkId,
+        ministryId: org.ministryId as Id<"ministries">,
+        networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
         metadata: { eligible_from_level: 1 },
       });
     } else if (nextProgress.status === "pending") {
-      await db
-        .update(personProcessProgress)
-        .set({ status: "eligible", currentStep: "apto_n2", updatedAt: new Date() })
-        .where(eq(personProcessProgress.id, nextProgress.id));
+      await client.mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
+        processType: "destino_n2",
+        status: "eligible",
+        currentStep: "apto_n2",
+      });
     }
     await writeAuditLog({
       actorUserId,
@@ -1046,37 +869,27 @@ export async function listDestinoEligible(actorUserId: string, level: DestinoLev
   if (!hasPermission(actor, "destination.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.DESTINATION_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
 
   if (level === 1) {
     // Consolidar completed and N1 not completed (UDV is NOT a gate)
-    const consolidarDone = await db
-      .select({
-        personId: personProcessProgress.personId,
-        ministryId: personProcessProgress.ministryId,
-        firstName: persons.firstName,
-        lastName: persons.lastName,
-      })
-      .from(personProcessProgress)
-      .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-      .where(
-        and(
-          eq(personProcessProgress.processType, "consolidar"),
-          eq(personProcessProgress.status, "completed"),
-        ),
-      );
+    const consolidarDone = await client.query(api.formation.listProgressRows, {
+      processTypes: ["consolidar"],
+      statuses: ["completed"],
+    });
     const result = [];
     for (const row of consolidarDone) {
-      if (!isSuperadmin(actor) && !canAccessMinistry(actor, row.ministryId)) continue;
+      const p = row.progress;
+      if (!isSuperadmin(actor) && !canAccessMinistry(actor, p.ministryId)) continue;
       try {
-        await assertProcessAccess(actor, row.personId, row.ministryId);
+        await assertProcessAccess(actor, p.personId, p.ministryId);
       } catch {
         continue;
       }
-      const n1 = await getLevelProgress(row.personId, 1);
+      const n1 = await getLevelProgress(p.personId, 1);
       if (n1?.status === "completed") continue;
       result.push({
-        personId: row.personId,
+        personId: p.personId as string,
         fullName: formatFullName(row.firstName, row.lastName),
         levelStatus: n1?.status ?? "eligible",
       });
@@ -1086,45 +899,28 @@ export async function listDestinoEligible(actorUserId: string, level: DestinoLev
 
   if (level === 3) {
     // CD2 + Re-Encuentro completed
-    const cd2Done = await db
-      .select({
-        personId: personProcessProgress.personId,
-        ministryId: personProcessProgress.ministryId,
-        firstName: persons.firstName,
-        lastName: persons.lastName,
-      })
-      .from(personProcessProgress)
-      .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-      .where(
-        and(
-          eq(personProcessProgress.processType, "destino_n2"),
-          eq(personProcessProgress.status, "completed"),
-        ),
-      );
+    const cd2Done = await client.query(api.formation.listProgressRows, {
+      processTypes: ["destino_n2"],
+      statuses: ["completed"],
+    });
     const result = [];
     for (const row of cd2Done) {
-      if (!isSuperadmin(actor) && !canAccessMinistry(actor, row.ministryId)) continue;
+      const p = row.progress;
+      if (!isSuperadmin(actor) && !canAccessMinistry(actor, p.ministryId)) continue;
       try {
-        await assertProcessAccess(actor, row.personId, row.ministryId);
+        await assertProcessAccess(actor, p.personId, p.ministryId);
       } catch {
         continue;
       }
-      const [re] = await db
-        .select()
-        .from(personProcessProgress)
-        .where(
-          and(
-            eq(personProcessProgress.personId, row.personId),
-            eq(personProcessProgress.processType, "reencuentro"),
-            eq(personProcessProgress.status, "completed"),
-          ),
-        )
-        .limit(1);
-      if (!re) continue;
-      const cur = await getLevelProgress(row.personId, 3);
+      const re = await client.query(api.formation.getProgress, {
+        personId: p.personId,
+        processType: "reencuentro",
+      });
+      if (!re || re.status !== "completed") continue;
+      const cur = await getLevelProgress(p.personId, 3);
       if (cur?.status === "completed") continue;
       result.push({
-        personId: row.personId,
+        personId: p.personId as string,
         fullName: formatFullName(row.firstName, row.lastName),
         levelStatus: cur?.status ?? "eligible",
       });
@@ -1133,33 +929,23 @@ export async function listDestinoEligible(actorUserId: string, level: DestinoLev
   }
 
   const prevLevel = (level - 1) as DestinoLevel;
-  const prevDone = await db
-    .select({
-      personId: personProcessProgress.personId,
-      ministryId: personProcessProgress.ministryId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personProcessProgress)
-    .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-    .where(
-      and(
-        eq(personProcessProgress.processType, LEVEL_PROCESS[prevLevel]),
-        eq(personProcessProgress.status, "completed"),
-      ),
-    );
+  const prevDone = await client.query(api.formation.listProgressRows, {
+    processTypes: [LEVEL_PROCESS[prevLevel]],
+    statuses: ["completed"],
+  });
   const result = [];
   for (const row of prevDone) {
-    if (!isSuperadmin(actor) && !canAccessMinistry(actor, row.ministryId)) continue;
+    const p = row.progress;
+    if (!isSuperadmin(actor) && !canAccessMinistry(actor, p.ministryId)) continue;
     try {
-      await assertProcessAccess(actor, row.personId, row.ministryId);
+      await assertProcessAccess(actor, p.personId, p.ministryId);
     } catch {
       continue;
     }
-    const cur = await getLevelProgress(row.personId, level);
+    const cur = await getLevelProgress(p.personId, level);
     if (cur?.status === "completed") continue;
     result.push({
-      personId: row.personId,
+      personId: p.personId as string,
       fullName: formatFullName(row.firstName, row.lastName),
       levelStatus: cur?.status ?? "eligible",
     });
@@ -1172,41 +958,18 @@ export async function getDestinoDashboardCounts(actorUserId: string) {
   if (!hasPermission(actor, "destination.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.DESTINATION_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const conditions = [];
-  if (!isSuperadmin(actor) && actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
-  }
-  const where =
-    conditions.length === 0
-      ? inArray(personProcessProgress.processType, [
-          "destino_n1",
-          "destino_n2",
-          "destino_n3",
-        ])
-      : and(
-          inArray(personProcessProgress.processType, [
-            "destino_n1",
-            "destino_n2",
-            "destino_n3",
-          ]),
-          ...conditions,
-        );
-
-  const rows = await db
-    .select({
-      processType: personProcessProgress.processType,
-      status: personProcessProgress.status,
-      c: count(),
-    })
-    .from(personProcessProgress)
-    .where(where)
-    .groupBy(personProcessProgress.processType, personProcessProgress.status);
+  const client = await getAuthenticatedConvexClient();
+  const ministryIds =
+    !isSuperadmin(actor) && actor.ministryIds.length
+      ? (actor.ministryIds as Id<"ministries">[])
+      : undefined;
+  const rows = await client.query(api.formation.listProgressRows, {
+    processTypes: ["destino_n1", "destino_n2", "destino_n3"],
+    ministryIds,
+  });
 
   const pick = (type: string, statuses: string[]) =>
-    rows
-      .filter((r) => r.processType === type && statuses.includes(r.status))
-      .reduce((acc, r) => acc + Number(r.c), 0);
+    rows.filter((r) => r.progress.processType === type && statuses.includes(r.progress.status)).length;
 
   const eligibleN1 = await listDestinoEligible(actorUserId, 1);
   const eligibleN2 = await listDestinoEligible(actorUserId, 2);
@@ -1238,26 +1001,22 @@ export async function listDestinoCycles(actorUserId: string, level?: DestinoLeve
     throw new DomainError(DomainErrorCode.DESTINATION_ACCESS_DENIED, "Sin permiso.");
   }
   await ensureDestinoPrograms();
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   if (level) {
     const program = await getProgramByLevel(level);
-    return db
-      .select()
-      .from(trainingCycles)
-      .where(eq(trainingCycles.programId, program.id))
-      .orderBy(desc(trainingCycles.startDate));
+    const cycles = await client.query(api.formation.listCycles, {
+      programIds: [program.id as Id<"trainingPrograms">],
+    });
+    return cycles.map(withId);
   }
-  const programs = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.family, DESTINO_FAMILY));
-  const ids = programs.map((p) => p.id);
-  if (!ids.length) return [];
-  return db
-    .select()
-    .from(trainingCycles)
-    .where(inArray(trainingCycles.programId, ids))
-    .orderBy(desc(trainingCycles.startDate));
+  const programs = await client.query(api.formation.listProgramsByFamily, {
+    family: DESTINO_FAMILY,
+  });
+  if (!programs.length) return [];
+  const cycles = await client.query(api.formation.listCycles, {
+    programIds: programs.map((p) => p._id),
+  });
+  return cycles.map(withId);
 }
 
 export async function getDestinoCycleBoard(actorUserId: string, cycleId: string) {
@@ -1265,46 +1024,32 @@ export async function getDestinoCycleBoard(actorUserId: string, cycleId: string)
   if (!hasPermission(actor, "destination.read") && !hasPermission(actor, "udv.read")) {
     throw new DomainError(DomainErrorCode.DESTINATION_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, cycleId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
   if (!cycle) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ciclo no encontrado.");
   }
-  const [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.id, cycle.programId))
-    .limit(1);
+  const candidatePrograms = await client.query(api.formation.listProgramsByFamily, {
+    family: DESTINO_FAMILY,
+  });
+  const programRow = candidatePrograms.find((p) => p._id === cycle.programId) ?? null;
 
-  const modules = await db
-    .select()
-    .from(trainingModules)
-    .where(
-      and(eq(trainingModules.programId, cycle.programId), eq(trainingModules.isActive, true)),
-    )
-    .orderBy(asc(trainingModules.orderIndex));
+  const modules = (
+    await client.query(api.formation.listModules, { programId: cycle.programId, activeOnly: true })
+  ).map(withId);
 
-  const enrollments = await db
-    .select({
-      enrollment: trainingEnrollments,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(trainingEnrollments)
-    .innerJoin(persons, eq(persons.id, trainingEnrollments.personId))
-    .where(eq(trainingEnrollments.cycleId, cycleId))
-    .orderBy(asc(persons.lastName));
+  const enrollments = await client.query(api.formation.listEnrollmentsByCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
 
   const scoped = [];
   for (const row of enrollments) {
     try {
-      const org = await currentOrg(row.enrollment.personId);
+      const org = await currentOrg(row.enrollment.personId as string);
       if (org?.ministryId) {
-        await assertProcessAccess(actor, row.enrollment.personId, org.ministryId);
+        await assertProcessAccess(actor, row.enrollment.personId as string, org.ministryId);
       } else if (!isSuperadmin(actor) && !isLeaderGeneral(actor)) {
         continue;
       }
@@ -1314,36 +1059,32 @@ export async function getDestinoCycleBoard(actorUserId: string, cycleId: string)
     }
   }
 
-  const enrollmentIds = scoped.map((s) => s.enrollment.id);
+  const enrollmentIds = scoped.map((s) => s.enrollment._id);
   const attendanceRows =
     enrollmentIds.length === 0
       ? []
-      : await db
-          .select()
-          .from(trainingAttendance)
-          .where(inArray(trainingAttendance.enrollmentId, enrollmentIds));
+      : await client.query(api.formation.listAttendanceByEnrollments, { enrollmentIds });
 
   const participants = [];
   for (const s of scoped) {
-    const level = (program?.level ?? 1) as DestinoLevel;
-    const evalReq = await evaluateLevelRequirements(s.enrollment.personId, level);
+    const level = (programRow?.level ?? 1) as DestinoLevel;
+    const evalReq = await evaluateLevelRequirements(s.enrollment.personId as string, level);
     participants.push({
-      enrollmentId: s.enrollment.id,
-      personId: s.enrollment.personId,
+      enrollmentId: s.enrollment._id as string,
+      personId: s.enrollment.personId as string,
       fullName: formatFullName(s.firstName, s.lastName),
       status: s.enrollment.status,
       attendance: Object.fromEntries(
         attendanceRows
-          .filter((a) => a.enrollmentId === s.enrollment.id)
-          .map((a) => [a.moduleId, a]),
+          .filter((a) => a.enrollmentId === s.enrollment._id)
+          .map((a) => [a.moduleId as string, withId(a)]),
       ),
       pastoralPending: evalReq.academicPassed && !evalReq.pastoralPassed,
-      memberCount:
-        evalReq.results.find((r) => r.type === "active_cell_members")?.actual ?? null,
+      memberCount: evalReq.results.find((r) => r.type === "active_cell_members")?.actual ?? null,
     });
   }
 
-  return { cycle, program, modules, participants };
+  return { cycle: withId(cycle), program: programRow ? withId(programRow) : null, modules, participants };
 }
 
 export async function getPersonDestinoSummary(personId: string) {

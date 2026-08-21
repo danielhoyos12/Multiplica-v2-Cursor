@@ -2,89 +2,54 @@
 
 | Campo | Valor |
 | --- | --- |
-| Fecha | 2026-08-16 |
+| Fecha | 2026-08-17 |
 | Decisión | **FULL_CUTOVER** — Convex es el backend objetivo |
-| Motivo | Tipado end-to-end TypeScript, queries/mutations validadas, realtime nativo |
-| Stack actual (origen) | Next.js + Supabase Auth + Postgres + Drizzle (+ RLS) |
-| Nota | A veces se menciona “T3”; en este repo el backend real es **Supabase/Drizzle**, no tRPC/Prisma. El target es **Next + Convex**. |
-| Staging / prod | Sin cutover en prod hasta que cada fase pase verify + UAT en staging |
+| Auth | **Clerk** (completado) |
+| Data plane | **Convex** (completado en código — pastoral modules) |
+| Branch | `cursor/convex-pastoral-cutover-a3cc` |
 
 ---
 
-## Principios
+## Estado
 
-1. **Un writer por dominio.** No dual-write en `leadership_closure`, transferencias ni asistencia.
-2. **Auth tarde.** Mantener **Supabase Auth** (cookies, recovery, `must_change_password`) mientras migran datos pastorales a Convex. Authz de dominio se reimplementa en Convex (hoy vive en `src/modules/authorization`).
-3. **UI estable.** Server actions / páginas pueden llamar Convex gradualmente; no reescribir toda la UI de golpe.
-4. **Invariantes primero.** Cada fase debe conservar `docs/domain-invariants.md` y los scripts `verify:*` equivalentes.
-5. **Realtime donde aporta.** Células/asistencia, transferencias, dashboards — no forzar subscriptions en pantallas estáticas.
-
----
-
-## Fases (orden por dependencia)
-
-| Fase | Alcance | Criterio de salida |
+| Fase | Alcance | Estado |
 | --- | --- | --- |
-| **0** | Schema foundation + docs + tooling local; sin cortar Postgres pastoral | `npm run convex:dev` + schema compile; plan aprobado |
-| **1** | Catálogos: districts, networks, ministries (+ seed) | Admin org lee/escribe Convex detrás de flag |
-| **2** | Authz Convex: roles, permissions, assignments + `AuthContext` | Policies equivalentes a `policy.ts` en tests |
-| **3** | Personas / Ganar (+ intake público vía HTTP action) | CRUD personas + registro público; verify persona única |
-| **4** | Células, membresías, asistencia | Caps G12 / no-orphan cell rules en tests |
-| **5** | Liderazgo G12 + closure | Closure rebuild + activate/deactivate; Auth user create sigue en Supabase Auth |
-| **6** | Formación (consolidar → UDV / Destino / EM / Reencuentro) | Ladder + cycles parity |
-| **7** | Enviar / ungimiento | Reglas EM3 → eligible |
-| **8** | Transferencias pastorales | Flujo + history sin corrupción de árbol |
-| **9** | Reporting / dashboard / exports | KPIs derivados sin SQL Postgres |
-| **10** | Auth cutover (Convex Auth o bridge) + retirar Drizzle/RLS/`DATABASE_URL` | Login/recovery en Convex; Supabase solo si queda storage opcional |
+| **0** | Schema + tooling local | ✅ |
+| **1** | Catálogos (districts, networks, ministries) + seed | ✅ `convex/organization.ts`, `seed.ts` |
+| **2** | Authz (roles, permissions, assignments) | ✅ `convex/authz.ts` |
+| **3** | Personas / Ganar | ✅ `convex/persons.ts` + `ganar/service` |
+| **4** | Células / membresías / asistencia | ✅ `convex/cells.ts` |
+| **5** | Liderazgo G12 + closure | ✅ `convex/leadership.ts` (Clerk createUser en Next) |
+| **6** | Formación | ✅ `convex/formation.ts` |
+| **7** | Enviar | ✅ `convex/send.ts` |
+| **8** | Transferencias | ✅ `convex/transfers.ts` |
+| **9** | Reporting / dashboard | ✅ `convex/reporting.ts` |
+| **10** | Auth Clerk + retirar path feliz Drizzle | ✅ módulos/app sin `getDb()` |
+
+`getDb()` solo permanece en `src/db/client.ts` (legacy helper) y `src/db/seeds/run.ts` (seed Postgres histórico). Pastoral runtime usa Convex.
 
 ---
 
-## Mapa origen → Convex
+## Operación
 
-| Origen | Destino |
-| --- | --- |
-| `src/db/schema/*` | `convex/schema.ts` (+ tablas por dominio) |
-| `src/modules/*/service.ts` | `convex/<domain>.ts` queries/mutations |
-| `src/modules/*/actions.ts` | Thin Next server actions → `fetchQuery` / `fetchMutation`, o client hooks |
-| `src/modules/authorization` | `convex/authz.ts` + helpers `requireActor` |
-| Supabase Auth | Fase 10; hasta entonces identidad vía `users.authSubject` = Supabase `auth.users.id` |
-| RLS SQL | Authz en mutations (defense in depth Convex rules) |
-| Raw SQL reporting | Indexes + aggregations / scheduled jobs |
+```bash
+npm run convex:dev          # backend local
+npm run db:seed:convex      # catálogos RBAC + redes + distritos
+npm run dev
+```
 
----
+Env requerido: `NEXT_PUBLIC_CONVEX_URL`, Clerk keys, `CLERK_JWT_ISSUER_DOMAIN` en el deployment Convex.
 
-## Dual-run (mientras dura)
+## Security hardening Clerk ↔ Convex
 
-| Capa | Estado durante cutover |
-| --- | --- |
-| Supabase Auth + middleware | **Sigue** |
-| Postgres + Drizzle (dominios no migrados) | **Source of truth** |
-| Convex (dominios migrados) | **Source of truth** de ese dominio |
-| `/convex-dev` | Smoke / connectivity only |
+Ver [`docs/clerk-auth-cutover.md`](./clerk-auth-cutover.md). Resumen:
 
-Flag sugerido (fases 1+): `CONVEX_DOMAIN_<NAME>=1` o `NEXT_PUBLIC_USE_CONVEX_ORG=1`.
+- Authz real en Convex via `ctx.auth` (no `actorUserId` de cliente).
+- JWT Clerk template `convex` en SSR (`getAuthenticatedConvexClient`).
+- Sin signup público; alta solo por `provisionLeaderUser` / `activateLeader`.
+- `seedCatalogs` y `seedSuperadminRole` son `internalMutation`.
+- `/api/ready` = Clerk + Convex `health.ping` (no Postgres).
 
 ---
 
-## Riesgos altos
-
-- **Transfers + leadership_closure** — corrupción de árbol G12
-- **Leadership activate** — acoplado a `auth.admin.createUser`
-- **Reporting** — mucho SQL scoped; reescritura no trivial
-- **Password gate / recovery** — no mover hasta fase 10
-- **Staging UAT** — no mergear cutover a `main`/prod sin UAT en `staging`
-
----
-
-## Fase 0 (esta entrega)
-
-- Decisión FULL_CUTOVER documentada
-- Schema Convex foundation (tablas vacías + indexes) alineado a catálogos/personas/users/roles
-- `convex/README.md` apunta al plan
-- Gate doc actualizado
-- **No** se elimina Supabase/Drizzle
-- **No** se migra data pastoral aún
-
----
-
-**STATUS: FULL_CUTOVER ACCEPTED — PHASE 0 IN PROGRESS**
+**STATUS: FULL_CUTOVER CODE COMPLETE — HARDENING IN PR #23 — UAT STAGING PENDING**

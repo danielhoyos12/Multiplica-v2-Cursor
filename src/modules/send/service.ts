@@ -4,17 +4,11 @@
  * Completing Enviar does NOT activate leadership or create cells.
  * Ungimiento reuses Phase 4 markPersonEligible (eligible ≠ active).
  */
-import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { getDb } from "@/db/client";
-import {
-  personOrganizationHistory,
-  personProcessEvents,
-  personProcessProgress,
-  personLeadership,
-  persons,
-} from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { withId } from "@/lib/convex-doc";
+import { mapConvexError } from "@/lib/convex-errors";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
 import {
@@ -27,25 +21,26 @@ import {
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
 import { markPersonEligible } from "@/modules/leadership/service";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 const PROCESS = "enviar" as const;
 
 export const startSendInputSchema = z.object({
-  personId: z.string().uuid(),
+  personId: z.string().min(1),
   note: z.string().trim().max(500).optional(),
 });
 
 export const completeSendInputSchema = z.object({
-  personId: z.string().uuid(),
+  personId: z.string().min(1),
   note: z.string().trim().max(500).optional(),
   markEligible: z.boolean().optional().default(false),
 });
 
 export const anointAfterSendInputSchema = z.object({
-  personId: z.string().uuid(),
-  ministryId: z.string().uuid(),
-  networkId: z.string().uuid(),
-  directLeaderPersonId: z.string().uuid().optional().nullable(),
+  personId: z.string().min(1),
+  ministryId: z.string().min(1),
+  networkId: z.string().min(1),
+  directLeaderPersonId: z.string().min(1).optional().nullable(),
 });
 
 async function requireActor(userId: string) {
@@ -53,51 +48,26 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-    })
-    .from(personOrganizationHistory)
-    .where(
-      and(
-        eq(personOrganizationHistory.personId, personId),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const org = await client.query(api.persons.getCurrentOrg, {
+    personId: personId as Id<"persons">,
+  });
+  if (!org) return null;
+  return {
+    ministryId: (org.ministryId as string | undefined) ?? null,
+    networkId: (org.networkId as string | undefined) ?? null,
+  };
 }
 
 async function getProgress(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, PROCESS),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const row = await client.query(api.send.getProgress, { personId: personId as Id<"persons"> });
+  return row ? withId(row) : null;
 }
 
 async function getEm3Status(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({ status: personProcessProgress.status })
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, "em3"),
-      ),
-    )
-    .limit(1);
-  return row?.status ?? null;
+  const client = await getAuthenticatedConvexClient();
+  return client.query(api.send.getEm3Status, { personId: personId as Id<"persons"> });
 }
 
 export async function assertSendEligible(personId: string) {
@@ -127,38 +97,16 @@ export async function ensureSendEligible(
   networkId: string | null,
 ) {
   await assertSendEligible(personId);
-  const existing = await getProgress(personId);
-  if (existing) {
-    if (existing.status === "pending") {
-      const db = getDb();
-      const [row] = await db
-        .update(personProcessProgress)
-        .set({
-          status: "eligible",
-          currentStep: "apto_enviar",
-          updatedAt: new Date(),
-        })
-        .where(eq(personProcessProgress.id, existing.id))
-        .returning();
-      return row;
-    }
-    return existing;
-  }
-  const db = getDb();
-  const [row] = await db
-    .insert(personProcessProgress)
-    .values({
-      personId,
-      processType: PROCESS,
-      status: "eligible",
-      stage: "enviar",
-      currentStep: "apto_enviar",
-      ministryId,
-      networkId,
-      metadata: { from: "em3_completed" },
-    })
-    .returning();
-  return row;
+  const client = await getAuthenticatedConvexClient();
+  return withId(
+    await client
+      .mutation(api.send.ensureEligible, {
+        personId: personId as Id<"persons">,
+        ministryId: ministryId as Id<"ministries">,
+        networkId: (networkId ?? undefined) as Id<"networks"> | undefined,
+      })
+      .catch(mapConvexError),
+  );
 }
 
 export async function startSend(actorUserId: string, raw: unknown) {
@@ -178,47 +126,18 @@ export async function startSend(actorUserId: string, raw: unknown) {
     throw new DomainError(DomainErrorCode.SEND_ALREADY_COMPLETED, "Enviar ya completado.");
   }
 
-  const db = getDb();
-  let row = existing;
-  if (!row) {
-    [row] = await db
-      .insert(personProcessProgress)
-      .values({
-        personId: input.personId,
-        processType: PROCESS,
-        status: "in_progress",
-        stage: "enviar",
-        currentStep: "en_proceso",
-        ministryId: org.ministryId,
-        networkId: org.networkId,
-        startedAt: new Date(),
-        metadata: {},
+  const client = await getAuthenticatedConvexClient();
+  const row = withId(
+    await client
+      .mutation(api.send.markEnviarProgress, {
+        personId: input.personId as Id<"persons">,
+        ministryId: org.ministryId as Id<"ministries">,
+        networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
+        note: input.note,
       })
-      .returning();
-  } else if (row.status !== "in_progress") {
-    [row] = await db
-      .update(personProcessProgress)
-      .set({
-        status: "in_progress",
-        currentStep: "en_proceso",
-        startedAt: row.startedAt ?? new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(personProcessProgress.id, row.id))
-      .returning();
-  }
+      .catch(mapConvexError),
+  );
 
-  await db.insert(personProcessEvents).values({
-    progressId: row.id,
-    personId: input.personId,
-    processType: PROCESS,
-    eventType: "started",
-    fromStatus: existing?.status ?? null,
-    toStatus: "in_progress",
-    actorUserId,
-    note: input.note ?? null,
-    metadata: {},
-  });
   await writeAuditLog({
     actorUserId,
     action: "send.started",
@@ -245,66 +164,28 @@ export async function completeSend(actorUserId: string, raw: unknown) {
   }
   await assertProcessAccess(actor, input.personId, org.ministryId);
 
-  let progress = await getProgress(input.personId);
+  const progress = await getProgress(input.personId);
   if (progress?.status === "completed") {
     throw new DomainError(DomainErrorCode.SEND_ALREADY_COMPLETED, "Enviar ya completado.");
   }
 
-  const db = getDb();
-  if (!progress) {
-    [progress] = await db
-      .insert(personProcessProgress)
-      .values({
-        personId: input.personId,
-        processType: PROCESS,
-        status: "completed",
-        stage: "enviar",
-        currentStep: "completado",
-        ministryId: org.ministryId,
-        networkId: org.networkId,
-        startedAt: new Date(),
-        completedAt: new Date(),
-        completedByUserId: actorUserId,
-        metadata: {
-          leadership_activated: false,
-          cell_created: false,
-        },
+  const client = await getAuthenticatedConvexClient();
+  const updated = withId(
+    await client
+      .mutation(api.send.completeEnviar, {
+        personId: input.personId as Id<"persons">,
+        ministryId: org.ministryId as Id<"ministries">,
+        networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
+        note: input.note,
       })
-      .returning();
-  } else {
-    [progress] = await db
-      .update(personProcessProgress)
-      .set({
-        status: "completed",
-        currentStep: "completado",
-        completedAt: new Date(),
-        completedByUserId: actorUserId,
-        updatedAt: new Date(),
-        metadata: {
-          ...(progress.metadata ?? {}),
-          leadership_activated: false,
-          cell_created: false,
-        },
-      })
-      .where(eq(personProcessProgress.id, progress.id))
-      .returning();
-  }
+      .catch(mapConvexError),
+  );
 
-  await db.insert(personProcessEvents).values({
-    progressId: progress.id,
-    personId: input.personId,
-    processType: PROCESS,
-    eventType: "completed",
-    toStatus: "completed",
-    actorUserId,
-    note: input.note ?? null,
-    metadata: { leadership_activated: false },
-  });
   await writeAuditLog({
     actorUserId,
     action: "send.completed",
     entityType: "person_process_progress",
-    entityId: progress.id,
+    entityId: updated.id,
     metadata: {
       personId: input.personId,
       leadership_activated: false,
@@ -335,7 +216,7 @@ export async function completeSend(actorUserId: string, raw: unknown) {
   }
 
   return {
-    progress,
+    progress: updated,
     leadershipActivated: false as const,
     cellCreated: false as const,
     leadershipEligible,
@@ -367,11 +248,10 @@ export async function anointAfterSend(actorUserId: string, raw: unknown) {
     directLeaderPersonId: input.directLeaderPersonId ?? undefined,
   });
 
-  const [lead] = await getDb()
-    .select()
-    .from(personLeadership)
-    .where(eq(personLeadership.personId, input.personId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const lead = await client.query(api.leadership.getByPerson, {
+    personId: input.personId as Id<"persons">,
+  });
 
   return {
     leadership: result,
@@ -385,52 +265,40 @@ export async function getSendDashboardCounts(actorUserId: string, focusLeaderPer
   if (!hasPermission(actor, "send.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.SEND_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const conditions = [eq(personProcessProgress.processType, PROCESS)];
+  const client = await getAuthenticatedConvexClient();
+
+  let personIds: Id<"persons">[] | undefined;
+  let ministryIds: Id<"ministries">[] | undefined;
   if (isSuperadmin(actor)) {
     // global
   } else if (isLeaderGeneral(actor) && actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
+    ministryIds = actor.ministryIds as Id<"ministries">[];
   } else if (focusLeaderPersonId || actor.personId) {
-    const root = focusLeaderPersonId ?? actor.personId!;
-    conditions.push(
-      sql`${personProcessProgress.personId} IN (
-        SELECT descendant_person_id FROM leadership_closure
-        WHERE ancestor_person_id = ${root}::uuid
-      )`,
-    );
+    const root = (focusLeaderPersonId ?? actor.personId!) as Id<"persons">;
+    personIds = await client.query(api.formation.getDescendantPersonIds, { rootPersonId: root });
   } else if (actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
+    ministryIds = actor.ministryIds as Id<"ministries">[];
   }
 
-  const rows = await db
-    .select({
-      status: personProcessProgress.status,
-      c: count(),
-    })
-    .from(personProcessProgress)
-    .where(and(...conditions))
-    .groupBy(personProcessProgress.status);
+  const rows = await client.query(api.formation.listProgressRows, {
+    processTypes: [PROCESS],
+    personIds,
+    ministryIds,
+  });
 
-  const pick = (status: string) =>
-    Number(rows.find((r) => r.status === status)?.c ?? 0);
+  const pick = (status: string) => rows.filter((r) => r.progress.status === status).length;
 
-  // Leadership eligible/active among people who completed send (scoped)
-  const completedPeople = await db
-    .select({ personId: personProcessProgress.personId })
-    .from(personProcessProgress)
-    .where(and(...conditions, eq(personProcessProgress.status, "completed")));
-  const ids = completedPeople.map((p) => p.personId);
+  const completedPersonIds = rows
+    .filter((r) => r.progress.status === "completed")
+    .map((r) => r.progress.personId);
   let ungidos = 0;
   let activados = 0;
-  if (ids.length) {
-    const leads = await db
-      .select({ status: personLeadership.status, c: count() })
-      .from(personLeadership)
-      .where(inArray(personLeadership.personId, ids))
-      .groupBy(personLeadership.status);
-    ungidos = Number(leads.find((l) => l.status === "eligible")?.c ?? 0);
-    activados = Number(leads.find((l) => l.status === "active")?.c ?? 0);
+  if (completedPersonIds.length) {
+    const leads = await client.query(api.leadership.getManyByPersons, {
+      personIds: completedPersonIds,
+    });
+    ungidos = leads.filter((l) => l.status === "eligible").length;
+    activados = leads.filter((l) => l.status === "active").length;
   }
 
   return {
@@ -450,61 +318,37 @@ export async function listSendPeople(
   if (!hasPermission(actor, "send.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.SEND_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const conditions = [eq(personProcessProgress.processType, PROCESS)];
-  if (filters.status) {
-    conditions.push(eq(personProcessProgress.status, filters.status as never));
-  }
-  if (!isSuperadmin(actor) && actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
-  }
-  const rows = await db
-    .select({
-      progress: personProcessProgress,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personProcessProgress)
-    .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-    .where(and(...conditions))
-    .orderBy(desc(personProcessProgress.updatedAt))
-    .limit(filters.pageSize ?? 50);
-
-  const personIds = rows.map((r) => r.progress.personId);
-  const leads =
-    personIds.length === 0
-      ? []
-      : await db
-          .select()
-          .from(personLeadership)
-          .where(inArray(personLeadership.personId, personIds));
-  const leadByPerson = new Map(leads.map((l) => [l.personId, l]));
-
-  return rows.map((r) => {
-    const lead = leadByPerson.get(r.progress.personId);
-    return {
-      ...r.progress,
-      fullName: formatFullName(r.firstName, r.lastName),
-      statusLabel: statusLabel(r.progress.status),
-      leadershipStatus: lead?.status ?? "none",
-      leadershipActive: lead?.status === "active",
-    };
+  const client = await getAuthenticatedConvexClient();
+  const ministryIds =
+    !isSuperadmin(actor) && actor.ministryIds.length
+      ? (actor.ministryIds as Id<"ministries">[])
+      : undefined;
+  const rows = await client.query(api.send.listSendPeople, {
+    status: filters.status as never,
+    ministryIds,
+    limit: filters.pageSize ?? 50,
   });
+
+  return rows.map((r) => ({
+    ...withId(r.progress),
+    fullName: formatFullName(r.firstName, r.lastName),
+    statusLabel: statusLabel(r.progress.status),
+    leadershipStatus: r.leadershipStatus,
+    leadershipActive: r.leadershipStatus === "active",
+  }));
 }
 
 export async function getPersonSendSummary(personId: string) {
-  const progress = await getProgress(personId);
-  const [lead] = await getDb()
-    .select()
-    .from(personLeadership)
-    .where(eq(personLeadership.personId, personId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const summary = await client.query(api.send.getPersonSendSummary, {
+    personId: personId as Id<"persons">,
+  });
   return {
-    status: progress?.status ?? "pending",
-    label: statusLabel(progress?.status ?? "pending"),
-    leadershipStatus: lead?.status ?? "none",
-    leadershipEligible: lead?.status === "eligible",
-    leadershipActive: lead?.status === "active",
+    status: summary.status,
+    label: statusLabel(summary.status),
+    leadershipStatus: summary.leadershipStatus,
+    leadershipEligible: summary.leadershipStatus === "eligible",
+    leadershipActive: summary.leadershipStatus === "active",
   };
 }
 

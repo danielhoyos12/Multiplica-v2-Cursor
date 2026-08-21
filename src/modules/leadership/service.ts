@@ -1,19 +1,7 @@
-import { and, asc, count, eq, gt, isNull, sql } from "drizzle-orm";
+import { clerkClient } from "@clerk/nextjs/server";
 
-import { getDb } from "@/db/client";
-import {
-  cells,
-  cellMemberships,
-  leadershipClosure,
-  ministries,
-  networks,
-  personLeadership,
-  personOrganizationHistory,
-  persons,
-  roles,
-  userRoleAssignments,
-  users,
-} from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { mapConvexError } from "@/lib/convex-errors";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { buildChildHumanCode } from "@/lib/human-codes";
 import { writeAuditLog } from "@/modules/audit";
@@ -26,7 +14,7 @@ import {
   type AuthContext,
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
-import { clerkClient } from "@clerk/nextjs/server";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import { generateTemporaryPassword } from "./credentials";
 import { buildUsernameBase, nextUsernameCandidate } from "./username";
@@ -44,13 +32,8 @@ async function requireActor(userId: string) {
 }
 
 async function getLeadership(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personLeadership)
-    .where(eq(personLeadership.personId, personId))
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  return client.query(api.leadership.getByPerson, { personId: personId as Id<"persons"> });
 }
 
 export async function isDescendantOf(
@@ -58,19 +41,11 @@ export async function isDescendantOf(
   descendantPersonId: string,
 ): Promise<boolean> {
   if (ancestorPersonId === descendantPersonId) return true;
-  const db = getDb();
-  const [row] = await db
-    .select({ depth: leadershipClosure.depth })
-    .from(leadershipClosure)
-    .where(
-      and(
-        eq(leadershipClosure.ancestorPersonId, ancestorPersonId),
-        eq(leadershipClosure.descendantPersonId, descendantPersonId),
-        gt(leadershipClosure.depth, 0),
-      ),
-    )
-    .limit(1);
-  return Boolean(row);
+  const client = await getAuthenticatedConvexClient();
+  return client.query(api.leadership.isDescendant, {
+    ancestorPersonId: ancestorPersonId as Id<"persons">,
+    descendantPersonId: descendantPersonId as Id<"persons">,
+  });
 }
 
 export async function assertTreeAccess(
@@ -89,35 +64,22 @@ export async function assertTreeAccess(
 }
 
 async function currentOrg(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-    })
-    .from(personOrganizationHistory)
-    .where(
-      and(
-        eq(personOrganizationHistory.personId, personId),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const org = await client.query(api.persons.getCurrentOrg, {
+    personId: personId as Id<"persons">,
+  });
+  if (!org) return null;
+  return {
+    ministryId: (org.ministryId as string | undefined) ?? null,
+    networkId: (org.networkId as string | undefined) ?? null,
+  };
 }
 
 async function countDirectActiveLeaders(leaderPersonId: string) {
-  const db = getDb();
-  const [{ c }] = await db
-    .select({ c: count() })
-    .from(personLeadership)
-    .where(
-      and(
-        eq(personLeadership.directLeaderPersonId, leaderPersonId),
-        eq(personLeadership.status, "active"),
-      ),
-    );
-  return Number(c);
+  const client = await getAuthenticatedConvexClient();
+  return client.query(api.leadership.countActiveDirectLeadersFor, {
+    leaderPersonId: leaderPersonId as Id<"persons">,
+  });
 }
 
 async function wouldCreateCycle(personId: string, proposedDirectLeaderId: string) {
@@ -125,87 +87,29 @@ async function wouldCreateCycle(personId: string, proposedDirectLeaderId: string
   return isDescendantOf(personId, proposedDirectLeaderId);
 }
 
-async function rebuildClosureForPerson(
-  personId: string,
-  directLeaderPersonId: string | null,
-  ministryId: string,
-) {
-  const db = getDb();
-  await db
-    .delete(leadershipClosure)
-    .where(eq(leadershipClosure.descendantPersonId, personId));
-
-  await db.insert(leadershipClosure).values({
-    ancestorPersonId: personId,
-    descendantPersonId: personId,
-    depth: 0,
-    ministryId,
-  });
-
-  if (!directLeaderPersonId) return;
-
-  const ancestors = await db
-    .select()
-    .from(leadershipClosure)
-    .where(eq(leadershipClosure.descendantPersonId, directLeaderPersonId));
-
-  if (ancestors.length === 0) {
-    await db.insert(leadershipClosure).values({
-      ancestorPersonId: directLeaderPersonId,
-      descendantPersonId: personId,
-      depth: 1,
-      ministryId,
-    });
-    return;
-  }
-
-  await db.insert(leadershipClosure).values(
-    ancestors.map((a) => ({
-      ancestorPersonId: a.ancestorPersonId,
-      descendantPersonId: personId,
-      depth: a.depth + 1,
-      ministryId,
-    })),
-  );
-}
-
 async function allocateUsername(firstName: string, lastName: string) {
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   const base = buildUsernameBase(firstName, lastName);
   for (let attempt = 1; attempt <= 50; attempt += 1) {
     const candidate = nextUsernameCandidate(base, attempt);
-    const [existing] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.username, candidate))
-      .limit(1);
+    const existing = await client.query(api.users.getByUsername, { username: candidate });
     if (!existing) return candidate;
   }
   throw new DomainError(DomainErrorCode.USERNAME_COLLISION, "No se pudo generar username único.");
 }
 
 async function allocateHumanCode(directLeaderPersonId: string | null, ministryId: string) {
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   if (!directLeaderPersonId) {
-    const [ministry] = await db
-      .select()
-      .from(ministries)
-      .where(eq(ministries.id, ministryId))
-      .limit(1);
+    const ministry = await client.query(api.organization.getMinistry, {
+      ministryId: ministryId as Id<"ministries">,
+    });
     const base = ministry?.code ?? `M${ministryId.slice(0, 4)}`;
-    const [taken] = await db
-      .select({ id: personLeadership.id })
-      .from(personLeadership)
-      .where(eq(personLeadership.humanLeaderCode, base))
-      .limit(1);
+    const taken = await client.query(api.leadership.isHumanCodeTaken, { code: base });
     if (!taken) return base;
     for (let n = 2; n <= 99; n += 1) {
       const candidate = `${base}-R${n}`;
-      const [exists] = await db
-        .select({ id: personLeadership.id })
-        .from(personLeadership)
-        .where(eq(personLeadership.humanLeaderCode, candidate))
-        .limit(1);
+      const exists = await client.query(api.leadership.isHumanCodeTaken, { code: candidate });
       if (!exists) return candidate;
     }
     throw new DomainError(
@@ -214,11 +118,9 @@ async function allocateHumanCode(directLeaderPersonId: string | null, ministryId
     );
   }
 
-  const [parent] = await db
-    .select()
-    .from(personLeadership)
-    .where(eq(personLeadership.personId, directLeaderPersonId))
-    .limit(1);
+  const parent = await client.query(api.leadership.getByPerson, {
+    personId: directLeaderPersonId as Id<"persons">,
+  });
   const parentCode = parent?.humanLeaderCode;
   if (!parentCode) {
     throw new DomainError(
@@ -227,10 +129,9 @@ async function allocateHumanCode(directLeaderPersonId: string | null, ministryId
     );
   }
 
-  const siblings = await db
-    .select({ humanLeaderCode: personLeadership.humanLeaderCode })
-    .from(personLeadership)
-    .where(eq(personLeadership.directLeaderPersonId, directLeaderPersonId));
+  const siblings = await client.query(api.leadership.listChildrenAny, {
+    directLeaderPersonId: directLeaderPersonId as Id<"persons">,
+  });
 
   let max = 0;
   for (const s of siblings) {
@@ -316,77 +217,43 @@ export async function markPersonEligible(actorUserId: string, raw: unknown) {
     );
   }
 
-  const db = getDb();
   const intendedDirectLeader =
-    input.directLeaderPersonId === undefined
-      ? actor.personId
-      : input.directLeaderPersonId;
+    input.directLeaderPersonId === undefined ? actor.personId : input.directLeaderPersonId;
 
-  if (existing) {
-    const [row] = await db
-      .update(personLeadership)
-      .set({
-        status: "eligible",
-        ministryId: input.ministryId,
-        networkId: input.networkId,
-        directLeaderPersonId: intendedDirectLeader,
-        eligibleAt: new Date(),
-        eligibleByUserId: actorUserId,
-        updatedAt: new Date(),
-      })
-      .where(eq(personLeadership.personId, input.personId))
-      .returning();
-    await writeAuditLog({
-      actorUserId,
-      action: "leader.marked_eligible",
-      entityType: "person_leadership",
-      entityId: row.id,
-      metadata: {
-        personId: input.personId,
-        ministryId: input.ministryId,
-        directLeaderPersonId: intendedDirectLeader,
-      },
-    });
-    return row;
-  }
-
-  const [row] = await db
-    .insert(personLeadership)
-    .values({
-      personId: input.personId,
-      status: "eligible",
-      ministryId: input.ministryId,
-      networkId: input.networkId,
-      directLeaderPersonId: intendedDirectLeader,
-      eligibleAt: new Date(),
-      eligibleByUserId: actorUserId,
+  const client = await getAuthenticatedConvexClient();
+  const row = await client
+    .mutation(api.leadership.markEligible, {
+      personId: input.personId as Id<"persons">,
+      ministryId: input.ministryId as Id<"ministries">,
+      networkId: input.networkId as Id<"networks">,
+      directLeaderPersonId: intendedDirectLeader
+        ? (intendedDirectLeader as Id<"persons">)
+        : undefined,
     })
-    .returning();
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
     action: "leader.marked_eligible",
     entityType: "person_leadership",
-    entityId: row.id,
+    entityId: row._id,
     metadata: {
       personId: input.personId,
       ministryId: input.ministryId,
       directLeaderPersonId: intendedDirectLeader,
     },
   });
-  return row;
+  return { ...row, id: row._id as string };
 }
 
 export async function activateLeader(actorUserId: string, raw: unknown) {
   const actor = await requireActor(actorUserId);
   const input = activateLeaderInputSchema.parse(raw);
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
 
-  const [person] = await db
-    .select()
-    .from(persons)
-    .where(and(eq(persons.id, input.personId), isNull(persons.deletedAt)))
-    .limit(1);
+  const person = await client.query(api.persons.getById, {
+    personId: input.personId as Id<"persons">,
+  });
   if (!person) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Persona no encontrada.");
   }
@@ -413,15 +280,10 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
   const isRoot = Boolean(input.isMinistryRoot);
   const directLeaderPersonId = isRoot
     ? null
-    : (input.directLeaderPersonId ?? leadership.directLeaderPersonId ?? null);
+    : ((input.directLeaderPersonId ?? (leadership.directLeaderPersonId as string | undefined)) ??
+      null);
 
-  await assertCanActivate(
-    actor,
-    input.personId,
-    org.ministryId,
-    directLeaderPersonId,
-    isRoot,
-  );
+  await assertCanActivate(actor, input.personId, org.ministryId, directLeaderPersonId, isRoot);
 
   if (!isRoot) {
     if (!directLeaderPersonId) {
@@ -434,7 +296,7 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
         "El líder directo debe estar activo.",
       );
     }
-    if (parent.ministryId !== org.ministryId) {
+    if ((parent.ministryId as string) !== org.ministryId) {
       throw new DomainError(
         DomainErrorCode.LEADER_DIFFERENT_MINISTRY,
         "El líder directo debe ser del mismo Ministerio.",
@@ -455,174 +317,144 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
   const humanLeaderCode = await allocateHumanCode(directLeaderPersonId, org.ministryId);
   const username = await allocateUsername(person.firstName, person.lastName);
   const email =
-    (input.email && input.email.trim()) ||
-    person.email ||
-    `${username}@multiplica.local`;
+    (input.email && input.email.trim()) || person.email || `${username}@multiplica.local`;
   const temporaryPassword = generateTemporaryPassword();
 
   // Credential provisioning outside DB transaction (Clerk), then DB work.
   let appUserId: string | null = null;
   let clerkUserId: string | null = null;
   let provisionedNew = false;
-  const [existingUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.personId, input.personId))
-    .limit(1);
+  const existingUser = await client.query(api.users.getByPersonId, {
+    personId: input.personId as Id<"persons">,
+  });
 
   try {
-    const client = await clerkClient();
+    const clerk = await clerkClient();
     if (existingUser) {
-      appUserId = existingUser.id;
-      clerkUserId = existingUser.clerkUserId;
-      await db
-        .update(users)
-        .set({
-          username: existingUser.username ?? username,
-          email: existingUser.email || email,
-          displayName: formatFullName(person.firstName, person.lastName),
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, existingUser.id));
-    } else {
-      const created = await client.users.createUser({
-        emailAddress: [email],
-        password: temporaryPassword,
-        skipPasswordChecks: true,
-        skipPasswordRequirement: false,
-        publicMetadata: {
-          mustChangePassword: true,
-          username,
-          personId: input.personId,
-        },
-      });
-      clerkUserId = created.id;
-      provisionedNew = true;
-      const [inserted] = await db
-        .insert(users)
-        .values({
-          clerkUserId,
-          personId: input.personId,
+      appUserId = existingUser._id as string;
+      clerkUserId = existingUser.authSubject;
+      await client
+        .mutation(api.users.provisionLeaderUser, {
+          personId: input.personId as Id<"persons">,
+          authSubject: existingUser.authSubject,
           email,
           username,
           displayName: formatFullName(person.firstName, person.lastName),
-          mustChangePassword: true,
-          isActive: true,
         })
-        .returning({ id: users.id });
-      appUserId = inserted.id;
-    }
-
-    const [leaderRole] = await db.select().from(roles).where(eq(roles.code, "leader")).limit(1);
-    if (leaderRole && appUserId) {
-      const [existingAssign] = await db
-        .select()
-        .from(userRoleAssignments)
-        .where(
-          and(
-            eq(userRoleAssignments.userId, appUserId),
-            eq(userRoleAssignments.roleId, leaderRole.id),
-            isNull(userRoleAssignments.endsAt),
-          ),
-        )
-        .limit(1);
-      if (!existingAssign) {
-        await db.insert(userRoleAssignments).values({
-          userId: appUserId,
-          roleId: leaderRole.id,
-          ministryId: org.ministryId,
-          networkId: org.networkId,
-          createdByUserId: actorUserId,
+        .catch(mapConvexError);
+    } else {
+      const existingByEmail = await clerk.users.getUserList({
+        emailAddress: [email],
+        limit: 1,
+      });
+      const already = existingByEmail.data[0];
+      if (already) {
+        clerkUserId = already.id;
+        provisionedNew = false;
+      } else {
+        const created = await clerk.users.createUser({
+          emailAddress: [email],
+          password: temporaryPassword,
+          skipPasswordChecks: true,
+          skipPasswordRequirement: false,
+          publicMetadata: {
+            mustChangePassword: true,
+            username,
+            personId: input.personId,
+          },
         });
+        clerkUserId = created.id;
+        provisionedNew = true;
       }
+      const inserted = await client
+        .mutation(api.users.provisionLeaderUser, {
+          personId: input.personId as Id<"persons">,
+          authSubject: clerkUserId,
+          email,
+          username,
+          displayName: formatFullName(person.firstName, person.lastName),
+        })
+        .catch(mapConvexError);
+      appUserId = inserted._id as string;
     }
 
-    const result = await db.transaction(async (tx) => {
-      const [cell] = await tx
-        .insert(cells)
-        .values({
-          name: input.cell.name.trim(),
-          type: "evangelistic",
-          ministryId: org.ministryId!,
-          networkId: org.networkId!,
-          responsiblePersonId: input.personId,
-          responsibleUserId: appUserId,
-          dayOfWeek: input.cell.dayOfWeek,
-          startTime: input.cell.startTime,
-          timezone: "America/Lima",
-          address: input.cell.address?.trim() || null,
-          districtId:
-            input.cell.districtId && input.cell.districtId !== ""
-              ? input.cell.districtId
-              : null,
-          status: "active",
+    const roleContext = await client.query(api.authz.loadContext, {
+      userId: appUserId as Id<"users">,
+    });
+    if (!roleContext.roleCodes.includes("leader")) {
+      await client
+        .mutation(api.authz.assignRole, {
+          userId: appUserId as Id<"users">,
+          roleCode: "leader",
+          ministryId: org.ministryId as Id<"ministries">,
+          networkId: org.networkId as Id<"networks">,
         })
-        .returning();
+        .catch(mapConvexError);
+    }
 
-      const [updated] = await tx
-        .update(personLeadership)
-        .set({
-          status: "active",
-          ministryId: org.ministryId!,
-          networkId: org.networkId!,
-          directLeaderPersonId,
-          primaryCellId: cell.id,
-          humanLeaderCode,
-          isMinistryRoot: isRoot,
-          activatedAt: new Date(),
-          activatedByUserId: actorUserId,
-          updatedAt: new Date(),
-        })
-        .where(eq(personLeadership.personId, input.personId))
-        .returning();
+    const cell = await client
+      .mutation(api.cells.create, {
+        name: input.cell.name.trim(),
+        type: "evangelistic",
+        ministryId: org.ministryId as Id<"ministries">,
+        networkId: org.networkId as Id<"networks">,
+        responsiblePersonId: input.personId as Id<"persons">,
+        responsibleUserId: appUserId as Id<"users">,
+        dayOfWeek: input.cell.dayOfWeek,
+        startTime: input.cell.startTime,
+        timezone: "America/Lima",
+        address: input.cell.address?.trim() || undefined,
+        districtId:
+          input.cell.districtId && input.cell.districtId !== ""
+            ? (input.cell.districtId as Id<"districts">)
+            : undefined,
+      })
+      .catch(mapConvexError);
 
-      // If direct leader already has a Célula de 12 with capacity, add twelve_team membership
-      if (directLeaderPersonId) {
-        const [twelveCell] = await tx
-          .select()
-          .from(cells)
-          .where(
-            and(
-              eq(cells.responsiblePersonId, directLeaderPersonId),
-              eq(cells.type, "twelve"),
-              eq(cells.status, "active"),
-            ),
-          )
-          .limit(1);
-        if (twelveCell) {
-          const [{ c }] = await tx
-            .select({ c: count() })
-            .from(cellMemberships)
-            .where(
-              and(
-                eq(cellMemberships.cellId, twelveCell.id),
-                eq(cellMemberships.status, "active"),
-              ),
-            );
-          if (Number(c) < MAX_DIRECT_LEADERS) {
-            await tx.insert(cellMemberships).values({
-              cellId: twelveCell.id,
-              personId: input.personId,
-              status: "active",
+    const updatedLeadership = await client
+      .mutation(api.leadership.activate, {
+        personId: input.personId as Id<"persons">,
+        directLeaderPersonId: directLeaderPersonId
+          ? (directLeaderPersonId as Id<"persons">)
+          : undefined,
+        primaryCellId: cell._id,
+        isMinistryRoot: isRoot,
+        humanLeaderCode,
+      })
+      .catch(mapConvexError);
+
+    // If direct leader already has a Célula de 12 with capacity, add twelve_team membership
+    if (directLeaderPersonId) {
+      const responsibleCells = await client.query(api.cells.listByResponsible, {
+        responsiblePersonId: directLeaderPersonId as Id<"persons">,
+      });
+      const twelveCell = responsibleCells.find(
+        (c) => c.type === "twelve" && c.status === "active",
+      );
+      if (twelveCell) {
+        const [{ count: activeCount }] = await client.query(api.cells.countActiveMembers, {
+          cellIds: [twelveCell._id],
+        });
+        if ((activeCount ?? 0) < MAX_DIRECT_LEADERS) {
+          await client
+            .mutation(api.cells.addMember, {
+              cellId: twelveCell._id,
+              personId: input.personId as Id<"persons">,
               role: "twelve_team",
-            });
-          }
+            })
+            .catch(mapConvexError);
         }
       }
-
-      return { cell, leadership: updated };
-    });
-
-    await rebuildClosureForPerson(input.personId, directLeaderPersonId, org.ministryId);
+    }
 
     await writeAuditLog({
       actorUserId,
       action: "leader.activated",
       entityType: "person_leadership",
-      entityId: result.leadership.id,
+      entityId: updatedLeadership._id,
       metadata: {
         personId: input.personId,
-        cellId: result.cell.id,
+        cellId: cell._id,
         directLeaderPersonId,
         humanLeaderCode,
         username,
@@ -651,8 +483,8 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
     });
 
     return {
-      leadership: result.leadership,
-      cell: result.cell,
+      leadership: { ...updatedLeadership, id: updatedLeadership._id as string },
+      cell: { ...cell, id: cell._id as string },
       username,
       email,
       temporaryPassword: provisionedNew ? temporaryPassword : null,
@@ -661,9 +493,9 @@ export async function activateLeader(actorUserId: string, raw: unknown) {
   } catch (error) {
     if (provisionedNew && clerkUserId && appUserId) {
       try {
-        const client = await clerkClient();
-        await client.users.deleteUser(clerkUserId);
-        await db.delete(users).where(eq(users.id, appUserId));
+        const clerk = await clerkClient();
+        await clerk.users.deleteUser(clerkUserId);
+        await client.mutation(api.users.remove, { userId: appUserId as Id<"users"> });
       } catch {
         // best-effort rollback of Clerk user
       }
@@ -684,54 +516,44 @@ export async function deactivateLeader(actorUserId: string, personId: string) {
   }
   assertCanMutate(actor, "leaders.deactivate", {
     type: "leader",
-    ministryId: leadership.ministryId,
+    ministryId: leadership.ministryId as string,
     personId,
   });
 
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   const directCount = await countDirectActiveLeaders(personId);
-  const [{ cellsCount }] = await db
-    .select({ cellsCount: count() })
-    .from(cells)
-    .where(
-      and(
-        eq(cells.responsiblePersonId, personId),
-        sql`${cells.status} <> 'closed'`,
-      ),
-    );
+  const ownCells = await client.query(api.cells.listByResponsible, {
+    responsiblePersonId: personId as Id<"persons">,
+  });
+  const cellsCount = ownCells.filter((c) => c.status !== "closed").length;
 
-  if (directCount > 0 || Number(cellsCount) > 0) {
+  if (directCount > 0 || cellsCount > 0) {
     throw new DomainError(
       DomainErrorCode.LEADER_HAS_ACTIVE_STRUCTURE,
       "No se puede desactivar: hay células o líderes directos. Use un plan de desactivación en /transferencias (leader_deactivation).",
       {
         directCount,
-        cellsCount: Number(cellsCount),
+        cellsCount,
         requiresDeactivationPlan: true,
         transferType: "leader_deactivation",
       },
     );
   }
 
-  const [row] = await db
-    .update(personLeadership)
-    .set({
-      status: "inactive",
-      deactivatedAt: new Date(),
-      deactivatedByUserId: actorUserId,
-      updatedAt: new Date(),
+  const row = await client
+    .mutation(api.leadership.deactivate, {
+      personId: personId as Id<"persons">,
     })
-    .where(eq(personLeadership.personId, personId))
-    .returning();
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
     action: "leader.deactivated",
     entityType: "person_leadership",
-    entityId: row.id,
+    entityId: row._id,
     metadata: { personId },
   });
-  return row;
+  return { ...row, id: row._id as string };
 }
 
 export async function getTwelveProgress(leaderPersonId: string) {
@@ -750,34 +572,24 @@ export async function listDirectLeaders(actorUserId: string, leaderPersonId: str
   if (!leadership) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Liderazgo no encontrado.");
   }
-  await assertTreeAccess(actor, leaderPersonId, leadership.ministryId);
+  await assertTreeAccess(actor, leaderPersonId, leadership.ministryId as string);
   assertCanMutate(actor, "leaders.read", {
     type: "leader",
-    ministryId: leadership.ministryId,
+    ministryId: leadership.ministryId as string,
   });
 
-  const db = getDb();
-  const rows = await db
-    .select({
-      personId: personLeadership.personId,
-      humanLeaderCode: personLeadership.humanLeaderCode,
-      status: personLeadership.status,
-      primaryCellId: personLeadership.primaryCellId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personLeadership)
-    .innerJoin(persons, eq(persons.id, personLeadership.personId))
-    .where(
-      and(
-        eq(personLeadership.directLeaderPersonId, leaderPersonId),
-        eq(personLeadership.status, "active"),
-      ),
-    )
-    .orderBy(asc(personLeadership.humanLeaderCode));
+  const client = await getAuthenticatedConvexClient();
+  const rows = await client.query(api.leadership.listDirectLeaders, {
+    leaderPersonId: leaderPersonId as Id<"persons">,
+  });
 
   return rows.map((r) => ({
-    ...r,
+    personId: r.personId as string,
+    humanLeaderCode: r.humanLeaderCode ?? null,
+    status: r.status,
+    primaryCellId: (r.primaryCellId as string | undefined) ?? null,
+    firstName: r.firstName,
+    lastName: r.lastName,
     fullName: formatFullName(r.firstName, r.lastName),
   }));
 }
@@ -792,77 +604,60 @@ export async function getLeaderDashboard(actorUserId: string, focusPersonId?: st
     );
   }
 
-  const leadership = await getLeadership(personId);
-  if (!leadership) {
+  const client = await getAuthenticatedConvexClient();
+  const dashboard = await client.query(api.leadership.getDashboard, {
+    personId: personId as Id<"persons">,
+  });
+  if (!dashboard) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Sin registro de liderazgo.");
   }
-  await assertTreeAccess(actor, personId, leadership.ministryId);
+  const leadership = dashboard.leadership;
+  await assertTreeAccess(actor, personId, leadership.ministryId as string);
 
-  const db = getDb();
-  const ownCells = await db
-    .select()
-    .from(cells)
-    .where(
-      and(eq(cells.responsiblePersonId, personId), sql`${cells.status} <> 'closed'`),
-    );
-  const progress = await getTwelveProgress(personId);
-  const directs = await listDirectLeaders(actorUserId, personId);
+  const [ownCellsRaw, person, ministry, networks, eligiblePendingRaw, directs] =
+    await Promise.all([
+      client.query(api.cells.listByResponsible, {
+        responsiblePersonId: personId as Id<"persons">,
+      }),
+      client.query(api.persons.getById, { personId: personId as Id<"persons"> }),
+      client.query(api.organization.getMinistry, { ministryId: leadership.ministryId }),
+      client.query(api.organization.listNetworks, {}),
+      client.query(api.leadership.listEligibleChildren, {
+        directLeaderPersonId: personId as Id<"persons">,
+      }),
+      listDirectLeaders(actorUserId, personId),
+    ]);
 
-  const [{ descendants }] = await db
-    .select({ descendants: count() })
-    .from(leadershipClosure)
-    .where(
-      and(
-        eq(leadershipClosure.ancestorPersonId, personId),
-        gt(leadershipClosure.depth, 0),
-      ),
-    );
+  const ownCells = ownCellsRaw
+    .filter((c) => c.status !== "closed")
+    .map((c) => ({ ...c, id: c._id as string }));
+  const network = networks.find((n) => n._id === leadership.networkId) ?? null;
 
-  const [person] = await db.select().from(persons).where(eq(persons.id, personId)).limit(1);
-  const [ministry] = await db
-    .select()
-    .from(ministries)
-    .where(eq(ministries.id, leadership.ministryId))
-    .limit(1);
-  const [network] = await db
-    .select()
-    .from(networks)
-    .where(eq(networks.id, leadership.networkId))
-    .limit(1);
-
-  const eligiblePending = await db
-    .select({
-      personId: personLeadership.personId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personLeadership)
-    .innerJoin(persons, eq(persons.id, personLeadership.personId))
-    .where(
-      and(
-        eq(personLeadership.ministryId, leadership.ministryId),
-        eq(personLeadership.status, "eligible"),
-        eq(personLeadership.directLeaderPersonId, personId),
-      ),
-    )
-    .limit(20);
+  const progress = {
+    current: dashboard.directLeaderCount,
+    max: dashboard.directLeaderCapacity,
+    ready: dashboard.readyForTwelve,
+    label: `${dashboard.directLeaderCount} / ${dashboard.directLeaderCapacity} líderes`,
+  };
 
   return {
     person: person
-      ? { ...person, fullName: formatFullName(person.firstName, person.lastName) }
+      ? { ...person, id: person._id as string, fullName: formatFullName(person.firstName, person.lastName) }
       : null,
-    leadership,
+    leadership: { ...leadership, id: leadership._id as string },
     ministry,
     network,
     cells: ownCells,
     progress,
     directLeaders: directs,
-    descendantLeaders: Number(descendants),
-    eligiblePending: eligiblePending.map((e) => ({
-      ...e,
+    descendantLeaders: dashboard.descendantCount,
+    eligiblePending: eligiblePendingRaw.map((e) => ({
+      personId: e.personId as string,
+      firstName: e.firstName,
+      lastName: e.lastName,
       fullName: formatFullName(e.firstName, e.lastName),
     })),
-    readyForTwelve: progress.ready,
+    readyForTwelve: dashboard.readyForTwelve,
   };
 }
 
@@ -870,33 +665,17 @@ export async function getBreadcrumbs(actorUserId: string, personId: string) {
   const actor = await requireActor(actorUserId);
   const leadership = await getLeadership(personId);
   if (!leadership) return [];
-  await assertTreeAccess(actor, personId, leadership.ministryId);
+  await assertTreeAccess(actor, personId, leadership.ministryId as string);
 
-  const db = getDb();
-  const ancestors = await db
-    .select({
-      personId: leadershipClosure.ancestorPersonId,
-      depth: leadershipClosure.depth,
-      humanLeaderCode: personLeadership.humanLeaderCode,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(leadershipClosure)
-    .innerJoin(persons, eq(persons.id, leadershipClosure.ancestorPersonId))
-    .leftJoin(
-      personLeadership,
-      eq(personLeadership.personId, leadershipClosure.ancestorPersonId),
-    )
-    .where(eq(leadershipClosure.descendantPersonId, personId))
-    .orderBy(asc(leadershipClosure.depth));
+  const client = await getAuthenticatedConvexClient();
+  const ancestors = await client.query(api.leadership.listAncestors, {
+    personId: personId as Id<"persons">,
+  });
 
-  // ancestors query returns depth from ancestor to person; we need path root→leaf
-  // Actually closure stores ancestor→descendant depth. For person P, rows are (A,P,d).
-  // Sort by depth DESC to get root first? depth 0 is self. Depth max is root.
   const sorted = [...ancestors].sort((a, b) => b.depth - a.depth);
   return sorted.map((a) => ({
-    personId: a.personId,
-    humanLeaderCode: a.humanLeaderCode,
+    personId: a.personId as string,
+    humanLeaderCode: a.humanLeaderCode ?? null,
     fullName: formatFullName(a.firstName, a.lastName),
     depthFromSelf: a.depth,
   }));
@@ -907,13 +686,9 @@ export async function countsAsTwelveLeader(personId: string): Promise<boolean> {
   if (!leadership || leadership.status !== "active" || !leadership.primaryCellId) {
     return false;
   }
-  const db = getDb();
-  const [cell] = await db
-    .select()
-    .from(cells)
-    .where(and(eq(cells.id, leadership.primaryCellId), eq(cells.status, "active")))
-    .limit(1);
-  return Boolean(cell);
+  const client = await getAuthenticatedConvexClient();
+  const cell = await client.query(api.cells.getById, { cellId: leadership.primaryCellId });
+  return Boolean(cell && cell.status === "active");
 }
 
 export async function convertEvangelisticCellToTwelve(
@@ -922,24 +697,25 @@ export async function convertEvangelisticCellToTwelve(
 ) {
   const actor = await requireActor(actorUserId);
   const input = convertTwelveInputSchema.parse(raw);
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
 
-  const [cell] = await db.select().from(cells).where(eq(cells.id, input.cellId)).limit(1);
+  const cell = await client.query(api.cells.getById, { cellId: input.cellId as Id<"cells"> });
   if (!cell || cell.type !== "evangelistic" || cell.status !== "active") {
     throw new DomainError(DomainErrorCode.CELL_NOT_FOUND, "Célula evangelística no encontrada.");
   }
   if (!cell.responsiblePersonId) {
     throw new DomainError(DomainErrorCode.LEADER_REQUIRES_CELL, "La célula no tiene responsable.");
   }
+  const responsiblePersonId = cell.responsiblePersonId;
 
   assertCanMutate(actor, "g12.convert_twelve", {
     type: "cell",
-    id: cell.id,
-    ministryId: cell.ministryId,
+    id: cell._id as string,
+    ministryId: cell.ministryId as string,
   });
-  await assertTreeAccess(actor, cell.responsiblePersonId, cell.ministryId);
+  await assertTreeAccess(actor, responsiblePersonId as string, cell.ministryId as string);
 
-  const progress = await getTwelveProgress(cell.responsiblePersonId);
+  const progress = await getTwelveProgress(responsiblePersonId as string);
   if (!progress.ready) {
     throw new DomainError(
       DomainErrorCode.TWELVE_REQUIRES_12_ACTIVE_LEADERS,
@@ -947,31 +723,22 @@ export async function convertEvangelisticCellToTwelve(
     );
   }
 
-  const activeMembers = await db
-    .select()
-    .from(cellMemberships)
-    .where(and(eq(cellMemberships.cellId, cell.id), eq(cellMemberships.status, "active")));
+  const detail = await client.query(api.cells.getDetail, { cellId: cell._id });
+  const activeMembers = detail ? detail.members.filter((m) => m.status === "active") : [];
 
   const ordinary: typeof activeMembers = [];
   const leaders: typeof activeMembers = [];
   for (const m of activeMembers) {
-    if (await countsAsTwelveLeader(m.personId)) {
+    if (await countsAsTwelveLeader(m.personId as string)) {
       leaders.push(m);
     } else {
       ordinary.push(m);
     }
   }
 
-  // Direct leaders of responsible should be the twelve team
-  const directLeaders = await db
-    .select()
-    .from(personLeadership)
-    .where(
-      and(
-        eq(personLeadership.directLeaderPersonId, cell.responsiblePersonId),
-        eq(personLeadership.status, "active"),
-      ),
-    );
+  const directLeaders = await client.query(api.leadership.listDirectLeaders, {
+    leaderPersonId: responsiblePersonId,
+  });
 
   if (directLeaders.length < MAX_DIRECT_LEADERS) {
     throw new DomainError(
@@ -981,7 +748,7 @@ export async function convertEvangelisticCellToTwelve(
   }
 
   const unresolvedOrdinary = ordinary.filter(
-    (m) => !input.ordinaryMemberPersonIds.includes(m.personId),
+    (m) => !input.ordinaryMemberPersonIds.includes(m.personId as string),
   );
   if (unresolvedOrdinary.length > 0 && input.ordinaryMemberPersonIds.length === 0) {
     throw new DomainError(
@@ -991,166 +758,130 @@ export async function convertEvangelisticCellToTwelve(
     );
   }
 
-  // Ensure leader doesn't already have a twelve cell
-  const existingCells = await db
-    .select()
-    .from(cells)
-    .where(
-      and(
-        eq(cells.responsiblePersonId, cell.responsiblePersonId),
-        sql`${cells.status} <> 'closed'`,
-      ),
-    );
-  if (existingCells.some((c) => c.type === "twelve")) {
+  const existingCells = await client.query(api.cells.listByResponsible, {
+    responsiblePersonId,
+  });
+  if (existingCells.some((c) => c.type === "twelve" && c.status !== "closed")) {
     throw new DomainError(
       DomainErrorCode.MAX_DIRECT_CELLS_REACHED,
       "El líder ya tiene una Célula de 12.",
     );
   }
 
-  const result = await db.transaction(async (tx) => {
-    // Convert this cell to twelve
-    const [twelve] = await tx
-      .update(cells)
-      .set({ type: "twelve", updatedAt: new Date() })
-      .where(eq(cells.id, cell.id))
-      .returning();
+  const twelve = await client
+    .mutation(api.cells.convertToTwelve, { cellId: cell._id })
+    .catch(mapConvexError);
 
-    // Move ordinary members to a (new or existing) evangelistic cell
-    let evangelistic = existingCells.find(
-      (c) => c.type === "evangelistic" && c.id !== cell.id && c.status === "active",
-    );
-    if (ordinary.length > 0 || input.ordinaryMemberPersonIds.length > 0) {
-      if (!evangelistic) {
-        if (existingCells.filter((c) => c.status !== "closed").length >= 2) {
-          throw new DomainError(
-            DomainErrorCode.MAX_DIRECT_CELLS_REACHED,
-            "No se puede abrir otra evangelística: máximo 2 células.",
-          );
-        }
-        const [created] = await tx
-          .insert(cells)
-          .values({
-            name:
-              input.evangelisticCellName?.trim() ||
-              `${cell.name} — Evangelística`,
-            type: "evangelistic",
-            ministryId: cell.ministryId,
-            networkId: cell.networkId,
-            responsiblePersonId: cell.responsiblePersonId,
-            dayOfWeek: cell.dayOfWeek,
-            startTime: cell.startTime,
-            timezone: cell.timezone,
-            status: "active",
-          })
-          .returning();
-        evangelistic = created;
-      }
+  let evangelistic =
+    existingCells.find(
+      (c) => c.type === "evangelistic" && c._id !== cell._id && c.status === "active",
+    ) ?? null;
 
-      const moveIds =
-        input.ordinaryMemberPersonIds.length > 0
-          ? input.ordinaryMemberPersonIds
-          : ordinary.map((o) => o.personId);
-
-      for (const personId of moveIds) {
-        const membership = activeMembers.find((m) => m.personId === personId);
-        if (!membership) continue;
-        await tx
-          .update(cellMemberships)
-          .set({
-            status: "transferred",
-            leftAt: new Date(),
-            leaveReason: "Conversión a Célula de 12",
-            updatedAt: new Date(),
-          })
-          .where(eq(cellMemberships.id, membership.id));
-        await tx.insert(cellMemberships).values({
-          cellId: evangelistic.id,
-          personId,
-          status: "active",
-          role: "member",
-        });
-      }
-    }
-
-    // Ensure twelve_team memberships for each direct leader
-    for (const leader of directLeaders) {
-      const [existing] = await tx
-        .select()
-        .from(cellMemberships)
-        .where(
-          and(
-            eq(cellMemberships.cellId, twelve.id),
-            eq(cellMemberships.personId, leader.personId),
-            eq(cellMemberships.status, "active"),
-          ),
-        )
-        .limit(1);
-      if (!existing) {
-        await tx.insert(cellMemberships).values({
-          cellId: twelve.id,
-          personId: leader.personId,
-          status: "active",
-          role: "twelve_team",
-        });
-      } else if (existing.role !== "twelve_team") {
-        await tx
-          .update(cellMemberships)
-          .set({ role: "twelve_team", updatedAt: new Date() })
-          .where(eq(cellMemberships.id, existing.id));
-      }
-    }
-
-    // Reject any remaining non-leader active memberships
-    const remaining = await tx
-      .select()
-      .from(cellMemberships)
-      .where(and(eq(cellMemberships.cellId, twelve.id), eq(cellMemberships.status, "active")));
-    for (const m of remaining) {
-      if (m.role === "twelve_team") continue;
-      const ok = await countsAsTwelveLeader(m.personId);
-      if (!ok) {
+  if (ordinary.length > 0 || input.ordinaryMemberPersonIds.length > 0) {
+    if (!evangelistic) {
+      if (existingCells.filter((c) => c.status !== "closed").length >= 2) {
         throw new DomainError(
-          DomainErrorCode.TWELVE_MEMBER_NOT_ACTIVE_LEADER,
-          "La Célula de 12 solo admite líderes activos.",
-          { personId: m.personId },
+          DomainErrorCode.MAX_DIRECT_CELLS_REACHED,
+          "No se puede abrir otra evangelística: máximo 2 células.",
         );
       }
+      evangelistic = await client
+        .mutation(api.cells.create, {
+          name: input.evangelisticCellName?.trim() || `${cell.name} — Evangelística`,
+          type: "evangelistic",
+          ministryId: cell.ministryId,
+          networkId: cell.networkId,
+          responsiblePersonId,
+          dayOfWeek: cell.dayOfWeek,
+          startTime: cell.startTime,
+          timezone: cell.timezone,
+        })
+        .catch(mapConvexError);
     }
 
-    return { twelve, evangelistic: evangelistic ?? null };
-  });
+    const moveIds =
+      input.ordinaryMemberPersonIds.length > 0
+        ? input.ordinaryMemberPersonIds
+        : ordinary.map((o) => o.personId as string);
+
+    for (const personId of moveIds) {
+      const membership = activeMembers.find((m) => (m.personId as string) === personId);
+      if (!membership) continue;
+      await client
+        .mutation(api.cells.reassignMember, {
+          membershipId: membership.membershipId,
+          targetCellId: evangelistic._id,
+          reason: "Conversión a Célula de 12",
+        })
+        .catch(mapConvexError);
+    }
+  }
+
+  const twelveDetail = await client.query(api.cells.getDetail, { cellId: twelve._id });
+  const twelveActiveByPerson = new Map(
+    (twelveDetail?.members ?? [])
+      .filter((m) => m.status === "active")
+      .map((m) => [m.personId as string, m]),
+  );
+
+  for (const leader of directLeaders) {
+    const existing = twelveActiveByPerson.get(leader.personId as string);
+    if (!existing) {
+      await client
+        .mutation(api.cells.addMember, {
+          cellId: twelve._id,
+          personId: leader.personId,
+          role: "twelve_team",
+        })
+        .catch(mapConvexError);
+    } else if (existing.role !== "twelve_team") {
+      await client
+        .mutation(api.cells.setMembershipRole, {
+          membershipId: existing.membershipId,
+          role: "twelve_team",
+        })
+        .catch(mapConvexError);
+    }
+  }
+
+  const finalDetail = await client.query(api.cells.getDetail, { cellId: twelve._id });
+  const remaining = (finalDetail?.members ?? []).filter((m) => m.status === "active");
+  for (const m of remaining) {
+    if (m.role === "twelve_team") continue;
+    const ok = await countsAsTwelveLeader(m.personId as string);
+    if (!ok) {
+      throw new DomainError(
+        DomainErrorCode.TWELVE_MEMBER_NOT_ACTIVE_LEADER,
+        "La Célula de 12 solo admite líderes activos.",
+        { personId: m.personId },
+      );
+    }
+  }
 
   await writeAuditLog({
     actorUserId,
     action: "g12.twelve_converted",
     entityType: "cell",
-    entityId: result.twelve.id,
+    entityId: twelve._id,
     metadata: {
-      responsiblePersonId: cell.responsiblePersonId,
-      evangelisticCellId: result.evangelistic?.id ?? null,
+      responsiblePersonId,
+      evangelisticCellId: evangelistic?._id ?? null,
       leaderCount: directLeaders.length,
     },
   });
 
-  return result;
+  return {
+    twelve: { ...twelve, id: twelve._id as string },
+    evangelistic: evangelistic ? { ...evangelistic, id: evangelistic._id as string } : null,
+  };
 }
 
 export async function listDescendantLeaderIds(ancestorPersonId: string) {
-  const db = getDb();
-  const rows = await db
-    .select({
-      personId: leadershipClosure.descendantPersonId,
-      depth: leadershipClosure.depth,
-    })
-    .from(leadershipClosure)
-    .where(
-      and(
-        eq(leadershipClosure.ancestorPersonId, ancestorPersonId),
-        gt(leadershipClosure.depth, 0),
-      ),
-    );
-  return rows;
+  const client = await getAuthenticatedConvexClient();
+  const rows = await client.query(api.leadership.listDescendants, {
+    ancestorPersonId: ancestorPersonId as Id<"persons">,
+  });
+  return rows.map((r) => ({ personId: r.personId as string, depth: r.depth }));
 }
 
 /** Pure helpers exported for unit tests */

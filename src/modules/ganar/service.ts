@@ -1,15 +1,7 @@
-import { and, asc, count, desc, eq, gte, ilike, isNull, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 
-import { getDb } from "@/db/client";
-import {
-  districts,
-  ministries,
-  networks,
-  personIntakeEvents,
-  personOrganizationHistory,
-  persons,
-} from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { mapConvexError } from "@/lib/convex-errors";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
 import {
@@ -21,6 +13,7 @@ import {
   type AuthContext,
   type NetworkCode,
 } from "@/modules/authorization";
+import { api, getAuthenticatedConvexClient, getPublicConvexClient } from "@/server/convex";
 
 import {
   formatFullName,
@@ -54,9 +47,19 @@ async function requireActor(userId: string): Promise<AuthContext> {
   return loadAuthContext(userId);
 }
 
+async function listNetworks() {
+  const client = await getAuthenticatedConvexClient();
+  return client.query(api.organization.listNetworks, {});
+}
+
+async function listMinistries() {
+  const client = await getAuthenticatedConvexClient();
+  return client.query(api.organization.listMinistries, {});
+}
+
 async function loadNetwork(networkId: string) {
-  const db = getDb();
-  const [row] = await db.select().from(networks).where(eq(networks.id, networkId)).limit(1);
+  const networks = await listNetworks();
+  const row = networks.find((n) => (n._id as string) === networkId);
   if (!row) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Red no encontrada.");
   }
@@ -64,12 +67,10 @@ async function loadNetwork(networkId: string) {
 }
 
 async function loadMinistry(ministryId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(ministries)
-    .where(eq(ministries.id, ministryId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const row = await client.query(api.organization.getMinistry, {
+    ministryId: ministryId as Id<"ministries">,
+  });
   if (!row || !row.isActive) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ministerio no disponible.");
   }
@@ -77,37 +78,35 @@ async function loadMinistry(ministryId: string) {
 }
 
 async function dbNetworksForActor(actor: AuthContext) {
-  const db = getDb();
   if (actor.networkIds.length === 0) {
     return [] as { id: string; code: string }[];
   }
-  return db
-    .select({ id: networks.id, code: networks.code })
-    .from(networks)
-    .where(sql`${networks.id} in (${sql.join(
-      actor.networkIds.map((id) => sql`${id}::uuid`),
-      sql`, `,
-    )})`);
+  const networks = await listNetworks();
+  return networks
+    .filter((n) => actor.networkIds.includes(n._id as string))
+    .map((n) => ({ id: n._id as string, code: n.code as string }));
 }
 
 async function currentOrg(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-      effectiveFrom: personOrganizationHistory.effectiveFrom,
-    })
-    .from(personOrganizationHistory)
-    .where(
-      and(
-        eq(personOrganizationHistory.personId, personId),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .orderBy(desc(personOrganizationHistory.effectiveFrom))
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const org = await client.query(api.persons.getCurrentOrg, {
+    personId: personId as Id<"persons">,
+  });
+  if (!org) return null;
+  return {
+    ministryId: (org.ministryId as string | undefined) ?? null,
+    networkId: (org.networkId as string | undefined) ?? null,
+    effectiveFrom: new Date(org.effectiveFrom),
+  };
+}
+
+async function assertDistrictActive(districtId: string) {
+  const client = await getAuthenticatedConvexClient();
+  const districts = await client.query(api.foundation.listActiveDistricts, {});
+  const found = districts.some((d) => (d._id as string) === districtId);
+  if (!found) {
+    throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "Distrito no disponible.");
+  }
 }
 
 export async function findDuplicateCandidates(params: {
@@ -116,33 +115,18 @@ export async function findDuplicateCandidates(params: {
   lastName: string;
   ministryScopeIds?: string[] | null;
 }): Promise<DuplicateMatch[]> {
-  const db = getDb();
   const phoneNormalized = normalizePhone(params.phone);
   if (!phoneNormalized) return [];
 
-  const rows = await db
-    .select({
-      id: persons.id,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-      phone: persons.phone,
-      phoneNormalized: persons.phoneNormalized,
-    })
-    .from(persons)
-    .where(
-      and(
-        isNull(persons.deletedAt),
-        or(
-          eq(persons.phoneNormalized, phoneNormalized),
-          sql`right(${persons.phoneNormalized}, 9) = ${phoneNormalized.slice(-9)}`,
-        ),
-      ),
-    )
-    .limit(20);
+  const client = await getAuthenticatedConvexClient();
+  const rows = await client.query(api.persons.findDuplicateCandidates, {
+    phoneNormalized,
+    limit: 20,
+  });
 
   const matches: DuplicateMatch[] = [];
   for (const row of rows) {
-    const org = await currentOrg(row.id);
+    const org = await currentOrg(row._id as string);
     if (
       params.ministryScopeIds &&
       params.ministryScopeIds.length > 0 &&
@@ -152,8 +136,7 @@ export async function findDuplicateCandidates(params: {
       continue;
     }
 
-    const strong = phonesMatchStrong(row.phoneNormalized, phoneNormalized);
-
+    const strong = phonesMatchStrong(row.phoneNormalized ?? null, phoneNormalized);
     const possible =
       !strong &&
       namesLookSimilar(params.firstName, params.lastName, row.firstName, row.lastName);
@@ -161,9 +144,9 @@ export async function findDuplicateCandidates(params: {
     if (strong || possible) {
       matches.push({
         strength: strong ? "strong" : "possible",
-        personId: row.id,
+        personId: row._id as string,
         fullName: formatFullName(row.firstName, row.lastName),
-        phone: row.phone,
+        phone: row.phone ?? null,
         ministryId: org?.ministryId ?? null,
       });
     }
@@ -172,50 +155,6 @@ export async function findDuplicateCandidates(params: {
   return matches.sort((left, right) => {
     if (left.strength === right.strength) return 0;
     return left.strength === "strong" ? -1 : 1;
-  });
-}
-
-async function insertPersonWithOrg(params: {
-  firstName: string;
-  lastName: string;
-  phone: string;
-  phoneNormalized: string | null;
-  address: string;
-  districtId: string;
-  prayerRequest: string | null;
-  email: string | null;
-  ministryId: string;
-  networkId: string;
-  source: "internal_form" | "public_form";
-  actorUserId: string | null;
-}) {
-  const db = getDb();
-  return db.transaction(async (tx) => {
-    const [person] = await tx
-      .insert(persons)
-      .values({
-        firstName: params.firstName,
-        lastName: params.lastName,
-        phone: params.phone,
-        phoneNormalized: params.phoneNormalized,
-        address: params.address,
-        districtId: params.districtId,
-        prayerRequest: params.prayerRequest,
-        email: params.email,
-        source: params.source,
-        isActive: true,
-      })
-      .returning();
-
-    await tx.insert(personOrganizationHistory).values({
-      personId: person.id,
-      ministryId: params.ministryId,
-      networkId: params.networkId,
-      changeReason: params.source === "public_form" ? "ganar.public" : "ganar.internal",
-      createdByUserId: params.actorUserId,
-    });
-
-    return person;
   });
 }
 
@@ -241,22 +180,12 @@ export async function createPersonInternal(
     networkIsActive: network.isActive,
   });
 
-  const actorNetworkCodes = (
-    await dbNetworksForActor(actor)
-  ).map((n) => n.code as NetworkCode);
+  const actorNetworkCodes = (await dbNetworksForActor(actor)).map((n) => n.code as NetworkCode);
   assertActorMayCaptureNetwork(actorNetworkCodes, network.code as NetworkCode);
 
-  const [district] = await getDb()
-    .select({ id: districts.id })
-    .from(districts)
-    .where(and(eq(districts.id, input.districtId), eq(districts.isActive, true)))
-    .limit(1);
-  if (!district) {
-    throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "Distrito no disponible.");
-  }
+  await assertDistrictActive(input.districtId);
 
   const { firstName, lastName } = splitFullName(input.fullName);
-  const phoneNormalized = normalizePhone(input.phone);
   const duplicates = await findDuplicateCandidates({
     phone: input.phone,
     firstName,
@@ -296,26 +225,26 @@ export async function createPersonInternal(
     return { personId: "", duplicates };
   }
 
-  const person = await insertPersonWithOrg({
-    firstName,
-    lastName,
-    phone: input.phone.trim(),
-    phoneNormalized,
-    address: input.address.trim(),
-    districtId: input.districtId,
-    prayerRequest: input.prayerRequest?.trim() || null,
-    email: input.email?.trim() || null,
-    ministryId: input.ministryId,
-    networkId: input.networkId,
-    source: "internal_form",
-    actorUserId,
-  });
+  const client = await getAuthenticatedConvexClient();
+  const person = await client
+    .mutation(api.persons.createInternal, {
+      firstName,
+      lastName,
+      phone: input.phone.trim(),
+      address: input.address.trim(),
+      districtId: input.districtId as Id<"districts">,
+      prayerRequest: input.prayerRequest?.trim() || undefined,
+      email: input.email?.trim() || undefined,
+      ministryId: input.ministryId as Id<"ministries">,
+      networkId: input.networkId as Id<"networks">,
+    })
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
     action: "person.created.internal",
     entityType: "person",
-    entityId: person.id,
+    entityId: person._id,
     afterData: {
       firstName: person.firstName,
       lastName: person.lastName,
@@ -330,7 +259,7 @@ export async function createPersonInternal(
     },
   });
 
-  return { personId: person.id };
+  return { personId: person._id as string };
 }
 
 export async function createPersonPublic(
@@ -340,159 +269,50 @@ export async function createPersonPublic(
   const input = publicGanarInputSchema.parse(raw);
   const ipHash = meta.ip ? hashValue(meta.ip) : null;
   const uaHash = meta.userAgent ? hashValue(meta.userAgent) : null;
-  const db = getDb();
+  const client = getPublicConvexClient();
+
+  const recordEvent = async (outcome: string) => {
+    await client.mutation(api.persons.recordIntakeEvent, {
+      ministryId: input.ministryId as Id<"ministries">,
+      networkId: input.networkId as Id<"networks">,
+      source: "public_form",
+      outcome,
+      ipHash: ipHash ?? undefined,
+      userAgentHash: uaHash ?? undefined,
+    });
+  };
 
   if (ipHash) {
-    const since = new Date(Date.now() - 10 * 60 * 1000);
-    const [{ c }] = await db
-      .select({ c: count() })
-      .from(personIntakeEvents)
-      .where(
-        and(
-          eq(personIntakeEvents.ipHash, ipHash),
-          eq(personIntakeEvents.source, "public_form"),
-          gte(personIntakeEvents.createdAt, since),
-        ),
-      );
-    if (Number(c) >= 10) {
-      await db.insert(personIntakeEvents).values({
-        source: "public_form",
-        outcome: "rate_limited",
-        ipHash,
-        userAgentHash: uaHash,
-        ministryId: input.ministryId,
-        networkId: input.networkId,
-      });
+    const since = Date.now() - 10 * 60 * 1000;
+    const count = await client.query(api.persons.countRecentIntakeEvents, {
+      ipHash,
+      source: "public_form",
+      sinceMs: since,
+    });
+    if (count >= 10) {
+      await recordEvent("rate_limited");
       return { ok: true };
     }
   }
 
-  try {
-    await loadMinistry(input.ministryId);
-  } catch {
-    await db.insert(personIntakeEvents).values({
-      source: "public_form",
-      outcome: "rejected_ministry",
-      ipHash,
-      userAgentHash: uaHash,
-      ministryId: input.ministryId,
-      networkId: input.networkId,
-    });
-    return { ok: true };
-  }
-
-  const network = await loadNetwork(input.networkId);
-  try {
-    assertNetworkAllowedForCapture({
-      networkCode: network.code as NetworkCode,
-      networkIsActive: network.isActive,
-    });
-  } catch {
-    await db.insert(personIntakeEvents).values({
-      source: "public_form",
-      outcome: "rejected_network",
-      ipHash,
-      userAgentHash: uaHash,
-      ministryId: input.ministryId,
-      networkId: input.networkId,
-    });
-    return { ok: true };
-  }
-
-  const [district] = await db
-    .select({ id: districts.id })
-    .from(districts)
-    .where(and(eq(districts.id, input.districtId), eq(districts.isActive, true)))
-    .limit(1);
-  if (!district) {
-    await db.insert(personIntakeEvents).values({
-      source: "public_form",
-      outcome: "rejected_district",
-      ipHash,
-      userAgentHash: uaHash,
-      ministryId: input.ministryId,
-      networkId: input.networkId,
-    });
-    return { ok: true };
-  }
-
   const { firstName, lastName } = splitFullName(input.fullName);
-  const phoneNormalized = normalizePhone(input.phone);
-  const duplicates = await findDuplicateCandidates({
-    phone: input.phone,
-    firstName,
-    lastName,
-    ministryScopeIds: null,
-  });
-  const strong = duplicates.find((d) => d.strength === "strong");
 
-  if (strong) {
-    await writeAuditLog({
-      action: "person.possible_duplicate_detected",
-      entityType: "person",
-      entityId: strong.personId,
-      metadata: {
-        source: "public_form",
-        strength: "strong",
-        ministryId: input.ministryId,
-        networkId: input.networkId,
-        silent: true,
-      },
-    });
-    await db.insert(personIntakeEvents).values({
-      personId: strong.personId,
-      source: "public_form",
-      outcome: "duplicate_silent",
-      ipHash,
-      userAgentHash: uaHash,
-      ministryId: input.ministryId,
-      networkId: input.networkId,
-    });
-    return { ok: true };
-  }
-
-  const person = await insertPersonWithOrg({
-    firstName,
-    lastName,
-    phone: input.phone.trim(),
-    phoneNormalized,
-    address: input.address.trim(),
-    districtId: input.districtId,
-    prayerRequest: input.prayerRequest?.trim() || null,
-    email: null,
-    ministryId: input.ministryId,
-    networkId: input.networkId,
-    source: "public_form",
-    actorUserId: null,
-  });
-
-  await writeAuditLog({
-    action: "person.created.public",
-    entityType: "person",
-    entityId: person.id,
-    afterData: {
-      firstName: person.firstName,
-      lastName: person.lastName,
-      phoneNormalized: person.phoneNormalized,
-      districtId: person.districtId,
-      hasPrayerRequest: Boolean(person.prayerRequest),
-    },
-    metadata: {
-      ministryId: input.ministryId,
-      networkId: input.networkId,
-      source: "public_form",
-    },
-  });
-
-  await db.insert(personIntakeEvents).values({
-    personId: person.id,
-    source: "public_form",
-    outcome: "created",
-    ipHash,
-    userAgentHash: uaHash,
-    ministryId: input.ministryId,
-    networkId: input.networkId,
-  });
+  // Public mutation validates catalogs, dedupes by phone, and never leaks
+  // whether the person already existed.
+  await client
+    .mutation(api.persons.createPublic, {
+      firstName,
+      lastName,
+      phone: input.phone.trim(),
+      address: input.address.trim(),
+      districtId: input.districtId as Id<"districts">,
+      prayerRequest: input.prayerRequest?.trim() || undefined,
+      ministryId: input.ministryId as Id<"ministries">,
+      networkId: input.networkId as Id<"networks">,
+      ipHash: ipHash ?? undefined,
+      userAgentHash: uaHash ?? undefined,
+    })
+    .catch(mapConvexError);
 
   return { ok: true };
 }
@@ -517,6 +337,29 @@ function emptyStats() {
   };
 }
 
+type ActivePersonRow = {
+  _id: Id<"persons">;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  phoneNormalized?: string;
+  email?: string;
+  districtId?: Id<"districts">;
+  prayerRequest?: string;
+  source: "internal_form" | "public_form";
+  registeredAt: number;
+  ministryId: Id<"ministries">;
+  networkId: Id<"networks">;
+};
+
+async function scopedActiveRows(actor: AuthContext): Promise<ActivePersonRow[]> {
+  const client = await getAuthenticatedConvexClient();
+  const rows = await client.query(api.persons.listActiveWithOrg, {});
+  if (isSuperadmin(actor)) return rows;
+  if (actor.ministryIds.length === 0) return [];
+  return rows.filter((r) => actor.ministryIds.includes(r.ministryId as string));
+}
+
 export async function listPersonsForActor(
   actorUserId: string,
   filters: PersonListFilters = {},
@@ -526,201 +369,115 @@ export async function listPersonsForActor(
 
   const page = Math.max(1, filters.page ?? 1);
   const pageSize = Math.min(50, Math.max(1, filters.pageSize ?? 20));
-  const offset = (page - 1) * pageSize;
-  const db = getDb();
-  const conditions = [isNull(persons.deletedAt)];
 
-  if (!isSuperadmin(actor)) {
-    if (actor.ministryIds.length === 0) {
-      return { rows: [], total: 0, page, pageSize, stats: emptyStats() };
-    }
-    conditions.push(
-      sql`${personOrganizationHistory.ministryId} in (${sql.join(
-        actor.ministryIds.map((id) => sql`${id}::uuid`),
-        sql`, `,
-      )})`,
-    );
+  if (filters.ministryId && !canAccessMinistry(actor, filters.ministryId) && !isSuperadmin(actor)) {
+    throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Ministerio fuera de alcance.");
   }
 
+  const scoped = await scopedActiveRows(actor);
+  if (scoped.length === 0 && actor.ministryIds.length === 0 && !isSuperadmin(actor)) {
+    return { rows: [], total: 0, page, pageSize, stats: emptyStats() };
+  }
+
+  let filtered = scoped;
   if (filters.ministryId) {
-    if (!canAccessMinistry(actor, filters.ministryId) && !isSuperadmin(actor)) {
-      throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Ministerio fuera de alcance.");
-    }
-    conditions.push(eq(personOrganizationHistory.ministryId, filters.ministryId));
+    filtered = filtered.filter((r) => (r.ministryId as string) === filters.ministryId);
   }
-
   if (filters.networkId) {
-    conditions.push(eq(personOrganizationHistory.networkId, filters.networkId));
+    filtered = filtered.filter((r) => (r.networkId as string) === filters.networkId);
   }
-
   if (filters.districtId) {
-    conditions.push(eq(persons.districtId, filters.districtId));
+    filtered = filtered.filter((r) => (r.districtId as string | undefined) === filters.districtId);
   }
   if (filters.from) {
-    conditions.push(gte(persons.registeredAt, new Date(filters.from)));
+    const fromMs = new Date(filters.from).getTime();
+    filtered = filtered.filter((r) => r.registeredAt >= fromMs);
   }
   if (filters.to) {
-    conditions.push(sql`${persons.registeredAt} <= ${new Date(filters.to)}`);
+    const toMs = new Date(filters.to).getTime();
+    filtered = filtered.filter((r) => r.registeredAt <= toMs);
   }
   if (filters.q?.trim()) {
-    const q = `%${filters.q.trim()}%`;
+    const q = filters.q.trim().toLowerCase();
     const qDigits = normalizePhone(filters.q) ?? filters.q.trim();
-    conditions.push(
-      or(
-        ilike(persons.firstName, q),
-        ilike(persons.lastName, q),
-        ilike(persons.phone, q),
-        ilike(persons.phoneNormalized, `%${qDigits}%`),
-        sql`concat(${persons.firstName}, ' ', ${persons.lastName}) ilike ${q}`,
-      )!,
-    );
+    filtered = filtered.filter((r) => {
+      const fullName = `${r.firstName} ${r.lastName}`.toLowerCase();
+      return (
+        r.firstName.toLowerCase().includes(q) ||
+        r.lastName.toLowerCase().includes(q) ||
+        fullName.includes(q) ||
+        (r.phone ?? "").toLowerCase().includes(q) ||
+        (r.phoneNormalized ?? "").includes(qDigits)
+      );
+    });
   }
 
-  const whereExpr = and(...conditions);
+  filtered = [...filtered].sort((a, b) => b.registeredAt - a.registeredAt);
+  const total = filtered.length;
+  const offset = (page - 1) * pageSize;
+  const pageRows = filtered.slice(offset, offset + pageSize);
 
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(persons)
-    .innerJoin(
-      personOrganizationHistory,
-      and(
-        eq(personOrganizationHistory.personId, persons.id),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .where(whereExpr);
+  const [{ ministryById, networkById }] = await Promise.all([getMinistryNetworkMaps()]);
+  const client = await getAuthenticatedConvexClient();
+  const districts = await client.query(api.foundation.listActiveDistricts, {});
+  const districtById = Object.fromEntries(districts.map((d) => [d._id as string, d]));
 
-  const rows = await db
-    .select({
-      id: persons.id,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-      phone: persons.phone,
-      districtId: persons.districtId,
-      hasPrayerRequest: sql<boolean>`(${persons.prayerRequest} is not null and length(trim(${persons.prayerRequest})) > 0)`,
-      registeredAt: persons.registeredAt,
-      source: persons.source,
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-      ministryName: ministries.name,
-      networkName: networks.name,
-      districtName: districts.name,
-    })
-    .from(persons)
-    .innerJoin(
-      personOrganizationHistory,
-      and(
-        eq(personOrganizationHistory.personId, persons.id),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .innerJoin(ministries, eq(personOrganizationHistory.ministryId, ministries.id))
-    .innerJoin(networks, eq(personOrganizationHistory.networkId, networks.id))
-    .leftJoin(districts, eq(persons.districtId, districts.id))
-    .where(whereExpr)
-    .orderBy(desc(persons.registeredAt))
-    .limit(pageSize)
-    .offset(offset);
+  const rows = pageRows.map((row) => ({
+    id: row._id as string,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    fullName: formatFullName(row.firstName, row.lastName),
+    phone: row.phone ?? null,
+    districtId: (row.districtId as string | undefined) ?? null,
+    hasPrayerRequest: Boolean(row.prayerRequest?.trim()),
+    registeredAt: new Date(row.registeredAt),
+    source: row.source,
+    ministryId: row.ministryId as string,
+    networkId: row.networkId as string,
+    ministryName: ministryById[row.ministryId as string]?.name ?? null,
+    networkName: networkById[row.networkId as string]?.name ?? null,
+    districtName: row.districtId ? districtById[row.districtId as string]?.name ?? null : null,
+  }));
 
   return {
-    rows: rows.map((row) => ({
-      ...row,
-      fullName: formatFullName(row.firstName, row.lastName),
-    })),
-    total: Number(total),
+    rows,
+    total,
     page,
     pageSize,
-    stats: await computeStats(actor),
+    stats: computeStats(scoped),
   };
 }
 
-async function computeStats(actor: AuthContext) {
-  const db = getDb();
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+function computeStats(scoped: ActivePersonRow[]) {
+  if (scoped.length === 0) return emptyStats();
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
 
-  const scopeConditions = [isNull(persons.deletedAt)];
-  if (!isSuperadmin(actor)) {
-    if (actor.ministryIds.length === 0) {
-      return emptyStats();
-    }
-    scopeConditions.push(
-      sql`${personOrganizationHistory.ministryId} in (${sql.join(
-        actor.ministryIds.map((id) => sql`${id}::uuid`),
-        sql`, `,
-      )})`,
-    );
+  const byNetwork = new Map<string, number>();
+  let week = 0;
+  let month = 0;
+  for (const row of scoped) {
+    const networkId = row.networkId as string;
+    byNetwork.set(networkId, (byNetwork.get(networkId) ?? 0) + 1);
+    if (row.registeredAt >= weekAgo) week += 1;
+    if (row.registeredAt >= monthAgo) month += 1;
   }
-  const scopeWhere = and(...scopeConditions);
-
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(persons)
-    .innerJoin(
-      personOrganizationHistory,
-      and(
-        eq(personOrganizationHistory.personId, persons.id),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .where(scopeWhere);
-  const [{ week }] = await db
-    .select({ week: count() })
-    .from(persons)
-    .innerJoin(
-      personOrganizationHistory,
-      and(
-        eq(personOrganizationHistory.personId, persons.id),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .where(and(scopeWhere, gte(persons.registeredAt, weekAgo)));
-  const [{ month }] = await db
-    .select({ month: count() })
-    .from(persons)
-    .innerJoin(
-      personOrganizationHistory,
-      and(
-        eq(personOrganizationHistory.personId, persons.id),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .where(and(scopeWhere, gte(persons.registeredAt, monthAgo)));
-
-  const byNetwork = await db
-    .select({
-      networkId: personOrganizationHistory.networkId,
-      c: count(),
-    })
-    .from(persons)
-    .innerJoin(
-      personOrganizationHistory,
-      and(
-        eq(personOrganizationHistory.personId, persons.id),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .where(scopeWhere)
-    .groupBy(personOrganizationHistory.networkId);
 
   return {
-    total: Number(total),
-    week: Number(week),
-    month: Number(month),
-    byNetwork: byNetwork
-      .filter((r) => r.networkId)
-      .map((r) => ({ networkId: r.networkId as string, count: Number(r.c) })),
+    total: scoped.length,
+    week,
+    month,
+    byNetwork: [...byNetwork.entries()].map(([networkId, count]) => ({ networkId, count })),
   };
 }
 
 export async function getPersonForActor(actorUserId: string, personId: string) {
   const actor = await requireActor(actorUserId);
-  const db = getDb();
-  const [person] = await db
-    .select()
-    .from(persons)
-    .where(and(eq(persons.id, personId), isNull(persons.deletedAt)))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const person = await client.query(api.persons.getById, {
+    personId: personId as Id<"persons">,
+  });
   if (!person) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Persona no encontrada.");
   }
@@ -732,34 +489,43 @@ export async function getPersonForActor(actorUserId: string, personId: string) {
     ministryId: org?.ministryId ?? undefined,
   });
 
-  if (
-    !isSuperadmin(actor) &&
-    (!org?.ministryId || !canAccessMinistry(actor, org.ministryId))
-  ) {
+  if (!isSuperadmin(actor) && (!org?.ministryId || !canAccessMinistry(actor, org.ministryId))) {
     throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Persona fuera de alcance.");
   }
 
-  const history = await db
-    .select({
-      id: personOrganizationHistory.id,
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-      effectiveFrom: personOrganizationHistory.effectiveFrom,
-      effectiveTo: personOrganizationHistory.effectiveTo,
-      changeReason: personOrganizationHistory.changeReason,
-    })
-    .from(personOrganizationHistory)
-    .where(eq(personOrganizationHistory.personId, personId))
-    .orderBy(desc(personOrganizationHistory.effectiveFrom));
+  const historyRows = await client.query(api.persons.getOrgHistory, {
+    personId: personId as Id<"persons">,
+  });
+  const history = historyRows.map((row) => ({
+    id: row._id as string,
+    ministryId: (row.ministryId as string | undefined) ?? null,
+    networkId: (row.networkId as string | undefined) ?? null,
+    effectiveFrom: new Date(row.effectiveFrom),
+    effectiveTo: row.effectiveTo ? new Date(row.effectiveTo) : null,
+    changeReason: row.changeReason ?? null,
+  }));
 
-  const [district] = person.districtId
-    ? await db.select().from(districts).where(eq(districts.id, person.districtId)).limit(1)
-    : [null];
+  let district: { id: string; name: string } | null = null;
+  if (person.districtId) {
+    const districts = await client.query(api.foundation.listActiveDistricts, {});
+    const found = districts.find((d) => (d._id as string) === (person.districtId as string));
+    district = found ? { id: found._id as string, name: found.name } : null;
+  }
 
   return {
     person: {
-      ...person,
+      id: person._id as string,
+      firstName: person.firstName,
+      lastName: person.lastName,
       fullName: formatFullName(person.firstName, person.lastName),
+      phone: person.phone ?? null,
+      email: person.email ?? null,
+      address: person.address ?? null,
+      districtId: (person.districtId as string | undefined) ?? null,
+      prayerRequest: person.prayerRequest ?? null,
+      source: person.source,
+      isActive: person.isActive,
+      registeredAt: new Date(person.registeredAt),
     },
     current: org,
     history,
@@ -795,29 +561,27 @@ export async function updatePersonForActor(
     throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Edición cross-ministry bloqueada.");
   }
 
-  const db = getDb();
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  const client = await getAuthenticatedConvexClient();
+  let firstName: string | undefined;
+  let lastName: string | undefined;
   if (patch.fullName) {
     const parts = splitFullName(patch.fullName);
-    updates.firstName = parts.firstName;
-    updates.lastName = parts.lastName;
+    firstName = parts.firstName;
+    lastName = parts.lastName;
   }
-  if (patch.phone !== undefined) {
-    updates.phone = patch.phone.trim();
-    updates.phoneNormalized = normalizePhone(patch.phone);
-  }
-  if (patch.address !== undefined) updates.address = patch.address.trim();
-  if (patch.districtId !== undefined) updates.districtId = patch.districtId;
-  if (patch.prayerRequest !== undefined) {
-    updates.prayerRequest = patch.prayerRequest.trim() || null;
-  }
-  if (patch.email !== undefined) updates.email = patch.email.trim() || null;
 
-  const [after] = await db
-    .update(persons)
-    .set(updates)
-    .where(eq(persons.id, personId))
-    .returning();
+  const after = await client
+    .mutation(api.persons.update, {
+      personId: personId as Id<"persons">,
+      firstName,
+      lastName,
+      phone: patch.phone !== undefined ? patch.phone.trim() : undefined,
+      address: patch.address !== undefined ? patch.address.trim() : undefined,
+      districtId: patch.districtId !== undefined ? (patch.districtId as Id<"districts">) : undefined,
+      prayerRequest: patch.prayerRequest !== undefined ? patch.prayerRequest.trim() : undefined,
+      email: patch.email !== undefined ? patch.email.trim() : undefined,
+    })
+    .catch(mapConvexError);
 
   await writeAuditLog({
     actorUserId,
@@ -827,14 +591,12 @@ export async function updatePersonForActor(
     beforeData: {
       firstName: detail.person.firstName,
       lastName: detail.person.lastName,
-      phoneNormalized: detail.person.phoneNormalized,
       districtId: detail.person.districtId,
       hasPrayerRequest: Boolean(detail.person.prayerRequest),
     },
     afterData: {
       firstName: after.firstName,
       lastName: after.lastName,
-      phoneNormalized: after.phoneNormalized,
       districtId: after.districtId,
       hasPrayerRequest: Boolean(after.prayerRequest),
     },
@@ -844,52 +606,78 @@ export async function updatePersonForActor(
     },
   });
 
-  return after;
+  return {
+    ...after,
+    id: after._id as string,
+  };
 }
 
 export async function listCatalogsForGanar(
   actorUserId: string | null,
   opts?: { ministryId?: string; networkId?: string; publicMode?: boolean },
 ) {
-  const db = getDb();
-  const districtRows = await db
-    .select({ id: districts.id, name: districts.name })
-    .from(districts)
-    .where(eq(districts.isActive, true))
-    .orderBy(asc(districts.name));
+  if (opts?.publicMode) {
+    const publicClient = getPublicConvexClient();
+    const [districtRows, networkRows, ministryRowsRaw] = await Promise.all([
+      publicClient.query(api.foundation.listActiveDistricts, {}),
+      publicClient.query(api.foundation.listActiveNetworks, {}),
+      publicClient.query(api.foundation.listActiveMinistries, {}),
+    ]);
+    const districts = [...districtRows]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((d) => ({ id: d._id as string, name: d.name }));
+    let activeNetworks = networkRows
+      .filter((n) => n.isActive && n.code !== "ninos")
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((n) => ({
+        id: n._id as string,
+        code: n.code as string,
+        name: n.name,
+        isActive: n.isActive,
+      }));
+    if (opts.networkId) {
+      activeNetworks = activeNetworks.filter((n) => n.id === opts.networkId);
+    }
+    let ministryRows = ministryRowsRaw
+      .filter((m) => m.isActive)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code))
+      .map((m) => ({ id: m._id as string, code: m.code, name: m.name, isActive: m.isActive }));
+    if (opts.ministryId) {
+      ministryRows = ministryRows.filter((m) => m.id === opts.ministryId);
+    }
+    return { districts, networks: activeNetworks, ministries: ministryRows };
+  }
 
-  const networkRows = await db
-    .select({
-      id: networks.id,
-      code: networks.code,
-      name: networks.name,
-      isActive: networks.isActive,
-    })
-    .from(networks)
-    .orderBy(asc(networks.sortOrder));
+  const client = await getAuthenticatedConvexClient();
+  const [districtRows, networkRows, allMinistryRows] = await Promise.all([
+    client.query(api.foundation.listActiveDistricts, {}),
+    listNetworks(),
+    listMinistries(),
+  ]);
 
-  let activeNetworks = networkRows.filter((n) => n.isActive && n.code !== "ninos");
+  const districts = [...districtRows]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((d) => ({ id: d._id as string, name: d.name }));
+
+  let activeNetworks = networkRows
+    .filter((n) => n.isActive && n.code !== "ninos")
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((n) => ({ id: n._id as string, code: n.code as string, name: n.name, isActive: n.isActive }));
   if (opts?.networkId) {
     activeNetworks = activeNetworks.filter((n) => n.id === opts.networkId);
   }
 
-  let ministryRows = await db
-    .select({
-      id: ministries.id,
-      code: ministries.code,
-      name: ministries.name,
-      isActive: ministries.isActive,
-    })
-    .from(ministries)
-    .where(eq(ministries.isActive, true))
-    .orderBy(asc(ministries.sortOrder), asc(ministries.code));
+  let ministryRows = allMinistryRows
+    .filter((m) => m.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code))
+    .map((m) => ({ id: m._id as string, code: m.code, name: m.name, isActive: m.isActive }));
 
   if (opts?.publicMode) {
     if (opts.ministryId) {
       ministryRows = ministryRows.filter((m) => m.id === opts.ministryId);
     }
     return {
-      districts: districtRows,
+      districts,
       networks: activeNetworks,
       ministries: ministryRows,
     };
@@ -904,21 +692,21 @@ export async function listCatalogsForGanar(
   }
 
   return {
-    districts: districtRows,
+    districts,
     networks: activeNetworks,
     ministries: ministryRows,
   };
 }
 
 export async function getMinistryNetworkMaps() {
-  const db = getDb();
-  const [mins, nets] = await Promise.all([
-    db.select({ id: ministries.id, code: ministries.code, name: ministries.name }).from(ministries),
-    db.select({ id: networks.id, code: networks.code, name: networks.name }).from(networks),
-  ]);
+  const [ministries, networks] = await Promise.all([listMinistries(), listNetworks()]);
   return {
-    ministryById: Object.fromEntries(mins.map((m) => [m.id, m])),
-    networkById: Object.fromEntries(nets.map((n) => [n.id, n])),
+    ministryById: Object.fromEntries(
+      ministries.map((m) => [m._id as string, { id: m._id as string, code: m.code, name: m.name }]),
+    ),
+    networkById: Object.fromEntries(
+      networks.map((n) => [n._id as string, { id: n._id as string, code: n.code as string, name: n.name }]),
+    ),
   };
 }
 
@@ -930,7 +718,6 @@ export async function resolvePublicFormContext(params: {
   ministry?: string | null;
   network?: string | null;
 }) {
-  const db = getDb();
   let ministryId: string | null = null;
   let networkId: string | null = null;
   let ministryCode: string | null = null;
@@ -938,62 +725,28 @@ export async function resolvePublicFormContext(params: {
 
   if (params.ministry?.trim()) {
     const raw = params.ministry.trim();
-    const looksUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        raw,
-      );
-    if (looksUuid) {
-      const [byId] = await db
-        .select({ id: ministries.id, code: ministries.code })
-        .from(ministries)
-        .where(and(eq(ministries.isActive, true), eq(ministries.id, raw)))
-        .limit(1);
-      if (byId) {
-        ministryId = byId.id;
-        ministryCode = byId.code;
-      }
-    } else {
-      const [byCode] = await db
-        .select({ id: ministries.id, code: ministries.code })
-        .from(ministries)
-        .where(and(eq(ministries.isActive, true), eq(ministries.code, raw.toUpperCase())))
-        .limit(1);
-      if (byCode) {
-        ministryId = byCode.id;
-        ministryCode = byCode.code;
-      }
+    const ministries = await listMinistries();
+    const found = ministries.find(
+      (m) => m.isActive && ((m._id as string) === raw || m.code.toUpperCase() === raw.toUpperCase()),
+    );
+    if (found) {
+      ministryId = found._id as string;
+      ministryCode = found.code;
     }
   }
 
   if (params.network?.trim()) {
     const raw = params.network.trim();
-    const looksUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        raw,
-      );
-    let candidate:
-      | { id: string; code: string; isActive: boolean }
-      | undefined;
-
-    if (looksUuid) {
-      const [byId] = await db
-        .select({ id: networks.id, code: networks.code, isActive: networks.isActive })
-        .from(networks)
-        .where(eq(networks.id, raw))
-        .limit(1);
-      candidate = byId;
-    } else {
-      const [byCode] = await db
-        .select({ id: networks.id, code: networks.code, isActive: networks.isActive })
-        .from(networks)
-        .where(eq(networks.code, raw.toLowerCase() as NetworkCode))
-        .limit(1);
-      candidate = byCode;
-    }
-
-    if (candidate && candidate.isActive && candidate.code !== "ninos") {
-      networkId = candidate.id;
-      networkCode = candidate.code;
+    const networks = await listNetworks();
+    const found = networks.find(
+      (n) =>
+        n.isActive &&
+        n.code !== "ninos" &&
+        ((n._id as string) === raw || (n.code as string).toLowerCase() === raw.toLowerCase()),
+    );
+    if (found) {
+      networkId = found._id as string;
+      networkCode = found.code as string;
     }
   }
 

@@ -7,9 +7,10 @@
  *
  * UDV is NOT a gate. Legacy process_types are preserved but deprecated.
  */
-import { and, eq } from "drizzle-orm";
-
-import { getDb } from "@/db/client";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { withId } from "@/lib/convex-doc";
+import { mapConvexError } from "@/lib/convex-errors";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 import {
   CONSOLIDAR_FAMILY,
   DESTINO_FAMILY,
@@ -26,10 +27,6 @@ import {
   PRE_ENCUENTRO_CODE,
   REENCUENTRO_FAMILY,
   REENCUENTRO_PROGRAM_CODE,
-  personProcessProgress,
-  trainingCompletionRequirements,
-  trainingModules,
-  trainingPrograms,
 } from "@/db/schema";
 
 export type OfficialProcess =
@@ -227,173 +224,29 @@ export const OFFICIAL_PROGRAM_SEEDS: ProgramSeed[] = [
 
 /** Idempotent official catalog seed. Does not invent doctrinal class names. */
 export async function ensureOfficialCatalog() {
-  const db = getDb();
-  const results = [];
-
-  // Keep Destino family label aligned to discipular for CD codes when seeding
-  for (const seed of OFFICIAL_PROGRAM_SEEDS) {
-    const family =
-      seed.code.startsWith("destino_") || seed.code === REENCUENTRO_PROGRAM_CODE
-        ? seed.family === DISCIPULAR_FAMILY || seed.family === REENCUENTRO_FAMILY
-          ? seed.family
-          : DISCIPULAR_FAMILY
-        : seed.family;
-
-    let [program] = await db
-      .select()
-      .from(trainingPrograms)
-      .where(eq(trainingPrograms.code, seed.code))
-      .limit(1);
-
-    if (!program) {
-      [program] = await db
-        .insert(trainingPrograms)
-        .values({
-          code: seed.code,
-          name: seed.name,
-          description: seed.name,
-          family,
-          level: seed.level ?? null,
-          isActive: true,
-        })
-        .returning();
-    } else {
-      [program] = await db
-        .update(trainingPrograms)
-        .set({
-          name: seed.name,
-          family,
-          level: seed.level ?? null,
-          isActive: true,
-          updatedAt: new Date(),
-        })
-        .where(eq(trainingPrograms.id, program.id))
-        .returning();
-    }
-
-    const existing = await db
-      .select()
-      .from(trainingModules)
-      .where(eq(trainingModules.programId, program.id));
-    const byCode = new Map(existing.map((m) => [m.code, m]));
-
-    for (const mod of seed.modules) {
-      const row = byCode.get(mod.code);
-      if (!row) {
-        await db.insert(trainingModules).values({
-          programId: program.id,
-          code: mod.code,
-          name: mod.name,
-          orderIndex: mod.orderIndex,
-          componentCode: mod.componentCode ?? null,
-          componentName: mod.componentName ?? null,
-          isActive: true,
-          isRequired: true,
-        });
-      } else if (
-        row.componentCode !== (mod.componentCode ?? null) ||
-        row.componentName !== (mod.componentName ?? null) ||
-        row.name !== mod.name ||
-        !row.isActive
-      ) {
-        await db
-          .update(trainingModules)
-          .set({
-            name: mod.name,
-            componentCode: mod.componentCode ?? null,
-            componentName: mod.componentName ?? null,
-            orderIndex: mod.orderIndex,
-            isActive: true,
-            updatedAt: new Date(),
-          })
-          .where(eq(trainingModules.id, row.id));
-      }
-    }
-
-    // Deactivate legacy modules not in the official seed for this program
-    const seedCodes = new Set(seed.modules.map((m) => m.code));
-    for (const row of existing) {
-      if (!seedCodes.has(row.code) && row.isActive) {
-        await db
-          .update(trainingModules)
-          .set({
-            isActive: false,
-            updatedAt: new Date(),
-            name: `${row.name} [legacy inactive]`,
-          })
-          .where(eq(trainingModules.id, row.id));
-      }
-    }
-
-    if (seed.academicRequirement) {
-      const reqs = await db
-        .select()
-        .from(trainingCompletionRequirements)
-        .where(eq(trainingCompletionRequirements.programId, program.id));
-      // Clear pastoral active_cell_members defaults that were hard-seeded on Destino
-      // unless explicitly required — deactivate unverified 12-person reqs.
-      for (const req of reqs) {
-        if (req.requirementType === "active_cell_members" && req.isActive) {
-          await db
-            .update(trainingCompletionRequirements)
-            .set({
-              isActive: false,
-              updatedAt: new Date(),
-              label: `${req.label ?? "12 personas"} (desactivado — no confirmado por nivel)`,
-            })
-            .where(eq(trainingCompletionRequirements.id, req.id));
-        }
-      }
-      const hasAcademic = reqs.some(
-        (r) =>
-          r.isActive &&
-          (r.requirementType === "manual_approval" || r.category === "academic"),
-      );
-      if (!hasAcademic) {
-        await db.insert(trainingCompletionRequirements).values({
-          programId: program.id,
-          requirementType: "manual_approval",
-          category: "academic",
-          label: "Componente académico aprobado",
-          isRequired: true,
-          isActive: true,
-        });
-      }
-    }
-
-    results.push(program);
-  }
-
-  // Mark legacy UDV / single EM as inactive umbrella catalogs (keep rows)
-  for (const legacy of ["udv", "escuela_ministerial", "destino"] as const) {
-    const [row] = await db
-      .select()
-      .from(trainingPrograms)
-      .where(eq(trainingPrograms.code, legacy))
-      .limit(1);
-    if (row && row.isActive) {
-      await db
-        .update(trainingPrograms)
-        .set({
-          isActive: false,
-          description: `${row.description ?? ""} [DEPRECATED — Phase 7 reconciliation]`.trim(),
-          updatedAt: new Date(),
-        })
-        .where(eq(trainingPrograms.id, row.id));
-    }
-  }
-
-  // Align Destino family label for CD programs to discipular
-  await db
-    .update(trainingPrograms)
-    .set({ family: DISCIPULAR_FAMILY, updatedAt: new Date() })
-    .where(
-      and(
-        eq(trainingPrograms.family, DESTINO_FAMILY),
-      ),
-    );
-
-  return results;
+  const client = await getAuthenticatedConvexClient();
+  const results = await client
+    .mutation(api.formation.seedOfficialCatalog, {
+      seeds: OFFICIAL_PROGRAM_SEEDS.map((seed) => ({
+        code: seed.code,
+        name: seed.name,
+        family: seed.family,
+        level: seed.level ?? undefined,
+        academicRequirement: seed.academicRequirement,
+        modules: seed.modules.map((m) => ({
+          code: m.code,
+          name: m.name,
+          orderIndex: m.orderIndex,
+          componentCode: m.componentCode ?? undefined,
+          componentName: m.componentName ?? undefined,
+        })),
+      })),
+      legacyCodes: ["udv", "escuela_ministerial", "destino"],
+      realignFamilyFrom: DESTINO_FAMILY,
+      realignFamilyTo: DISCIPULAR_FAMILY,
+    })
+    .catch(mapConvexError);
+  return results.map(withId);
 }
 
 export function countCatalogExpectation() {
@@ -412,17 +265,11 @@ export async function getProgressStatus(
   personId: string,
   processType: string,
 ): Promise<string | null> {
-  const db = getDb();
-  const [row] = await db
-    .select({ status: personProcessProgress.status })
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, processType as never),
-      ),
-    )
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const row = await client.query(api.formation.getProgress, {
+    personId: personId as Id<"persons">,
+    processType: processType as never,
+  });
   return row?.status ?? null;
 }
 

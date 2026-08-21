@@ -21,6 +21,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seeds/run.ts",
+    "db:seed:convex": "tsx --env-file=.env.local scripts/seed-convex.ts",
     "db:push": "drizzle-kit push",
     "verify:invariants": "tsx --env-file=.env.local scripts/verify-data-invariants.ts",
     "verify:phase10": "tsx --env-file=.env.local scripts/verify-phase10-release.ts",
