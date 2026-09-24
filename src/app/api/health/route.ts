@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { hasClerkPublicConfig, hasConvexPublicConfig } from "@/lib/env";
-
 /**
- * Liveness probe — Clerk + Convex public config (no secrets).
+ * Liveness probe — Next.js process is up. Configuration belongs on `/api/ready`.
  */
 export async function GET() {
-  const ok = hasClerkPublicConfig() && hasConvexPublicConfig();
-  return NextResponse.json(
-    {
-      status: ok ? "ok" : "degraded",
-      service: "multiplica",
-      version: process.env.npm_package_version ?? "1.0.0-rc.1",
-      timestamp: new Date().toISOString(),
-    },
-    { status: ok ? 200 : 503 },
-  );
+  return NextResponse.json({
+    status: "ok",
+    service: "multiplica",
+    version: process.env.npm_package_version ?? "1.0.0-rc.1",
+    timestamp: new Date().toISOString(),
+  });
 }

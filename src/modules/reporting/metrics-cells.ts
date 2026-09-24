@@ -10,17 +10,9 @@
  * no_recent_attendance: active cell with habitual dayOfWeek; after that weekday
  * + grace hours in America/Lima with no completed/open session in last 7 days.
  */
-import { and, count, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
-import { getDb } from "@/db/client";
-import {
-  cellAttendance,
-  cellAttendanceSessions,
-  cellMemberships,
-  cells,
-} from "@/db/schema";
-
-import { ReportingThresholds } from "./period";
+import { buildScopeMatcher } from "./convex-scope";
 import type { DashboardScope } from "./scope";
 
 export type CellMetrics = {
@@ -46,17 +38,15 @@ export type CellAttendanceDetail = {
   trend: "up" | "stable" | "down" | "unknown";
 };
 
-function cellScopeSql(scope: DashboardScope) {
-  if (scope.mode === "subtree" && scope.rootPersonId) {
-    return sql`${cells.responsiblePersonId} IN (
-      SELECT descendant_person_id FROM leadership_closure
-      WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-    )`;
-  }
-  if (scope.mode === "ministry" && scope.ministryIds.length) {
-    return inArray(cells.ministryId, scope.ministryIds);
-  }
-  return undefined;
+async function scopedCells(scope: DashboardScope) {
+  const client = await getAuthenticatedConvexClient();
+  const [snapshot, matches] = await Promise.all([
+    client.query(api.reporting.cellsSnapshot, {}),
+    buildScopeMatcher(scope),
+  ]);
+  return snapshot.filter((c) =>
+    matches({ personId: c.responsiblePersonId ?? null, ministryId: c.ministryId, networkId: c.networkId }),
+  );
 }
 
 export async function getCellMetrics(
@@ -64,70 +54,31 @@ export async function getCellMetrics(
   periodFrom?: Date,
   periodTo?: Date,
 ): Promise<CellMetrics> {
-  const db = getDb();
-  const scopeSql = cellScopeSql(scope);
-
-  const typeRows = await db
-    .select({ type: cells.type, status: cells.status, c: count() })
-    .from(cells)
-    .where(scopeSql)
-    .groupBy(cells.type, cells.status);
+  const cells = await scopedCells(scope);
 
   let totalActive = 0;
   let evangelistic = 0;
   let twelve = 0;
   let closed = 0;
-  for (const r of typeRows) {
-    const n = Number(r.c);
-    if (r.status === "closed") closed += n;
-    else {
-      totalActive += n;
-      if (r.type === "evangelistic") evangelistic += n;
-      if (r.type === "twelve") twelve += n;
+  for (const c of cells) {
+    if (c.status === "closed") {
+      closed += 1;
+    } else {
+      totalActive += 1;
+      if (c.type === "evangelistic") evangelistic += 1;
+      if (c.type === "twelve") twelve += 1;
     }
   }
 
   let newInPeriod = 0;
   if (periodFrom && periodTo) {
-    const [row] = await db
-      .select({ c: count() })
-      .from(cells)
-      .where(
-        and(
-          scopeSql,
-          gte(cells.createdAt, periodFrom),
-          lte(cells.createdAt, periodTo),
-        ),
-      );
-    newInPeriod = Number(row?.c ?? 0);
+    const fromMs = periodFrom.getTime();
+    const toMs = periodTo.getTime();
+    newInPeriod = cells.filter((c) => c.createdAt >= fromMs && c.createdAt <= toMs).length;
   }
 
-  const [members] = await db.execute<{ c: string }>(sql`
-    SELECT count(*)::text AS c
-    FROM cell_memberships cm
-    INNER JOIN cells c ON c.id = cm.cell_id
-    WHERE cm.status = 'active'
-      AND c.status <> 'closed'
-      ${
-        scope.mode === "subtree" && scope.rootPersonId
-          ? sql`AND c.responsible_person_id IN (
-              SELECT descendant_person_id FROM leadership_closure
-              WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-            )`
-          : scope.mode === "ministry" && scope.ministryIds.length
-            ? sql`AND c.ministry_id IN (${sql.join(
-                scope.ministryIds.map((id) => sql`${id}::uuid`),
-                sql`, `,
-              )})`
-            : sql``
-      }
-  `);
-  const mList = Array.isArray(members)
-    ? members
-    : ((members as { rows?: typeof members }).rows ?? []);
-  const activeMembers = Number((mList as Array<{ c: string }>)[0]?.c ?? 0);
-
   const details = await listCellAttendanceDetails(scope);
+  const activeMembers = details.reduce((a, d) => a + d.activeMembers, 0);
   const pcts = details.map((d) => d.avgLast4Pct).filter((x): x is number => x != null);
   const avgAttendancePct =
     pcts.length === 0
@@ -157,80 +108,21 @@ function shouldAlertNoRecent(d: CellAttendanceDetail) {
 export async function listCellAttendanceDetails(
   scope: DashboardScope,
 ): Promise<CellAttendanceDetail[]> {
-  const db = getDb();
-  const scopeSql = cellScopeSql(scope);
-  const activeCells = await db
-    .select()
-    .from(cells)
-    .where(and(scopeSql, sql`${cells.status} <> 'closed'`))
-    .limit(300);
+  const client = await getAuthenticatedConvexClient();
+  const cells = (await scopedCells(scope)).filter((c) => c.status !== "closed").slice(0, 300);
 
-  const out: CellAttendanceDetail[] = [];
-  for (const cell of activeCells) {
-    const [{ members }] = await db
-      .select({ members: count() })
-      .from(cellMemberships)
-      .where(
-        and(eq(cellMemberships.cellId, cell.id), eq(cellMemberships.status, "active")),
-      );
+  const details = await client.query(api.reporting.cellAttendanceDetails, {
+    cellIds: cells.map((c) => c.cellId),
+  });
 
-    const sessions = await db
-      .select()
-      .from(cellAttendanceSessions)
-      .where(
-        and(
-          eq(cellAttendanceSessions.cellId, cell.id),
-          inArray(cellAttendanceSessions.status, ["completed", "open"]),
-        ),
-      )
-      .orderBy(desc(cellAttendanceSessions.sessionDate))
-      .limit(6);
-
-    const sessionStats: number[] = [];
-    let lastPresent: number | null = null;
-    for (const s of sessions) {
-      const [pres] = await db
-        .select({ c: count() })
-        .from(cellAttendance)
-        .where(
-          and(
-            eq(cellAttendance.sessionId, s.id),
-            eq(cellAttendance.status, "present"),
-          ),
-        );
-      const present = Number(pres?.c ?? 0);
-      if (lastPresent === null) lastPresent = present;
-      const mem = Number(members) || 0;
-      if (mem > 0) sessionStats.push((present / mem) * 100);
-    }
-
-    const recentN = ReportingThresholds.attendanceRecentSessions;
-    const baseN = ReportingThresholds.attendanceBaselineSessions;
-    const recent = sessionStats.slice(0, recentN);
-    const baseline = sessionStats.slice(recentN, recentN + baseN);
-    const avg = (arr: number[]) =>
-      arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
-    const recentAvg = avg(recent);
-    const baseAvg = avg(baseline.length ? baseline : sessionStats.slice(recentN));
-    const avgLast4 = avg(sessionStats.slice(0, 4));
-
-    let trend: CellAttendanceDetail["trend"] = "unknown";
-    if (recentAvg != null && baseAvg != null && baseAvg > 0) {
-      if (recentAvg < baseAvg * ReportingThresholds.attendanceDropRatio) trend = "down";
-      else if (recentAvg > baseAvg * 1.1) trend = "up";
-      else trend = "stable";
-    }
-
-    out.push({
-      cellId: cell.id,
-      name: cell.name,
-      type: cell.type,
-      lastSessionDate: sessions[0]?.sessionDate ?? null,
-      lastPresent,
-      activeMembers: Number(members),
-      avgLast4Pct: avgLast4 != null ? Math.round(avgLast4 * 10) / 10 : null,
-      trend,
-    });
-  }
-  return out;
+  return details.map((d) => ({
+    cellId: d.cellId,
+    name: d.name,
+    type: d.type,
+    lastSessionDate: d.lastSessionDate,
+    lastPresent: d.lastPresent,
+    activeMembers: d.activeMembers,
+    avgLast4Pct: d.avgLast4Pct,
+    trend: d.trend,
+  }));
 }

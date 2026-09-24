@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
 
 import { DataCard, SectionHeader } from "@/components/dashboard";
 import { TransferConfirmButton } from "@/components/transfers/transfer-confirm-button";
@@ -8,9 +7,8 @@ import { TransferRequestForm } from "@/components/transfers/transfer-request-for
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { getDb } from "@/db/client";
-import { ministries, networks } from "@/db/schema";
 import { hasPermission } from "@/modules/authorization";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 import {
   approveTransferAction,
   executeTransferAction,
@@ -40,17 +38,16 @@ export default async function TransferenciasPage({
   const canApprove = hasPermission(auth, "transfers.approve");
   const canExecute = hasPermission(auth, "transfers.execute");
 
-  const db = getDb();
-  const ministryRows = await db
-    .select({ id: ministries.id, code: ministries.code, name: ministries.name })
-    .from(ministries)
-    .where(eq(ministries.isActive, true))
-    .orderBy(asc(ministries.code));
-  const networkRows = await db
-    .select({ id: networks.id, name: networks.name })
-    .from(networks)
-    .where(eq(networks.isActive, true))
-    .orderBy(asc(networks.sortOrder));
+  const client = await getAuthenticatedConvexClient();
+  const [allMinistries, allNetworks] = await Promise.all([
+    client.query(api.organization.listMinistries, {}),
+    client.query(api.organization.listNetworks, {}),
+  ]);
+  const ministryRows = allMinistries
+    .filter((m) => m.isActive)
+    .map((m) => ({ id: m._id, code: m.code, name: m.name }))
+    .sort((a, b) => a.code.localeCompare(b.code));
+  const networkRows = allNetworks.filter((n) => n.isActive).map((n) => ({ id: n._id, name: n.name }));
 
   return (
     <div className="space-y-8">

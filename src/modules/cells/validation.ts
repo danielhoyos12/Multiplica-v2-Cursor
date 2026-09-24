@@ -25,14 +25,14 @@ export const createCellInputSchema = z.object({
   name: z.string().trim().min(2).max(120),
   code: z.string().trim().max(40).optional().or(z.literal("")),
   type: cellTypeSchema,
-  ministryId: z.string().uuid(),
-  networkId: z.string().uuid(),
-  responsiblePersonId: z.string().uuid().optional().nullable(),
+  ministryId: z.string().min(1),
+  networkId: z.string().min(1),
+  responsiblePersonId: z.string().min(1).optional().nullable(),
   dayOfWeek: dayOfWeekSchema,
   startTime: startTimeSchema,
   timezone: z.string().trim().min(3).max(64).default("America/Lima"),
   address: z.string().trim().max(240).optional().or(z.literal("")),
-  districtId: z.string().uuid().optional().nullable().or(z.literal("")),
+  districtId: z.string().min(1).optional().nullable().or(z.literal("")),
 });
 
 export type CreateCellInput = z.infer<typeof createCellInputSchema>;
@@ -47,23 +47,23 @@ export const updateCellInputSchema = createCellInputSchema
 export type UpdateCellInput = z.infer<typeof updateCellInputSchema>;
 
 export const addMemberInputSchema = z.object({
-  personId: z.string().uuid(),
+  personId: z.string().min(1),
 });
 
 export const removeMemberInputSchema = z.object({
-  membershipId: z.string().uuid(),
+  membershipId: z.string().min(1),
   reason: z.string().trim().max(240).optional().or(z.literal("")),
 });
 
 export const reassignMemberInputSchema = z.object({
-  membershipId: z.string().uuid(),
-  targetCellId: z.string().uuid(),
+  membershipId: z.string().min(1),
+  targetCellId: z.string().min(1),
   reason: z.string().trim().max(240).optional().or(z.literal("")),
 });
 
 export const attendanceRecordSchema = z.object({
-  personId: z.string().uuid(),
-  membershipId: z.string().uuid().optional().nullable(),
+  personId: z.string().min(1),
+  membershipId: z.string().min(1).optional().nullable(),
   status: attendanceStatusSchema,
   notes: z.string().trim().max(200).optional().or(z.literal("")),
 });

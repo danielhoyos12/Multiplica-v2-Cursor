@@ -1,31 +1,30 @@
 "use server";
 
-import { auth, clerkClient } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
+import { clerkClient } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
 
-import { getDb } from "@/db/client";
-import { users } from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { isDomainError } from "@/lib/errors";
 import {
   MUST_CHANGE_PASSWORD_COOKIE,
   passwordGateCookieOptions,
 } from "@/lib/password-change-gate";
 import { requireSessionUser } from "@/server/auth";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export async function clearMustChangePasswordAction() {
   try {
     const user = await requireSessionUser();
-    const db = getDb();
-    await db
-      .update(users)
-      .set({ mustChangePassword: false, updatedAt: new Date() })
-      .where(eq(users.id, user.id));
+    const client = await getAuthenticatedConvexClient();
+    await client.mutation(api.users.setMustChangePassword, {
+      userId: user.id as Id<"users">,
+      value: false,
+    });
 
     if (process.env.CLERK_SECRET_KEY) {
       try {
-        const client = await clerkClient();
-        await client.users.updateUser(user.clerkUserId, {
+        const clerk = await clerkClient();
+        await clerk.users.updateUser(user.clerkUserId, {
           publicMetadata: { mustChangePassword: false },
         });
       } catch {
@@ -53,10 +52,7 @@ export async function clearMustChangePasswordAction() {
 
 export async function setNewPasswordAction(password: string) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return { ok: false as const, error: "Debes iniciar sesión." };
-    }
+    const user = await requireSessionUser();
     if (password.length < 10) {
       return {
         ok: false as const,
@@ -64,14 +60,17 @@ export async function setNewPasswordAction(password: string) {
       };
     }
 
-    const client = await clerkClient();
-    await client.users.updateUser(userId, {
+    const clerk = await clerkClient();
+    await clerk.users.updateUser(user.clerkUserId, {
       password,
       publicMetadata: { mustChangePassword: false },
     });
 
     return clearMustChangePasswordAction();
   } catch (error) {
+    if (isDomainError(error)) {
+      return { ok: false as const, error: error.message };
+    }
     return {
       ok: false as const,
       error:

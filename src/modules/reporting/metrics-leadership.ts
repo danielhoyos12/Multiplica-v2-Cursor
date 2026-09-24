@@ -2,16 +2,15 @@
  * G12 leadership metrics — derived from person_leadership + closure + cells.
  * X/12 = active direct leaders with valid cell. eligible does NOT count.
  */
-import { and, count, eq, gt, gte, inArray, lte, sql } from "drizzle-orm";
+import { ConvexHttpClient } from "convex/browser";
 
-import { getDb } from "@/db/client";
-import { cells, leadershipClosure, personLeadership, persons } from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { getTwelveProgress } from "@/modules/leadership/service";
 
-import { ReportingThresholds } from "./period";
+import { buildScopeMatcher } from "./convex-scope";
 import type { DashboardScope } from "./scope";
-import { leadershipScopeCondition } from "./sql-scope";
 
 export type LeadershipMetrics = {
   active: number;
@@ -43,148 +42,88 @@ function band(n: number): "0-3" | "4-7" | "8-11" | "12" {
   return "0-3";
 }
 
+async function scopedLeaders(scope: DashboardScope) {
+  const client = await getAuthenticatedConvexClient();
+  const [snapshot, matches] = await Promise.all([
+    client.query(api.reporting.leadershipSnapshot, {}),
+    buildScopeMatcher(scope),
+  ]);
+  return snapshot.filter((l) => matches({ personId: l.personId, ministryId: l.ministryId, networkId: l.networkId }));
+}
+
 export async function getLeadershipMetrics(
   scope: DashboardScope,
   periodFrom?: Date,
   periodTo?: Date,
 ): Promise<LeadershipMetrics> {
-  const db = getDb();
-  const scopeCond = leadershipScopeCondition(scope);
-  const where = scopeCond ?? undefined;
-
-  const statusRows = await db
-    .select({ status: personLeadership.status, c: count() })
-    .from(personLeadership)
-    .where(where)
-    .groupBy(personLeadership.status);
+  const client = await getAuthenticatedConvexClient();
+  const leaders = await scopedLeaders(scope);
 
   let active = 0;
   let eligible = 0;
   let inactive = 0;
-  for (const r of statusRows) {
-    const n = Number(r.c);
-    if (r.status === "active") active = n;
-    else if (r.status === "eligible") eligible = n;
-    else if (r.status === "inactive") inactive = n;
+  for (const l of leaders) {
+    if (l.status === "active") active += 1;
+    else if (l.status === "eligible") eligible += 1;
+    else if (l.status === "inactive") inactive += 1;
   }
 
-  // Active with open responsible cell
-  const [withCell] = await db.execute<{ c: string }>(sql`
-    SELECT count(*)::text AS c
-    FROM person_leadership pl
-    WHERE pl.status = 'active'
-      AND EXISTS (
-        SELECT 1 FROM cells c
-        WHERE c.responsible_person_id = pl.person_id
-          AND c.status <> 'closed'
-      )
-      ${
-        scope.mode === "subtree" && scope.rootPersonId
-          ? sql`AND pl.person_id IN (
-              SELECT descendant_person_id FROM leadership_closure
-              WHERE ancestor_person_id = ${scope.rootPersonId}::uuid
-            )`
-          : scope.mode === "ministry" && scope.ministryIds.length
-            ? sql`AND pl.ministry_id IN (${sql.join(
-                scope.ministryIds.map((id) => sql`${id}::uuid`),
-                sql`, `,
-              )})`
-            : sql``
-      }
-  `);
-  const withCellList = Array.isArray(withCell)
-    ? withCell
-    : ((withCell as { rows?: typeof withCell }).rows ?? []);
-  const activeWithCell = Number(
-    (withCellList as Array<{ c: string }>)[0]?.c ?? 0,
+  const activeLeaders = leaders.filter((l) => l.status === "active");
+  const cellsSnapshot = await client.query(api.reporting.cellsSnapshot, {});
+  const responsibleWithOpenCell = new Set(
+    cellsSnapshot.filter((c) => c.status !== "closed" && c.responsiblePersonId).map((c) => c.responsiblePersonId),
   );
+  const activeWithCell = activeLeaders.filter((l) => responsibleWithOpenCell.has(l.personId)).length;
   const activeWithoutCell = Math.max(0, active - activeWithCell);
 
   let activatedInPeriod = 0;
   if (periodFrom && periodTo) {
-    const [row] = await db
-      .select({ c: count() })
-      .from(personLeadership)
-      .where(
-        and(
-          scopeCond,
-          eq(personLeadership.status, "active"),
-          gte(personLeadership.activatedAt, periodFrom),
-          lte(personLeadership.activatedAt, periodTo),
-        ),
-      );
-    activatedInPeriod = Number(row?.c ?? 0);
+    const fromMs = periodFrom.getTime();
+    const toMs = periodTo.getTime();
+    activatedInPeriod = activeLeaders.filter(
+      (l) => l.activatedAt !== undefined && l.activatedAt >= fromMs && l.activatedAt <= toMs,
+    ).length;
   }
 
-  // Generation depths relative to focus root (or all roots when global/ministry)
+  // Generation depths relative to focus root (or none when global/ministry)
   const root = scope.rootPersonId;
   let depth1 = 0;
   let depth2 = 0;
   let depth3 = 0;
   if (root) {
-    const depthRows = await db
-      .select({
-        depth: leadershipClosure.depth,
-        c: count(),
-      })
-      .from(leadershipClosure)
-      .innerJoin(
-        personLeadership,
-        and(
-          eq(personLeadership.personId, leadershipClosure.descendantPersonId),
-          eq(personLeadership.status, "active"),
-        ),
-      )
-      .where(
-        and(
-          eq(leadershipClosure.ancestorPersonId, root),
-          gt(leadershipClosure.depth, 0),
-          sql`${leadershipClosure.depth} <= 3`,
-        ),
-      )
-      .groupBy(leadershipClosure.depth);
-    for (const r of depthRows) {
-      if (r.depth === 1) depth1 = Number(r.c);
-      if (r.depth === 2) depth2 = Number(r.c);
-      if (r.depth === 3) depth3 = Number(r.c);
+    const descendants = await client.query(api.leadership.listDescendants, {
+      ancestorPersonId: root as Id<"persons">,
+    });
+    const activeIds = new Set(activeLeaders.map((l) => l.personId));
+    for (const d of descendants) {
+      if (!activeIds.has(d.personId)) continue;
+      if (d.depth === 1) depth1 += 1;
+      if (d.depth === 2) depth2 += 1;
+      if (d.depth === 3) depth3 += 1;
     }
   }
 
   // Twelve progress bands for active leaders in scope
   const buckets = { "0-3": 0, "4-7": 0, "8-11": 0, "12": 0 };
-  const leaders = await db
-    .select({ personId: personLeadership.personId })
-    .from(personLeadership)
-    .where(and(scopeCond, eq(personLeadership.status, "active")))
-    .limit(500);
-  for (const l of leaders) {
+  for (const l of activeLeaders.slice(0, 500)) {
     const p = await getTwelveProgress(l.personId);
     buckets[band(p.current)] += 1;
   }
 
   let focus: LeadershipMetrics["focus"];
   if (root) {
-    const [p] = await db.select().from(persons).where(eq(persons.id, root)).limit(1);
-    const [lead] = await db
-      .select()
-      .from(personLeadership)
-      .where(eq(personLeadership.personId, root))
-      .limit(1);
-    if (p && lead) {
+    const rootLeader = leaders.find((l) => l.personId === root) ?? (await scopedLeaderById(client, root));
+    if (rootLeader) {
       const progress = await getTwelveProgress(root);
       focus = {
         personId: root,
-        fullName: formatFullName(p.firstName, p.lastName),
-        code: lead.humanLeaderCode,
+        fullName: formatFullName(rootLeader.firstName, rootLeader.lastName),
+        code: rootLeader.humanLeaderCode ?? null,
         progress,
         progressBand: band(progress.current),
       };
     }
   }
-
-  void cells;
-  void inArray;
-  void ReportingThresholds;
 
   return {
     active,
@@ -204,6 +143,19 @@ export async function getLeadershipMetrics(
   };
 }
 
+async function scopedLeaderById(client: ConvexHttpClient, personId: string) {
+  const leadership = await client.query(api.leadership.getByPerson, { personId: personId as Id<"persons"> });
+  if (!leadership) return null;
+  const person = await client.query(api.persons.getById, { personId: personId as Id<"persons"> });
+  if (!person) return null;
+  return {
+    personId: leadership.personId,
+    firstName: person.firstName,
+    lastName: person.lastName,
+    humanLeaderCode: leadership.humanLeaderCode,
+  };
+}
+
 export type TreeNodeCard = {
   personId: string;
   fullName: string;
@@ -220,57 +172,39 @@ export async function listDirectNodeCards(
   scope: DashboardScope,
   parentPersonId: string,
 ): Promise<TreeNodeCard[]> {
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   // Auth already validated via resolveDashboardScope + assertTreeAccess callers
-  const directs = await db
-    .select({
-      personId: personLeadership.personId,
-      status: personLeadership.status,
-      code: personLeadership.humanLeaderCode,
-      networkId: personLeadership.networkId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personLeadership)
-    .innerJoin(persons, eq(persons.id, personLeadership.personId))
-    .where(
-      and(
-        eq(personLeadership.directLeaderPersonId, parentPersonId),
-        inArray(personLeadership.status, ["active", "eligible"]),
-      ),
+  const [leadershipSnapshot, cellsSnapshot] = await Promise.all([
+    client.query(api.reporting.leadershipSnapshot, {}),
+    client.query(api.reporting.cellsSnapshot, {}),
+  ]);
+
+  const directs = leadershipSnapshot
+    .filter(
+      (l) =>
+        l.directLeaderPersonId === parentPersonId &&
+        (l.status === "active" || l.status === "eligible"),
     )
-    .orderBy(personLeadership.humanLeaderCode);
+    .sort((a, b) => (a.humanLeaderCode ?? "").localeCompare(b.humanLeaderCode ?? ""));
 
   const cards: TreeNodeCard[] = [];
   for (const d of directs) {
     const progress = d.status === "active" ? await getTwelveProgress(d.personId) : { current: 0, ready: false };
-    const [{ descendants }] = await db
-      .select({ descendants: count() })
-      .from(leadershipClosure)
-      .where(
-        and(
-          eq(leadershipClosure.ancestorPersonId, d.personId),
-          gt(leadershipClosure.depth, 0),
-        ),
-      );
-    const [{ cellCount }] = await db
-      .select({ cellCount: count() })
-      .from(cells)
-      .where(
-        and(
-          eq(cells.responsiblePersonId, d.personId),
-          sql`${cells.status} <> 'closed'`,
-        ),
-      );
+    const descendants = await client.query(api.leadership.listDescendants, {
+      ancestorPersonId: d.personId as Id<"persons">,
+    });
+    const cellCount = cellsSnapshot.filter(
+      (c) => c.responsiblePersonId === d.personId && c.status !== "closed",
+    ).length;
     cards.push({
       personId: d.personId,
       fullName: formatFullName(d.firstName, d.lastName),
-      code: d.code,
+      code: d.humanLeaderCode ?? null,
       status: d.status,
       networkId: d.networkId,
       directCount: progress.current,
-      descendantCount: Number(descendants),
-      cellCount: Number(cellCount),
+      descendantCount: descendants.length,
+      cellCount,
       readyForTwelve: Boolean(progress.ready),
     });
   }
