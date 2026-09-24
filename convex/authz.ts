@@ -9,6 +9,7 @@ import {
   requireSelfOrPermission,
 } from "./lib/identity";
 import { forbidden, notFound } from "./lib/errors";
+import { bootstrapInitialSuperadmin as bootstrapInitialSuperadminInternal } from "./lib/initialSuperadminBootstrap";
 import { now } from "./lib/time";
 
 /** Mirrors `src/modules/authorization/policy.ts` `AuthContext` (ids as strings). */
@@ -106,6 +107,29 @@ export const seedSuperadminRole = internalMutation({
       startsAt: now(),
       createdAt: now(),
     });
+  },
+});
+
+/**
+ * Development-only, fail-closed bootstrap for the first global superadmin.
+ *
+ * Before calling this internal mutation, verify in Clerk Development that the
+ * selected `clerkUserId` owns the supplied verified primary email. This
+ * mutation intentionally does not create or modify the Clerk identity.
+ */
+export const bootstrapInitialSuperadmin = internalMutation({
+  args: {
+    clerkUserId: v.string(),
+    email: v.string(),
+    displayName: v.optional(v.string()),
+  },
+  returns: v.object({
+    userId: v.id("users"),
+    assignmentId: v.id("userRoleAssignments"),
+    created: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    return await bootstrapInitialSuperadminInternal(ctx, args);
   },
 });
 

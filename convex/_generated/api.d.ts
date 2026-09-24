@@ -18,6 +18,8 @@ import type * as leadership from "../leadership.js";
 import type * as lib_errors from "../lib/errors.js";
 import type * as lib_identity from "../lib/identity.js";
 import type * as lib_ids from "../lib/ids.js";
+import type * as lib_initialSuperadminBootstrap from "../lib/initialSuperadminBootstrap.js";
+import type * as lib_seedFoundation from "../lib/seedFoundation.js";
 import type * as lib_time from "../lib/time.js";
 import type * as organization from "../organization.js";
 import type * as persons from "../persons.js";
@@ -44,6 +46,8 @@ declare const fullApi: ApiFromModules<{
   "lib/errors": typeof lib_errors;
   "lib/identity": typeof lib_identity;
   "lib/ids": typeof lib_ids;
+  "lib/initialSuperadminBootstrap": typeof lib_initialSuperadminBootstrap;
+  "lib/seedFoundation": typeof lib_seedFoundation;
   "lib/time": typeof lib_time;
   organization: typeof organization;
   persons: typeof persons;
