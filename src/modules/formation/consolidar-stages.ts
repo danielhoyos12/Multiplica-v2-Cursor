@@ -16,6 +16,7 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
+import { deriveConsolidarLadderStatus } from "@/modules/formation/consolidar-status";
 import {
   OfficialEligibility,
   ensureOfficialCatalog,
@@ -391,6 +392,12 @@ export async function getPersonConsolidarSummary(personId: string) {
   const enc = await getStageProgress(personId, "encuentro");
   const post = await getStageProgress(personId, "post_encuentro");
   const agg = await getConsolidarAggregate(personId);
+  const derived = deriveConsolidarLadderStatus({
+    aggregateStatus: agg?.status,
+    preStatus: pre?.status,
+    encuentroStatus: enc?.status,
+    postStatus: post?.status,
+  });
   return {
     pre: {
       status: pre?.status ?? "pending",
@@ -405,15 +412,53 @@ export async function getPersonConsolidarSummary(personId: string) {
       label: statusLabel(post?.status ?? "pending"),
     },
     consolidar: {
-      status: agg?.status ?? "pending",
-      label: statusLabel(agg?.status ?? "pending"),
-      derivedComplete: OfficialEligibility.consolidar(
-        pre?.status ?? null,
-        enc?.status ?? null,
-        post?.status ?? null,
-      ),
+      status: derived.status,
+      label: statusLabel(derived.status),
+      derivedComplete: derived.derivedComplete,
+      /** Raw aggregate row — may be stale; do not use for gates/UI. */
+      aggregateStatus: agg?.status ?? "pending",
     },
   };
+}
+
+/**
+ * After "Iniciar Consolidar", open Pre-Encuentro as the next UDLV step.
+ * Idempotent: does not downgrade an already advanced stage.
+ */
+export async function ensurePreEncuentroEligible(
+  personId: string,
+  ministryId: string,
+  networkId: string | null,
+) {
+  const existing = await getStageProgress(personId, "pre_encuentro");
+  if (
+    existing &&
+    (existing.status === "eligible" ||
+      existing.status === "in_progress" ||
+      existing.status === "academic_completed" ||
+      existing.status === "completed")
+  ) {
+    return existing;
+  }
+
+  const client = await getAuthenticatedConvexClient();
+  return withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: personId as Id<"persons">,
+        processType: "pre_encuentro",
+        status: "eligible",
+        stage: existing ? undefined : "pre_encuentro",
+        currentStep: "apto_pre",
+        ministryId: ministryId as Id<"ministries">,
+        networkId: (networkId ?? undefined) as Id<"networks"> | undefined,
+        metadata: {
+          ...(existing?.metadata ?? {}),
+          opened_by: "start_consolidation",
+        },
+      })
+      .catch(mapConvexError),
+  );
 }
 
 export async function listConsolidarCycles(actorUserId: string, stage?: ConsolidarStage) {

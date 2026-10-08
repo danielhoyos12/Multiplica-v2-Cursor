@@ -677,6 +677,8 @@ export const upsertProgress = mutation({
     completedAt: v.optional(v.number()),
     completedByUserId: v.optional(v.id("users")),
     metadata: v.optional(v.any()),
+    /** When true, clears completion stamps (safe reopen of a false-completed aggregate). */
+    clearCompletion: v.optional(v.boolean()),
   },
   returns: progressDoc,
   handler: async (ctx, args) => {
@@ -691,8 +693,13 @@ export const upsertProgress = mutation({
       if (args.networkId !== undefined) patch.networkId = args.networkId;
       if (args.assignedLeaderPersonId !== undefined) patch.assignedLeaderPersonId = args.assignedLeaderPersonId;
       if (args.startedAt !== undefined) patch.startedAt = args.startedAt;
-      if (args.completedAt !== undefined) patch.completedAt = args.completedAt;
-      if (args.completedByUserId !== undefined) patch.completedByUserId = args.completedByUserId;
+      if (args.clearCompletion) {
+        patch.completedAt = undefined;
+        patch.completedByUserId = undefined;
+      } else {
+        if (args.completedAt !== undefined) patch.completedAt = args.completedAt;
+        if (args.completedByUserId !== undefined) patch.completedByUserId = args.completedByUserId;
+      }
       if (args.metadata !== undefined) patch.metadata = args.metadata;
       await ctx.db.patch("personProcessProgress", existing._id, patch);
       return (await ctx.db.get("personProcessProgress", existing._id))!;

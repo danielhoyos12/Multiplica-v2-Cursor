@@ -15,6 +15,7 @@ import {
   enrollInUdv,
   pauseProcess,
   recordTrainingAttendance,
+  repairConsolidarUdlvState,
   resumeProcess,
   startConsolidation,
 } from "./service";
@@ -85,6 +86,29 @@ export async function startConsolidationAction(raw: unknown) {
     revalidatePath("/proceso");
     revalidatePath(`/ganar/${parsed.data.personId}`);
     return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+/**
+ * Secure repair for false Consolidar completion (no CLI admin bypass).
+ * Requires Clerk session + pastoral RBAC via startConsolidation.
+ */
+export async function repairConsolidarUdlvAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = startConsolidationInputSchema
+      .pick({ personId: true })
+      .safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const result = await repairConsolidarUdlvState(user.id, parsed.data.personId);
+    revalidatePath("/proceso");
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    revalidatePath("/");
+    return { ok: true as const, ...result };
   } catch (error) {
     return toActionError(error);
   }

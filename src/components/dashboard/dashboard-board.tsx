@@ -129,22 +129,22 @@ export function DashboardBoard({
           <KpiCard
             label="Ganar"
             value={funnelCount(dash, "ganar")}
-            hint="Personas activas en etapa Ganar (conteo actual)"
+            hint={`En etapa (activas): ${dash.persons.totalActive} · completaron Ganar = personas activas`}
           />
           <KpiCard
             label="Consolidar"
             value={funnelCount(dash, "consolidar")}
-            hint={`Pre ${dash.ladder.consolidar.pre.completed} · Enc ${dash.ladder.consolidar.encuentro.completed} · Post ${dash.ladder.consolidar.post.completed}`}
+            hint={`En curso ${dash.ladder.consolidar.consolidarInProgress} · completadas (UDLV) ${dash.ladder.consolidar.consolidarCompleted} · Pre/Enc/Post hechos ${dash.ladder.consolidar.pre.completed}/${dash.ladder.consolidar.encuentro.completed}/${dash.ladder.consolidar.post.completed}`}
           />
           <KpiCard
             label="Discipular"
             value={funnelCount(dash, "discipular")}
-            hint="Capacitación Destino + Re-Encuentro + Escuela Ministerial (activos en etapa)"
+            hint="En etapa = Destino + Re-Encuentro + EM (eligible/en curso/académico/completado; no suma personas duplicadas por métrica de funnel)"
           />
           <KpiCard
             label="Enviar"
             value={funnelCount(dash, "enviar")}
-            hint={`Completados ${dash.ladder.enviar.completed} · aptos ${dash.ladder.enviar.eligible}`}
+            hint={`Completados ${dash.ladder.enviar.completed} · en curso ${dash.ladder.enviar.in_progress} · aptos ${dash.ladder.enviar.eligible}`}
           />
           <KpiCard
             label="Líderes activos"

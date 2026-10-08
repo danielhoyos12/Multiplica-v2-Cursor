@@ -18,6 +18,7 @@ export {
   listUdvCycles,
   pauseProcess,
   recordTrainingAttendance,
+  repairConsolidarUdlvState,
   resumeProcess,
   startConsolidation,
   statusLabel,
@@ -82,12 +83,19 @@ export {
   ConsolidarRules,
   createConsolidarCycle,
   enrollConsolidarStage,
+  ensurePreEncuentroEligible,
   getConsolidarCycleBoard,
   getConsolidarDashboardCounts,
   getPersonConsolidarSummary,
   listConsolidarCycles,
   syncConsolidarAggregate,
 } from "./consolidar-stages";
+
+export {
+  canOfferCapacitacionDestino,
+  deriveConsolidarLadderStatus,
+  needsConsolidarUdlvRepair,
+} from "./consolidar-status";
 
 export {
   countCatalogExpectation,

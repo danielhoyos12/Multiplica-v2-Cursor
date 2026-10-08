@@ -25,7 +25,10 @@ export type LadderMetrics = {
     pre: StageStatusCounts;
     encuentro: StageStatusCounts;
     post: StageStatusCounts;
+    /** Persons with Pre+Encuentro+Post all completed (UDLV). */
     consolidarCompleted: number;
+    /** Persons with Consolidar/UDLV started but not fully complete. */
+    consolidarInProgress: number;
   };
   discipular: {
     cd1: StageStatusCounts;
@@ -81,7 +84,40 @@ export async function getLadderMetrics(scope: DashboardScope): Promise<LadderMet
   const pre = fillStage(scoped, "pre_encuentro");
   const encuentro = fillStage(scoped, "encuentro");
   const post = fillStage(scoped, "post_encuentro");
-  const consolidarCompleted = fillStage(scoped, "consolidar").completed;
+
+  // Derive Consolidar completion from UDLV stages per person (ignore false aggregate completes).
+  const byPerson = new Map<
+    string,
+    { pre?: string; encuentro?: string; post?: string; consolidar?: string }
+  >();
+  for (const p of scoped) {
+    const cur = byPerson.get(p.personId) ?? {};
+    if (p.processType === "pre_encuentro") cur.pre = p.status;
+    if (p.processType === "encuentro") cur.encuentro = p.status;
+    if (p.processType === "post_encuentro") cur.post = p.status;
+    if (p.processType === "consolidar") cur.consolidar = p.status;
+    byPerson.set(p.personId, cur);
+  }
+  let consolidarCompleted = 0;
+  let consolidarInProgress = 0;
+  for (const row of byPerson.values()) {
+    const udlvDone =
+      row.pre === "completed" && row.encuentro === "completed" && row.post === "completed";
+    if (udlvDone) {
+      consolidarCompleted += 1;
+      continue;
+    }
+    const stageActive = [row.pre, row.encuentro, row.post].some(
+      (s) =>
+        s === "eligible" ||
+        s === "in_progress" ||
+        s === "academic_completed" ||
+        s === "completed",
+    );
+    if (row.consolidar === "in_progress" || row.consolidar === "completed" || stageActive) {
+      consolidarInProgress += 1;
+    }
+  }
 
   const cd1 = fillStage(scoped, "destino_n1");
   const cd2 = fillStage(scoped, "destino_n2");
@@ -111,9 +147,15 @@ export async function getLadderMetrics(scope: DashboardScope): Promise<LadderMet
 
   return {
     methodology: "current_state_counts",
-    note: "Conteos actuales por etapa; no son tasas de conversión de cohorte histórica.",
+    note: "Consolidar completado = Pre+Encuentro+Post (UDLV). Ganar y Consolidar en curso son métricas distintas por persona.",
     ganarCompleted: 0, // filled by dashboard from person metrics
-    consolidar: { pre, encuentro, post, consolidarCompleted },
+    consolidar: {
+      pre,
+      encuentro,
+      post,
+      consolidarCompleted,
+      consolidarInProgress,
+    },
     discipular: { cd1, cd2, reencuentro, cd3, em1, em2, em3 },
     enviar: { ...enviar, ungidos, activados },
     funnel: [
@@ -121,7 +163,8 @@ export async function getLadderMetrics(scope: DashboardScope): Promise<LadderMet
       {
         code: "consolidar",
         label: "CONSOLIDAR",
-        count: Math.max(activeish(pre), activeish(encuentro), activeish(post), consolidarCompleted),
+        // Unique persons in Consolidar (en curso + completadas), not sum of stage rows.
+        count: consolidarCompleted + consolidarInProgress,
       },
       {
         code: "discipular",

@@ -11,6 +11,7 @@ import { hasPermission, isSuperadmin } from "@/modules/authorization";
 import { getPersonLadder, statusLabel } from "@/modules/formation";
 import {
   completeConsolidationAction,
+  repairConsolidarUdlvAction,
   startConsolidationAction,
 } from "@/modules/formation/actions";
 import {
@@ -272,13 +273,18 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
 
           <li className="space-y-2">
             <div className="flex justify-between gap-2">
-              <span className="font-medium">02 Consolidar</span>
+              <div className="space-y-0.5">
+                <span className="font-medium">02 Consolidar</span>
+                <p className="text-xs font-normal text-[var(--muted)]">
+                  Universidad de la Vida (UDLV)
+                </p>
+              </div>
               <StatusBadge
                 label={ladder ? statusLabel(ladder.consolidar.status) : "—"}
                 tone={ladder?.consolidar.status === "completed" ? "success" : "warning"}
               />
             </div>
-            <ul className="ml-3 space-y-1 text-[var(--muted)]">
+            <ul className="ml-3 space-y-1 border-l border-[var(--border)] pl-3 text-[var(--muted)]">
               <StageRow
                 label="Pre-Encuentro"
                 status={ladder?.consolidar.stages?.pre.status}
@@ -299,10 +305,19 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
 
           <li className="space-y-2">
             <div className="flex justify-between gap-2">
-              <span className="font-medium">03 Discipular</span>
-              <Link href="/destino" className="text-xs text-[var(--cobalt)] underline">
-                Capacitación Destino
-              </Link>
+              <div className="space-y-0.5">
+                <span className="font-medium">03 Discipular</span>
+                <p className="text-xs font-normal text-[var(--muted)]">
+                  Destino · Re-Encuentro · Escuela Ministerial
+                </p>
+              </div>
+              {ladder?.consolidar.derivedComplete ? (
+                <Link href="/destino" className="text-xs text-[var(--cobalt)] underline">
+                  Capacitación Destino
+                </Link>
+              ) : (
+                <span className="text-xs text-[var(--muted)]">Tras UDLV</span>
+              )}
             </div>
             <ul className="ml-3 space-y-1 text-[var(--muted)]">
               <StageRow
@@ -379,8 +394,8 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
           ) : null}
           {canProcess &&
           detail.current?.ministryId &&
-          ladder?.consolidar.status !== "completed" &&
-          ladder?.consolidar.status !== "in_progress" ? (
+          !ladder?.consolidar.derivedComplete &&
+          ladder?.consolidar.status === "pending" ? (
             <form
               action={async () => {
                 "use server";
@@ -399,7 +414,35 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
               </button>
             </form>
           ) : null}
-          {canCompleteConsol && ladder?.consolidar.status === "in_progress" ? (
+          {canProcess &&
+          !ladder?.consolidar.derivedComplete &&
+          ladder?.consolidar.stages?.consolidar.aggregateStatus === "completed" ? (
+            <form
+              action={async () => {
+                "use server";
+                await repairConsolidarUdlvAction({ personId: id });
+              }}
+            >
+              <button
+                type="submit"
+                className="neo-touch rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm text-white"
+              >
+                Continuar Universidad de la Vida
+              </button>
+            </form>
+          ) : null}
+          {canProcess &&
+          !ladder?.consolidar.derivedComplete &&
+          ladder?.consolidar.status === "in_progress" &&
+          ladder?.next.code === "pre_encuentro" ? (
+            <Link
+              href="/proceso"
+              className="neo-touch rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm font-medium text-[var(--cobalt)]"
+            >
+              Ir a Pre-Encuentro
+            </Link>
+          ) : null}
+          {canCompleteConsol && ladder?.consolidar.derivedComplete ? (
             <form
               action={async () => {
                 "use server";
@@ -410,11 +453,11 @@ export default async function PersonDetailPage({ params }: { params: Params }) {
                 type="submit"
                 className="neo-touch rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
               >
-                Completar Consolidar
+                Sincronizar cierre de Consolidar
               </button>
             </form>
           ) : null}
-          {ladder?.consolidar.status === "completed" ? (
+          {ladder?.consolidar.derivedComplete ? (
             <Link href="/destino" className="text-sm font-medium text-[var(--cobalt)] underline">
               Ir a Capacitación Destino
             </Link>

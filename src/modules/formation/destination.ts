@@ -168,6 +168,10 @@ export async function ensureDestinoN1Eligible(
   ministryId: string,
   networkId: string | null,
 ) {
+  // Never open CD1 while UDLV (Pre/Encuentro/Post) is incomplete — even if
+  // a stale consolidar aggregate row says "completed".
+  await assertDestinoEligible(personId, 1);
+
   const existing = await getLevelProgress(personId, 1);
   if (existing && existing.status !== "pending") return existing;
   const client = await getAuthenticatedConvexClient();
@@ -189,16 +193,33 @@ export async function ensureDestinoN1Eligible(
 
 export async function assertDestinoEligible(personId: string, level: DestinoLevel) {
   if (level === 1) {
-    // Official: Consolidar completed (Pre+Encuentro+Post). UDV is NOT a gate.
+    // Official: Consolidar = UDLV (Pre+Encuentro+Post). Legacy processType `udv` is not a gate.
     const client = await getAuthenticatedConvexClient();
-    const consolidar = await client.query(api.formation.getProgress, {
-      personId: personId as Id<"persons">,
-      processType: "consolidar",
-    });
-    if (!consolidar || consolidar.status !== "completed") {
+    const [pre, enc, post] = await Promise.all([
+      client.query(api.formation.getProgress, {
+        personId: personId as Id<"persons">,
+        processType: "pre_encuentro",
+      }),
+      client.query(api.formation.getProgress, {
+        personId: personId as Id<"persons">,
+        processType: "encuentro",
+      }),
+      client.query(api.formation.getProgress, {
+        personId: personId as Id<"persons">,
+        processType: "post_encuentro",
+      }),
+    ]);
+    const { OfficialEligibility } = await import("./official-catalog");
+    if (
+      !OfficialEligibility.consolidar(
+        pre?.status ?? null,
+        enc?.status ?? null,
+        post?.status ?? null,
+      )
+    ) {
       throw new DomainError(
         DomainErrorCode.DESTINATION_LEVEL_1_NOT_ELIGIBLE,
-        "Consolidar (Pre + Encuentro + Post) debe estar completado.",
+        "Consolidar (Pre + Encuentro + Post / Universidad de la Vida) debe estar completado.",
       );
     }
     return;

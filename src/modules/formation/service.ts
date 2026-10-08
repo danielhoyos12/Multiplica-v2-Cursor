@@ -187,16 +187,20 @@ export async function startConsolidation(actorUserId: string, raw: unknown) {
   }
   await assertProcessAccess(actor, input.personId, org.ministryId);
 
-  const existing = await getProgress(input.personId, "consolidar");
-  if (existing?.status === "completed") {
+  const { getPersonConsolidarSummary, ensurePreEncuentroEligible } = await import(
+    "./consolidar-stages"
+  );
+  const summary = await getPersonConsolidarSummary(input.personId);
+  if (summary.consolidar.derivedComplete) {
     throw new DomainError(
       DomainErrorCode.CONSOLIDATION_ALREADY_COMPLETED,
-      "Consolidar ya está completado.",
+      "Consolidar ya está completado (Pre + Encuentro + Post).",
     );
   }
-  if (existing?.status === "in_progress") {
-    return existing;
-  }
+
+  const existing = await getProgress(input.personId, "consolidar");
+  const needsReopen =
+    existing?.status === "completed" && !summary.consolidar.derivedComplete;
 
   const client = await getAuthenticatedConvexClient();
   const assignedLeaderPersonId = input.assignedLeaderPersonId ?? actor.personId ?? undefined;
@@ -208,11 +212,12 @@ export async function startConsolidation(actorUserId: string, raw: unknown) {
         processType: "consolidar",
         status: "in_progress",
         stage: existing ? undefined : "consolidar",
-        currentStep: existing ? "seguimiento" : "inicio",
+        currentStep: existing || needsReopen ? "seguimiento" : "inicio",
         ministryId: org.ministryId as Id<"ministries">,
         networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
         assignedLeaderPersonId: assignedLeaderPersonId as Id<"persons"> | undefined,
         startedAt: existing?.startedAt ?? Date.now(),
+        clearCompletion: needsReopen || undefined,
       })
       .catch(mapConvexError),
   );
@@ -233,9 +238,64 @@ export async function startConsolidation(actorUserId: string, raw: unknown) {
     entityId: row.id,
     metadata: { personId: input.personId, resumed: Boolean(existing) },
   });
+
+  // Consolidar = UDLV: open Pre-Encuentro as the immediate next step.
+  await ensurePreEncuentroEligible(input.personId, org.ministryId, org.networkId);
+
   return row;
 }
 
+/**
+ * Authorized, idempotent repair for a false Consolidar "completed" without UDLV.
+ * Uses the same RBAC as startConsolidation (Clerk session → JWT → permissions).
+ * Does not delete Persona Maestra, history, audit events, or legacy `udv` rows.
+ */
+export async function repairConsolidarUdlvState(
+  actorUserId: string,
+  personId: string,
+): Promise<{
+  repaired: boolean;
+  reason: "already_complete" | "already_correct" | "reopened";
+}> {
+  const { getPersonConsolidarSummary } = await import("./consolidar-stages");
+  const { needsConsolidarUdlvRepair } = await import("./consolidar-status");
+
+  const org = await currentOrg(personId);
+  if (!org?.ministryId) {
+    throw new DomainError(
+      DomainErrorCode.VALIDATION_FAILED,
+      "La persona necesita pertenencia organizacional.",
+    );
+  }
+
+  const summary = await getPersonConsolidarSummary(personId);
+  if (summary.consolidar.derivedComplete) {
+    return { repaired: false, reason: "already_complete" };
+  }
+
+  const aggregate = await getProgress(personId, "consolidar");
+  if (
+    !needsConsolidarUdlvRepair({
+      derivedComplete: summary.consolidar.derivedComplete,
+      aggregateStatus: aggregate?.status,
+      aggregateCompletedAt: aggregate?.completedAt,
+      preStatus: summary.pre.status,
+    })
+  ) {
+    return { repaired: false, reason: "already_correct" };
+  }
+
+  await startConsolidation(actorUserId, {
+    personId,
+    ministryId: org.ministryId,
+  });
+  return { repaired: true, reason: "reopened" };
+}
+
+/**
+ * Close Consolidar only when UDLV (Pre + Encuentro + Post) is complete.
+ * Does not treat legacy `udv` processType as a gate or as Consolidar itself.
+ */
 export async function completeConsolidation(actorUserId: string, raw: unknown) {
   const actor = await requireActor(actorUserId);
   const input = completeConsolidationInputSchema.parse(raw);
@@ -250,46 +310,40 @@ export async function completeConsolidation(actorUserId: string, raw: unknown) {
   });
   await assertProcessAccess(actor, input.personId, progress.ministryId);
 
-  if (progress.status === "completed") {
-    // Idempotent: return existing + ensure UDV pending row
-    await ensureUdvEligibleRow(progress.personId, progress.ministryId, progress.networkId ?? null);
-    return progress;
+  const { getPersonConsolidarSummary, syncConsolidarAggregate } = await import(
+    "./consolidar-stages"
+  );
+  const summary = await getPersonConsolidarSummary(input.personId);
+
+  if (!summary.consolidar.derivedComplete) {
+    throw new DomainError(
+      DomainErrorCode.PREREQUISITE_NOT_MET,
+      "Consolidar solo se completa cuando Pre-Encuentro, Encuentro y Post-Encuentro (Universidad de la Vida) están completados.",
+    );
   }
 
-  const client = await getAuthenticatedConvexClient();
-  const row = withId(
-    await client
-      .mutation(api.formation.upsertProgress, {
-        personId: input.personId as Id<"persons">,
-        processType: "consolidar",
-        status: "completed",
-        currentStep: "completado",
-        completedAt: Date.now(),
-        completedByUserId: actorUserId as Id<"users">,
-      })
-      .catch(mapConvexError),
-  );
+  const synced = await syncConsolidarAggregate(input.personId, actorUserId);
+  if (!synced) {
+    throw new DomainError(
+      DomainErrorCode.PREREQUISITE_NOT_MET,
+      "No se pudo sincronizar el cierre de Consolidar; verifica las tres etapas UDLV.",
+    );
+  }
 
-  await appendEvent({
-    progressId: row.id,
-    personId: input.personId,
-    processType: "consolidar",
-    eventType: "completed",
-    fromStatus: progress.status,
-    toStatus: "completed",
-    actorUserId,
-    note: input.note,
-  });
-  await writeAuditLog({
-    actorUserId,
-    action: "process.consolidation.completed",
-    entityType: "person_process_progress",
-    entityId: row.id,
-    metadata: { personId: input.personId },
-  });
+  if (input.note?.trim()) {
+    await appendEvent({
+      progressId: synced.id,
+      personId: input.personId,
+      processType: "consolidar",
+      eventType: "note",
+      fromStatus: progress.status,
+      toStatus: "completed",
+      actorUserId,
+      note: input.note,
+    });
+  }
 
-  await ensureUdvEligibleRow(row.personId, row.ministryId, row.networkId ?? null);
-  return row;
+  return synced;
 }
 
 async function ensureUdvEligibleRow(
@@ -897,7 +951,7 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
   }
 
   const consolidar = await getProgress(personId, "consolidar");
-  const udv = await getProgress(personId, "udv"); // legacy only — not a gate
+  const udv = await getProgress(personId, "udv"); // legacy only — not a gate / not UDLV
   const { getPersonConsolidarSummary } = await import("./consolidar-stages");
   const { getPersonDestinoSummary } = await import("./destination");
   const { getPersonEmLevelsSummary } = await import("./em-levels");
@@ -908,7 +962,9 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
   const emLevels = await getPersonEmLevelsSummary(personId);
   const reencuentro = await getPersonReencuentroSummary(personId);
 
-  const consolidarDone = consolidar?.status === "completed";
+  // Consolidar display/gates derive from UDLV stages (never trust a stale aggregate alone).
+  const consolidarDone = consolidarStages.consolidar.derivedComplete;
+  const consolidarStatus = consolidarStages.consolidar.status;
   const n1Done = destinoLevels.n1.status === "completed";
   const n2Done = destinoLevels.n2.status === "completed";
   const n3Done = destinoLevels.n3.status === "completed";
@@ -917,20 +973,20 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
   const em2Done = emLevels.em2.status === "completed";
   const em3Done = emLevels.em3.status === "completed";
 
-  // Official next-step resolution (no UDV gate; RE between CD2 and CD3)
+  // Official next-step: finish UDLV before offering Capacitación Destino (Discipular).
   let nextCode = "pre_encuentro";
   let nextLabel = "Pre-Encuentro";
   let nextEligible = true;
 
-  if (consolidarStages.pre.status !== "completed") {
+  if (!consolidarDone && consolidarStages.pre.status !== "completed") {
     nextCode = "pre_encuentro";
     nextLabel = "Pre-Encuentro";
-    nextEligible = true;
-  } else if (consolidarStages.encuentro.status !== "completed") {
+    nextEligible = consolidarStatus === "in_progress" || consolidarStatus === "eligible";
+  } else if (!consolidarDone && consolidarStages.encuentro.status !== "completed") {
     nextCode = "encuentro";
     nextLabel = "Encuentro";
     nextEligible = true;
-  } else if (consolidarStages.post.status !== "completed") {
+  } else if (!consolidarDone && consolidarStages.post.status !== "completed") {
     nextCode = "post_encuentro";
     nextLabel = "Post-Encuentro";
     nextEligible = true;
@@ -984,12 +1040,16 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
     personId,
     ganar: { status: "completed" as const, label: "Completado" },
     consolidar: {
-      status: consolidar?.status ?? consolidarStages.consolidar.status,
-      label: statusLabel(consolidar?.status ?? consolidarStages.consolidar.status),
+      status: consolidarStatus,
+      label: statusLabel(consolidarStatus),
       progress: consolidar,
       stages: consolidarStages,
+      derivedComplete: consolidarDone,
     },
-    /** @deprecated UDV is not an official gate; kept for legacy display only */
+    /**
+     * Legacy `udv` processType — NOT Universidad de la Vida.
+     * UDLV is Pre/Encuentro/Post under Consolidar. Kept for old rows only.
+     */
     udv: {
       status: udv?.status ?? "pending",
       label: statusLabel(udv?.status ?? "pending"),
@@ -1124,10 +1184,48 @@ export async function getProcessDashboardCounts(
     rows.filter((r) => r.progress.processType === type && statuses.includes(r.progress.status)).length;
   const pickOne = (type: string, status: string) => pick(type, [status]);
 
+  // Derive Consolidar KPI from UDLV stages (avoid counting false aggregate "completed").
+  const byPerson = new Map<
+    string,
+    { pre?: string; encuentro?: string; post?: string; consolidar?: string }
+  >();
+  for (const row of rows) {
+    const p = row.progress;
+    const cur = byPerson.get(p.personId) ?? {};
+    if (p.processType === "pre_encuentro") cur.pre = p.status;
+    if (p.processType === "encuentro") cur.encuentro = p.status;
+    if (p.processType === "post_encuentro") cur.post = p.status;
+    if (p.processType === "consolidar") cur.consolidar = p.status;
+    byPerson.set(p.personId, cur);
+  }
+  let consolidarCompleted = 0;
+  let consolidarInProgress = 0;
+  let consolidarPending = 0;
+  for (const row of byPerson.values()) {
+    const udlvDone =
+      row.pre === "completed" && row.encuentro === "completed" && row.post === "completed";
+    if (udlvDone) {
+      consolidarCompleted += 1;
+      continue;
+    }
+    const stageActive = [row.pre, row.encuentro, row.post].some(
+      (s) =>
+        s === "eligible" ||
+        s === "in_progress" ||
+        s === "academic_completed" ||
+        s === "completed",
+    );
+    if (row.consolidar === "in_progress" || row.consolidar === "completed" || stageActive) {
+      consolidarInProgress += 1;
+    } else if (row.consolidar === "pending" || row.consolidar === "eligible") {
+      consolidarPending += 1;
+    }
+  }
+
   return {
-    consolidarPending: pickOne("consolidar", "pending"),
-    consolidarInProgress: pickOne("consolidar", "in_progress"),
-    consolidarCompleted: pickOne("consolidar", "completed"),
+    consolidarPending,
+    consolidarInProgress,
+    consolidarCompleted,
     // Official stage counts
     preEncuentro: pick("pre_encuentro", ["eligible", "in_progress", "academic_completed"]),
     encuentro: pick("encuentro", ["eligible", "in_progress", "academic_completed"]),
