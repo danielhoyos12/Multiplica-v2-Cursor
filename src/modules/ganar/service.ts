@@ -8,11 +8,13 @@ import {
   assertCanMutate,
   assertCanView,
   canAccessMinistry,
+  isLeaderGeneral,
   isSuperadmin,
   loadAuthContext,
   type AuthContext,
   type NetworkCode,
 } from "@/modules/authorization";
+import { isDescendantOf } from "@/modules/leadership/service";
 import { api, getAuthenticatedConvexClient, getPublicConvexClient } from "@/server/convex";
 
 import {
@@ -356,8 +358,47 @@ async function scopedActiveRows(actor: AuthContext): Promise<ActivePersonRow[]> 
   const client = await getAuthenticatedConvexClient();
   const rows = await client.query(api.persons.listActiveWithOrg, {});
   if (isSuperadmin(actor)) return rows;
-  if (actor.ministryIds.length === 0) return [];
-  return rows.filter((r) => actor.ministryIds.includes(r.ministryId as string));
+  if (actor.ministryIds.length === 0 && !actor.personId) return [];
+
+  const ministryFiltered = actor.ministryIds.length
+    ? rows.filter((r) => actor.ministryIds.includes(r.ministryId as string))
+    : rows;
+
+  // Tree leaders: own + authorized descendants only (not ministry-wide laterals).
+  if (
+    actor.personId &&
+    actor.roleCodes.includes("leader") &&
+    !isLeaderGeneral(actor)
+  ) {
+    const descendantIds = await client.query(api.formation.getDescendantPersonIds, {
+      rootPersonId: actor.personId as Id<"persons">,
+    });
+    const allowed = new Set<string>([
+      actor.personId,
+      ...descendantIds.map((id) => id as string),
+    ]);
+    return ministryFiltered.filter((r) => allowed.has(r._id as string));
+  }
+
+  return ministryFiltered;
+}
+
+async function assertPersonTreeAccess(
+  actor: AuthContext,
+  personId: string,
+  ministryId: string | null | undefined,
+) {
+  if (isSuperadmin(actor)) return;
+  if (isLeaderGeneral(actor) && ministryId && canAccessMinistry(actor, ministryId)) return;
+  if (actor.roleCodes.includes("staff") && ministryId && canAccessMinistry(actor, ministryId)) {
+    return;
+  }
+  if (actor.personId && actor.personId === personId) return;
+  if (actor.personId && (await isDescendantOf(actor.personId, personId))) return;
+  throw new DomainError(
+    DomainErrorCode.TREE_ACCESS_DENIED,
+    "Persona fuera del subárbol pastoral autorizado (acceso lateral/ascendente prohibido).",
+  );
 }
 
 export async function listPersonsForActor(
@@ -483,15 +524,26 @@ export async function getPersonForActor(actorUserId: string, personId: string) {
   }
 
   const org = await currentOrg(personId);
-  assertCanView(actor, {
-    type: "person",
-    id: personId,
-    ministryId: org?.ministryId ?? undefined,
-  });
+  const isDescendant =
+    Boolean(actor.personId) &&
+    actor.personId !== personId &&
+    (await isDescendantOf(actor.personId!, personId));
+
+  assertCanView(
+    actor,
+    {
+      type: "person",
+      id: personId,
+      ministryId: org?.ministryId ?? undefined,
+    },
+    { actorPersonId: actor.personId ?? undefined, isDescendant },
+  );
 
   if (!isSuperadmin(actor) && (!org?.ministryId || !canAccessMinistry(actor, org.ministryId))) {
     throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Persona fuera de alcance.");
   }
+
+  await assertPersonTreeAccess(actor, personId, org?.ministryId);
 
   const historyRows = await client.query(api.persons.getOrgHistory, {
     personId: personId as Id<"persons">,

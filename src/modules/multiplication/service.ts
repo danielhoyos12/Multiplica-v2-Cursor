@@ -338,16 +338,27 @@ export async function buildProjectionsForStudent(
   const { listEmLevelCycles, listDestinoCycles, listConsolidarCycles, listReencuentroEvents } =
     await import("@/modules/formation");
 
-  const [em1Cycles, em2Cycles, em3Cycles, cd1Cycles, cd2Cycles, reEvents, encCycles] =
-    await Promise.all([
-      listEmLevelCycles(actorUserId, 1),
-      listEmLevelCycles(actorUserId, 2),
-      listEmLevelCycles(actorUserId, 3),
-      listDestinoCycles(actorUserId, 1),
-      listDestinoCycles(actorUserId, 2),
-      listReencuentroEvents(actorUserId),
-      listConsolidarCycles(actorUserId, "encuentro"),
-    ]);
+  const [
+    em1Cycles,
+    em2Cycles,
+    em3Cycles,
+    cd1Cycles,
+    cd2Cycles,
+    reEvents,
+    encCycles,
+    preCycles,
+    postCycles,
+  ] = await Promise.all([
+    listEmLevelCycles(actorUserId, 1),
+    listEmLevelCycles(actorUserId, 2),
+    listEmLevelCycles(actorUserId, 3),
+    listDestinoCycles(actorUserId, 1),
+    listDestinoCycles(actorUserId, 2),
+    listReencuentroEvents(actorUserId),
+    listConsolidarCycles(actorUserId, "encuentro"),
+    listConsolidarCycles(actorUserId, "pre_encuentro"),
+    listConsolidarCycles(actorUserId, "post_encuentro"),
+  ]);
 
   const pickActiveOrNext = <T extends { status: string; startDate: string }>(rows: T[]) =>
     rows.find((r) => r.status === "active") ??
@@ -355,6 +366,60 @@ export async function buildProjectionsForStudent(
       .filter((r) => r.status === "planned" || r.status === "active")
       .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)))[0] ??
     null;
+
+  // Chain evidence from expediente disciples when available.
+  let chain = {
+    cohortSize: 6,
+    postCompleted: 0,
+    cd1StartedOrDone: 0,
+    preCompleted: 0,
+    encuentroCompleted: 0,
+  };
+  const progress = await getExpedienteProgress(actorUserId, studentPersonId).catch(() => null);
+  if (progress) {
+    const firstSix = progress.disciples.filter((d) => d.cohort === "first_six");
+    const client = await getAuthenticatedConvexClient();
+    let postCompleted = 0;
+    let cd1StartedOrDone = 0;
+    let preCompleted = 0;
+    let encuentroCompleted = 0;
+    for (const d of firstSix) {
+      const [pre, enc, post, cd1] = await Promise.all([
+        client.query(api.formation.getProgress, {
+          personId: d.personId as Id<"persons">,
+          processType: "pre_encuentro",
+        }),
+        client.query(api.formation.getProgress, {
+          personId: d.personId as Id<"persons">,
+          processType: "encuentro",
+        }),
+        client.query(api.formation.getProgress, {
+          personId: d.personId as Id<"persons">,
+          processType: "post_encuentro",
+        }),
+        client.query(api.formation.getProgress, {
+          personId: d.personId as Id<"persons">,
+          processType: "destino_n1",
+        }),
+      ]);
+      if (pre?.status === "completed") preCompleted += 1;
+      if (enc?.status === "completed") encuentroCompleted += 1;
+      if (post?.status === "completed") postCompleted += 1;
+      if (
+        cd1 &&
+        ["eligible", "in_progress", "academic_completed", "completed"].includes(cd1.status)
+      ) {
+        cd1StartedOrDone += 1;
+      }
+    }
+    chain = {
+      cohortSize: 6,
+      postCompleted,
+      cd1StartedOrDone,
+      preCompleted,
+      encuentroCompleted,
+    };
+  }
 
   return projectAll({
     asOfDate,
@@ -366,5 +431,8 @@ export async function buildProjectionsForStudent(
     discipleCd2Window: toWindow(pickActiveOrNext(cd2Cycles), "cd2"),
     discipleReencuentroWindow: toWindow(pickActiveOrNext(reEvents), "reencuentro"),
     discipleEncuentroWindow: toWindow(pickActiveOrNext(encCycles), "encuentro"),
+    disciplePreWindow: toWindow(pickActiveOrNext(preCycles), "pre"),
+    disciplePostWindow: toWindow(pickActiveOrNext(postCycles), "post"),
+    chain,
   });
 }

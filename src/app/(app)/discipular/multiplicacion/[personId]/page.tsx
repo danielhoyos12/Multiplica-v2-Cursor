@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 
 import { DataCard, KpiCard, SectionHeader, StatGroup } from "@/components/dashboard";
 import { EnrollmentPersonForm } from "@/components/formation/enrollment-person-form";

@@ -274,6 +274,23 @@ export async function markEmLevelAcademic(
       "Estado inválido para académico.",
     );
   }
+  if (
+    progress.status !== "in_progress" &&
+    progress.status !== "paused" &&
+    progress.status !== "academic_completed"
+  ) {
+    throw new DomainError(
+      DomainErrorCode.PREREQUISITE_NOT_MET,
+      "Debe estar inscrito/en curso en EM antes de marcar académico.",
+    );
+  }
+  if (progress.status !== "academic_completed") {
+    const { assertTrainingAttendanceRequirements } = await import("./attendance-requirements");
+    await assertTrainingAttendanceRequirements(raw.personId, LEVEL_CODE[raw.level], {
+      requireInProgress: true,
+      processType: LEVEL_PROCESS[raw.level],
+    });
+  }
   const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
     await client

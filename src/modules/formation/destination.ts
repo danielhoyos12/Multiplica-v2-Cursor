@@ -604,6 +604,15 @@ export async function markAcademicCompleted(
     throw new DomainError(DomainErrorCode.DESTINATION_ALREADY_COMPLETED, "Nivel ya completado.");
   }
 
+  // Academic OK requires attendance on required modules (catalog) — not a bare status flip.
+  if (progress.status !== "academic_completed") {
+    const { assertTrainingAttendanceRequirements } = await import("./attendance-requirements");
+    await assertTrainingAttendanceRequirements(raw.personId, LEVEL_CODE[raw.level], {
+      requireInProgress: true,
+      processType: LEVEL_PROCESS[raw.level],
+    });
+  }
+
   const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
     const enrollment = await client.query(api.formation.getEnrollment, {

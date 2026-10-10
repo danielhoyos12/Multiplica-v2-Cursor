@@ -19,7 +19,8 @@ export type ReportType =
   | "cells"
   | "leadership"
   | "formation"
-  | "transfers";
+  | "transfers"
+  | "multiplication";
 
 export type ReportPage = {
   type: ReportType;
@@ -176,6 +177,109 @@ export async function runReport(
     };
   }
 
+  if (type === "multiplication") {
+    const { listOpenExpedientesSummary } = await import("@/modules/multiplication");
+    const {
+      aggregateMultiplication,
+      splitByLine,
+    } = await import("./metrics-multiplication");
+    const summaries = await listOpenExpedientesSummary(actorUserId);
+    const rows = [];
+    const discipleSets = new Map<string, Set<string>>();
+    const leaderSets = new Map<string, Set<string>>();
+
+    for (const s of summaries) {
+      if (
+        !matches({
+          personId: s.studentPersonId,
+          ministryId: null,
+          networkId: null,
+        })
+      ) {
+        continue;
+      }
+      let depth: number | null = null;
+      if (scope.rootPersonId && scope.rootPersonId !== s.studentPersonId) {
+        const ok = await client.query(api.leadership.isDescendant, {
+          ancestorPersonId: scope.rootPersonId as Id<"persons">,
+          descendantPersonId: s.studentPersonId as Id<"persons">,
+        });
+        if (!ok && scope.mode === "subtree") continue;
+        const desc = await client.query(api.leadership.listDescendants, {
+          ancestorPersonId: scope.rootPersonId as Id<"persons">,
+        });
+        depth = desc.find((d) => d.personId === s.studentPersonId)?.depth ?? null;
+      } else if (scope.rootPersonId === s.studentPersonId) {
+        depth = 0;
+      }
+      rows.push({
+        studentPersonId: s.studentPersonId,
+        fullName: s.fullName,
+        ministryId: "",
+        networkId: null as string | null,
+        generationDepth: depth,
+        contactsListed: s.counters.contacts.listed,
+        wonLinked: s.counters.contacts.wonLinked,
+        teamSize: s.counters.team.teamSize,
+        firstSix: s.counters.team.firstSix,
+        activeLeadersWithCell: s.counters.team.activeLeadersWithCell,
+        teamComplete: s.counters.team.teamSize >= 12,
+      });
+      discipleSets.set(
+        s.studentPersonId,
+        new Set(
+          // placeholders — unique counts already in summary; keep empty set size via teamSize
+          Array.from({ length: s.counters.team.teamSize }, (_, i) => `${s.studentPersonId}:${i}`),
+        ),
+      );
+      leaderSets.set(
+        s.studentPersonId,
+        new Set(
+          Array.from(
+            { length: s.counters.team.activeLeadersWithCell },
+            (_, i) => `${s.studentPersonId}:L${i}`,
+          ),
+        ),
+      );
+    }
+
+    const { own, descendants, consolidated } = splitByLine(
+      rows,
+      scope.rootPersonId ?? scope.actor.personId,
+    );
+    const aggregates = aggregateMultiplication(consolidated, discipleSets, leaderSets);
+    const pageRows = paginate(consolidated, page, pageSize);
+    return {
+      type,
+      total: consolidated.length,
+      page,
+      pageSize,
+      rows: [
+        {
+          vista: "totales_consolidados",
+          estudiantes: aggregates.students,
+          discipulosUnicos: aggregates.uniqueDisciples,
+          lideresActivosUnicos: aggregates.uniqueActiveLeaders,
+          conLista15: aggregates.withLista15,
+          conGanados3: aggregates.withGanados3,
+          conEquipo6: aggregates.withTeam6,
+          conEquipo12: aggregates.withTeam12,
+          con6LideresActivos: aggregates.withSixActiveLeaders,
+          propios: own.length,
+          descendientes: descendants.length,
+        },
+        ...pageRows.map((r) => ({
+          estudiante: r.fullName,
+          generacion: r.generationDepth,
+          contactos: r.contactsListed,
+          ganados: r.wonLinked,
+          equipo: r.teamSize,
+          lideresActivosCelula: r.activeLeadersWithCell,
+        })),
+      ],
+    };
+  }
+
   // transfers
   const transfersSnapshot = await client.query(api.reporting.transferRequestsSnapshot, {});
   const filtered = transfersSnapshot
@@ -265,6 +369,7 @@ const REPORT_LABELS: Record<ReportType, string> = {
   leadership: "Liderazgo",
   formation: "Formación",
   transfers: "Transferencias",
+  multiplication: "Multiplicación 3–12",
 };
 
 async function loadExportRows(

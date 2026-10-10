@@ -319,6 +319,14 @@ export async function completeConsolidarStage(
   await assertProcessAccess(actor, raw.personId, org.ministryId);
   await assertStageEligible(raw.personId, raw.stage);
 
+  const { assertConsolidarStageRequirements } = await import(
+    "./attendance-requirements"
+  );
+  const attendanceEval = await assertConsolidarStageRequirements(
+    raw.personId,
+    raw.stage,
+  );
+
   const existing = await getStageProgress(raw.personId, raw.stage);
   const client = await getAuthenticatedConvexClient();
   const progress = withId(
@@ -334,6 +342,15 @@ export async function completeConsolidarStage(
         startedAt: existing?.startedAt ?? Date.now(),
         completedAt: Date.now(),
         completedByUserId: actorUserId as Id<"users">,
+        metadata: {
+          ...(existing?.metadata ?? {}),
+          approval_attendance: {
+            presentOrRecovered: attendanceEval.presentOrRecovered,
+            requiredModules: attendanceEval.requiredModules,
+            enrollmentId: attendanceEval.enrollmentId,
+            cycleId: attendanceEval.cycleId,
+          },
+        },
       })
       .catch(mapConvexError),
   );
@@ -346,13 +363,24 @@ export async function completeConsolidarStage(
     toStatus: "completed",
     actorUserId,
     note: raw.note,
+    metadata: {
+      attendance: attendanceEval,
+      approved_with_requirements: true,
+    },
   });
   await writeAuditLog({
     actorUserId,
     action: `process.${raw.stage}.completed`,
     entityType: "person_process_progress",
     entityId: progress.id,
-    metadata: { personId: raw.personId, leadership_activated: false },
+    metadata: {
+      personId: raw.personId,
+      leadership_activated: false,
+      attendance: {
+        presentOrRecovered: attendanceEval.presentOrRecovered,
+        requiredModules: attendanceEval.requiredModules,
+      },
+    },
   });
 
   // Apto para la siguiente etapa ≠ matrícula automática en un ciclo.

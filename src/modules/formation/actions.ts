@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 
 import { isDomainError } from "@/lib/errors";
 import { requireSessionUser } from "@/server/auth";
@@ -244,7 +245,48 @@ export async function recordAttendanceAction(raw: unknown) {
     await recordTrainingAttendance(user.id, parsed.data);
     revalidatePath("/udv");
     revalidatePath("/destino");
+    revalidatePath("/proceso");
+    revalidatePath("/escuela-ministerial");
     return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function recordGroupAttendanceAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = z
+      .object({
+        moduleId: z.string().min(1),
+        attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        entries: z
+          .array(
+            z.object({
+              enrollmentId: z.string().min(1),
+              status: z.enum(["present", "absent", "excused"]),
+            }),
+          )
+          .min(1)
+          .max(200),
+      })
+      .safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    for (const entry of parsed.data.entries) {
+      await recordTrainingAttendance(user.id, {
+        enrollmentId: entry.enrollmentId,
+        moduleId: parsed.data.moduleId,
+        attendanceDate: parsed.data.attendanceDate,
+        status: entry.status,
+      });
+    }
+    revalidatePath("/udv");
+    revalidatePath("/destino");
+    revalidatePath("/proceso");
+    revalidatePath("/escuela-ministerial");
+    return { ok: true as const, saved: parsed.data.entries.length };
   } catch (error) {
     return toActionError(error);
   }

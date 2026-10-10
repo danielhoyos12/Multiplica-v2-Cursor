@@ -19,3 +19,6 @@ export {
 
 export { projectA, projectB, projectC, projectAll } from "./projections";
 export type { ProjectionResult, ProjectionStatus } from "./projections";
+
+export { evaluateObjectives, canMarkActiveLeader } from "./objectives";
+export type { ObjectiveResult, EvidenceSnapshot } from "./objectives";

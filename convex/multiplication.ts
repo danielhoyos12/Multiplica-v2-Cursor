@@ -1,9 +1,67 @@
 import { v } from "convex/values";
 
+import type { Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
-import { conflict, invalidArgument, notFound } from "./lib/errors";
-import { requireActiveAppUser, requirePermission } from "./lib/identity";
+import { conflict, forbidden, invalidArgument, notFound } from "./lib/errors";
+import {
+  isSuperadmin,
+  requirePermission,
+  type ConvexAuthContext,
+} from "./lib/identity";
 import { now } from "./lib/time";
+
+type AuthDbCtx = QueryCtx | MutationCtx;
+
+async function isDescendantOf(
+  ctx: AuthDbCtx,
+  ancestorPersonId: Id<"persons">,
+  descendantPersonId: Id<"persons">,
+): Promise<boolean> {
+  if (ancestorPersonId === descendantPersonId) return true;
+  const row = await ctx.db
+    .query("leadershipClosure")
+    .withIndex("by_ancestor_descendant", (q) =>
+      q.eq("ancestorPersonId", ancestorPersonId).eq("descendantPersonId", descendantPersonId),
+    )
+    .unique();
+  return Boolean(row && row.depth > 0);
+}
+
+/** Own + descendants + LG ministry. Blocks lateral/ascendant. */
+async function assertStudentAccess(
+  ctx: AuthDbCtx,
+  auth: ConvexAuthContext,
+  studentPersonId: Id<"persons">,
+  ministryId?: Id<"ministries">,
+) {
+  if (isSuperadmin(auth)) return;
+  if (
+    ministryId &&
+    auth.roleCodes.includes("leader_general") &&
+    auth.ministryIds.includes(ministryId)
+  ) {
+    return;
+  }
+  if (auth.personId && auth.personId === studentPersonId) return;
+  if (auth.personId && (await isDescendantOf(ctx, auth.personId as Id<"persons">, studentPersonId))) {
+    return;
+  }
+  return forbidden(
+    "Expediente fuera del subárbol pastoral autorizado (acceso lateral/ascendente prohibido).",
+  );
+}
+
+async function assertExpedienteAccess(
+  ctx: AuthDbCtx,
+  auth: ConvexAuthContext,
+  expedienteId: Id<"multiplicationExpedientes">,
+) {
+  const expediente = await ctx.db.get(expedienteId);
+  if (!expediente) return notFound("Expediente no encontrado.");
+  await assertStudentAccess(ctx, auth, expediente.studentPersonId, expediente.ministryId);
+  return expediente;
+}
 
 const expedienteStatus = v.union(
   v.literal("open"),
@@ -51,12 +109,14 @@ const milestoneStatus = v.union(
 export const getExpedienteByStudent = query({
   args: { studentPersonId: v.id("persons") },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "process.read");
-    return await ctx.db
+    const { auth } = await requirePermission(ctx, "process.read");
+    const row = await ctx.db
       .query("multiplicationExpedientes")
       .withIndex("by_student", (q) => q.eq("studentPersonId", args.studentPersonId))
       .first();
+    if (!row) return null;
+    await assertStudentAccess(ctx, auth, row.studentPersonId, row.ministryId);
+    return row;
   },
 });
 
@@ -66,33 +126,83 @@ export const listExpedientesByMinistry = query({
     status: v.optional(expedienteStatus),
   },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "process.read");
+    const { auth } = await requirePermission(ctx, "process.read");
+    let rows;
     if (args.ministryId) {
-      const rows = await ctx.db
+      if (
+        !isSuperadmin(auth) &&
+        !auth.ministryIds.includes(args.ministryId) &&
+        !auth.roleCodes.includes("leader_general")
+      ) {
+        // Tree leaders may still list within their ministry assignment.
+        if (!auth.ministryIds.includes(args.ministryId)) {
+          return [];
+        }
+      }
+      rows = await ctx.db
         .query("multiplicationExpedientes")
         .withIndex("by_ministry_status", (q) =>
           q.eq("ministryId", args.ministryId!).eq("status", args.status ?? "open"),
         )
         .collect();
-      return rows;
-    }
-    if (args.status) {
-      return await ctx.db
+    } else if (args.status) {
+      if (!isSuperadmin(auth) && !auth.roleCodes.includes("leader_general")) {
+        // Non-LG must scope by ministry — no unfiltered collect.
+        const ministryId = auth.ministryIds[0] as Id<"ministries"> | undefined;
+        if (!ministryId) return [];
+        rows = await ctx.db
+          .query("multiplicationExpedientes")
+          .withIndex("by_ministry_status", (q) =>
+            q.eq("ministryId", ministryId).eq("status", args.status!),
+          )
+          .collect();
+      } else {
+        rows = await ctx.db
+          .query("multiplicationExpedientes")
+          .withIndex("by_status", (q) => q.eq("status", args.status!))
+          .collect();
+      }
+    } else if (isSuperadmin(auth)) {
+      rows = await ctx.db.query("multiplicationExpedientes").collect();
+    } else {
+      const ministryId = auth.ministryIds[0] as Id<"ministries"> | undefined;
+      if (!ministryId) return [];
+      rows = await ctx.db
         .query("multiplicationExpedientes")
-        .withIndex("by_status", (q) => q.eq("status", args.status!))
+        .withIndex("by_ministry_status", (q) =>
+          q.eq("ministryId", ministryId).eq("status", "open"),
+        )
         .collect();
     }
-    return await ctx.db.query("multiplicationExpedientes").collect();
+
+    // Tree filter for regular leaders.
+    if (
+      auth.personId &&
+      auth.roleCodes.includes("leader") &&
+      !auth.roleCodes.includes("leader_general") &&
+      !isSuperadmin(auth)
+    ) {
+      const out = [];
+      for (const row of rows) {
+        if (row.studentPersonId === auth.personId) {
+          out.push(row);
+          continue;
+        }
+        if (await isDescendantOf(ctx, auth.personId as Id<"persons">, row.studentPersonId)) {
+          out.push(row);
+        }
+      }
+      return out;
+    }
+    return rows;
   },
 });
 
 export const getExpedienteBundle = query({
   args: { expedienteId: v.id("multiplicationExpedientes") },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "process.read");
-    const expediente = await ctx.db.get(args.expedienteId);
+    const { auth } = await requirePermission(ctx, "process.read");
+    const expediente = await assertExpedienteAccess(ctx, auth, args.expedienteId);
     if (!expediente) return null;
     const [contacts, disciples, milestones] = await Promise.all([
       ctx.db
@@ -120,8 +230,8 @@ export const openExpediente = mutation({
     openedAtAcademicLevel: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "destination.manage");
+    const { auth } = await requirePermission(ctx, "destination.manage");
+    await assertStudentAccess(ctx, auth, args.studentPersonId, args.ministryId);
     const existing = await ctx.db
       .query("multiplicationExpedientes")
       .withIndex("by_student", (q) => q.eq("studentPersonId", args.studentPersonId))
@@ -163,13 +273,11 @@ export const upsertContact = mutation({
     status: v.optional(contactStatus),
   },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "destination.manage");
+    const { auth } = await requirePermission(ctx, "destination.manage");
     if (args.orderIndex < 1 || args.orderIndex > 15) {
       return invalidArgument("orderIndex debe estar entre 1 y 15.");
     }
-    const expediente = await ctx.db.get(args.expedienteId);
-    if (!expediente) return notFound("Expediente no encontrado.");
+    await assertExpedienteAccess(ctx, auth, args.expedienteId);
     const existing = await ctx.db
       .query("multiplicationContacts")
       .withIndex("by_expediente_order", (q) =>
@@ -207,10 +315,10 @@ export const linkContactAsWon = mutation({
     linkedPersonId: v.id("persons"),
   },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "destination.manage");
+    const { auth } = await requirePermission(ctx, "destination.manage");
     const contact = await ctx.db.get(args.contactId);
     if (!contact) return notFound("Contacto no encontrado.");
+    await assertExpedienteAccess(ctx, auth, contact.expedienteId);
     const person = await ctx.db.get(args.linkedPersonId);
     if (!person) return notFound("Persona no encontrada.");
     await ctx.db.patch(args.contactId, {
@@ -233,13 +341,11 @@ export const assignDisciple = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "destination.manage");
+    const { auth } = await requirePermission(ctx, "destination.manage");
     if (args.slotIndex < 1 || args.slotIndex > 12) {
       return invalidArgument("slotIndex debe estar entre 1 y 12.");
     }
-    const expediente = await ctx.db.get(args.expedienteId);
-    if (!expediente) return notFound("Expediente no encontrado.");
+    await assertExpedienteAccess(ctx, auth, args.expedienteId);
 
     const byPerson = await ctx.db
       .query("multiplicationDisciples")
@@ -286,14 +392,29 @@ export const updateDiscipleFormation = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "leaders.activate");
+    const { auth } = await requirePermission(ctx, "leaders.activate");
     const row = await ctx.db.get(args.discipleId);
     if (!row) return notFound("Discípulo no encontrado.");
-    if (args.formationStatus === "lider_activo_celula" && !args.cellId && !row.cellId) {
-      return invalidArgument("Líder activo requiere una célula real.");
-    }
-    if (args.cellId) {
+    await assertExpedienteAccess(ctx, auth, row.expedienteId);
+    const cellId = args.cellId ?? row.cellId;
+    if (args.formationStatus === "lider_activo_celula") {
+      if (!cellId) {
+        return invalidArgument("Líder activo requiere una célula real.");
+      }
+      const cell = await ctx.db.get(cellId);
+      if (!cell || cell.status !== "active") {
+        return invalidArgument("La célula debe existir y estar activa.");
+      }
+      const leadership = await ctx.db
+        .query("personLeadership")
+        .withIndex("by_person", (q) => q.eq("personId", row.personId))
+        .unique();
+      if (!leadership || leadership.status !== "active") {
+        return invalidArgument(
+          "Líder activo requiere autorización pastoral (personLeadership.status = active).",
+        );
+      }
+    } else if (args.cellId) {
       const cell = await ctx.db.get(args.cellId);
       if (!cell || cell.status !== "active") {
         return invalidArgument("La célula debe existir y estar activa.");
@@ -320,8 +441,8 @@ export const upsertMilestone = mutation({
     updatedByUserId: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
-    await requireActiveAppUser(ctx);
-    await requirePermission(ctx, "destination.manage");
+    const { auth } = await requirePermission(ctx, "destination.manage");
+    await assertExpedienteAccess(ctx, auth, args.expedienteId);
     const existing = await ctx.db
       .query("multiplicationMilestones")
       .withIndex("by_expediente_level_key", (q) =>

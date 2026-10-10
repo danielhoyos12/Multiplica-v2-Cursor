@@ -394,6 +394,13 @@ export async function completeReencuentro(
     };
   }
 
+  const { assertTrainingAttendanceRequirements } = await import("./attendance-requirements");
+  const { REENCUENTRO_PROGRAM_CODE } = await import("@/db/schema");
+  await assertTrainingAttendanceRequirements(raw.personId, REENCUENTRO_PROGRAM_CODE, {
+    requireInProgress: true,
+    processType: PROCESS,
+  });
+
   const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
     const enrollment = await client.query(api.formation.getEnrollment, {

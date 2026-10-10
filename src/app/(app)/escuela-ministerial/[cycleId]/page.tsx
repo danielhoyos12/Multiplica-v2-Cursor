@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { EnrollmentPersonForm } from "@/components/formation/enrollment-person-form";
-import { UdvAttendanceBoard } from "@/components/formation/udv-attendance-board";
+import { GroupAttendancePanel } from "@/components/formation/group-attendance-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
@@ -73,7 +73,7 @@ export default async function EmCyclePage({ params }: { params: Params }) {
         />
       ) : null}
 
-      <UdvAttendanceBoard
+      <GroupAttendancePanel
         cycleId={cycleId}
         modules={board.modules.map((m) => ({
           id: m.id,
@@ -94,7 +94,6 @@ export default async function EmCyclePage({ params }: { params: Params }) {
         }))}
         attendanceDate={today}
         canAttend={canAttend}
-        canComplete={canManage}
       />
 
       <section className="space-y-3">
