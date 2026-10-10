@@ -14,7 +14,7 @@ import {
 } from "@/modules/formation";
 import { requireAppActor } from "@/server/actor";
 
-export const metadata = { title: "Escalera del Éxito" };
+export const metadata = { title: "Consolidar · Universidad de la Vida" };
 
 type Search = Promise<{ tipo?: string; estado?: string; etapa?: string }>;
 
@@ -48,35 +48,27 @@ export default async function ProcesoPage({
     <div className="space-y-8">
       <ProcesoEtapaFocus etapa={etapa} />
       <PageHeader
-        title="Escalera del Éxito"
-        description="GANAR → Consolidar (Pre → Encuentro → Post) → Discipular (Capacitación Destino → Re-Encuentro → EM) → Enviar."
+        title="Consolidar"
+        description="Universidad de la Vida (UDLV): Pre-Encuentro → Encuentro → Post-Encuentro. Capacitación Destino y Escuela de Líderes viven en Discipular."
         actions={
-          <div className="flex flex-wrap gap-3">
-            <Link href="/destino" className="text-sm font-medium underline">
-              Capacitación Destino
-            </Link>
-            <Link href="/reencuentro" className="text-sm font-medium underline">
-              Re-Encuentro
-            </Link>
-            <Link href="/escuela-ministerial" className="text-sm font-medium underline">
-              Escuela Ministerial
-            </Link>
-          </div>
+          <Link href="/discipular" className="text-sm font-medium underline">
+            Ir a Discipular
+          </Link>
         }
       />
 
       <div className="print:hidden flex flex-wrap gap-2 text-sm">
-        <span className="text-[var(--muted)]">Focalizar:</span>
+        <span className="text-[var(--muted)]">Abrir submódulo UDLV:</span>
         {(
           [
-            ["pre", "Pre-Encuentro"],
-            ["encuentro", "Encuentro"],
-            ["post", "Post-Encuentro"],
+            ["/proceso/pre", "Pre-Encuentro", "pre"],
+            ["/proceso/encuentro", "Encuentro", "encuentro"],
+            ["/proceso/post", "Post-Encuentro", "post"],
           ] as const
-        ).map(([key, label]) => (
+        ).map(([href, label, key]) => (
           <Link
             key={key}
-            href={`/proceso?etapa=${key}`}
+            href={href}
             className={
               etapa === key
                 ? "rounded-[var(--radius-sm)] bg-[var(--cobalt)] px-2 py-1 text-white"
@@ -87,12 +79,27 @@ export default async function ProcesoPage({
           </Link>
         ))}
       </div>
+
+      <section className="space-y-3" aria-labelledby="udlv-resumen">
+        <SectionHeader
+          id="udlv-resumen"
+          eyebrow="Universidad de la Vida"
+          title="Resumen Consolidar"
+          description="Indicadores propios de UDLV. No incluye Capacitación Destino ni Escuela Ministerial."
+        />
+        <StatGroup columns={3} aria-label="Resumen Universidad de la Vida">
+          <KpiCard label="Consolidar en curso" value={counts.consolidarInProgress} />
+          <KpiCard label="Consolidar completado" value={counts.consolidarCompleted} />
+          <KpiCard label="Consolidar pendiente" value={counts.consolidarPending} />
+        </StatGroup>
+      </section>
+
       <section className="space-y-3" aria-labelledby="pre-encuentro">
         <SectionHeader
           id="pre-encuentro"
-          eyebrow="01"
+          eyebrow="UDLV · 1"
           title="Pre-Encuentro"
-          description="Primera etapa de Consolidar."
+          description="Primera etapa de Universidad de la Vida."
         />
         <StatGroup columns={2} aria-label="Pre-Encuentro">
           <KpiCard label="En Pre-Encuentro" value={counts.preEncuentro} />
@@ -102,9 +109,9 @@ export default async function ProcesoPage({
       <section className="space-y-3" aria-labelledby="encuentro">
         <SectionHeader
           id="encuentro"
-          eyebrow="02"
+          eyebrow="UDLV · 2"
           title="Encuentro"
-          description="Segunda etapa de Consolidar."
+          description="Segunda etapa de Universidad de la Vida."
         />
         <StatGroup columns={2} aria-label="Encuentro">
           <KpiCard label="En Encuentro" value={counts.encuentro} />
@@ -114,46 +121,29 @@ export default async function ProcesoPage({
       <section className="space-y-3" aria-labelledby="post-encuentro">
         <SectionHeader
           id="post-encuentro"
-          eyebrow="03"
+          eyebrow="UDLV · 3"
           title="Post-Encuentro"
-          description="Cierre de Consolidar antes de Discipular."
+          description="Cierre de UDLV. Solo entonces se habilita Capacitación Destino en Discipular."
         />
         <StatGroup columns={2} aria-label="Post-Encuentro">
           <KpiCard label="En Post-Encuentro" value={counts.postEncuentro} />
-          <KpiCard label="Consolidar completado" value={counts.consolidarCompleted} />
-        </StatGroup>
-      </section>
-
-      <section className="space-y-3" aria-labelledby="discipular">
-        <SectionHeader
-          id="discipular"
-          eyebrow="Discipular"
-          title="Capacitación Destino · Re-Encuentro · EM"
-          description="Avance en CD, Re-Encuentro y Escuela Ministerial."
-        />
-        <StatGroup columns={4} aria-label="Discipular">
-          <KpiCard label="CD1" value={counts.cd1} />
-          <KpiCard label="CD2" value={counts.cd2} />
-          <KpiCard label="Re-Encuentro" value={counts.reencuentro} />
-          <KpiCard label="CD3" value={counts.cd3} />
-          <KpiCard label="EM1" value={counts.em1} />
-          <KpiCard label="EM2" value={counts.em2} />
-          <KpiCard label="EM3" value={counts.em3} />
-          <KpiCard label="Aptos CD1" value={counts.aptosCd1} />
         </StatGroup>
       </section>
 
       <DataCard className="space-y-4">
-        <SectionHeader title="Personas en proceso" description="Filtra por etapa y estado." />
+        <SectionHeader
+          title="Personas en Consolidar / UDLV"
+          description="Filtra por tipo y estado del proceso Consolidar."
+        />
         <form className="flex flex-wrap gap-2 text-sm">
           <select
             name="tipo"
             defaultValue={processType ?? ""}
             className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2"
           >
-            <option value="">Todas las etapas</option>
-            <option value="consolidar">Consolidar</option>
-            <option value="udv">Universidad de la Vida</option>
+            <option value="">Consolidar y legacy UDV</option>
+            <option value="consolidar">Consolidar (agregado)</option>
+            <option value="udv">UDV legacy (catálogo)</option>
           </select>
           <select
             name="estado"
