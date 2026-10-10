@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 
 import { isDomainError } from "@/lib/errors";
 import { requireSessionUser } from "@/server/auth";
@@ -15,6 +16,7 @@ import {
   enrollInUdv,
   pauseProcess,
   recordTrainingAttendance,
+  repairConsolidarUdlvState,
   resumeProcess,
   startConsolidation,
 } from "./service";
@@ -34,6 +36,17 @@ import {
   resumeEm,
 } from "./ministerial";
 import {
+  completeEmLevel,
+  createEmLevelCycle,
+  enrollEmLevel,
+  markEmLevelAcademic,
+} from "./em-levels";
+import {
+  completeConsolidarStage,
+  createConsolidarCycle,
+  enrollConsolidarStage,
+} from "./consolidar-stages";
+import {
   completeReencuentro,
   createReencuentroEvent,
   enrollReencuentro,
@@ -43,20 +56,27 @@ import {
   assignCycleStaffInputSchema,
   authorizeRecoveryInputSchema,
   completeConsolidationInputSchema,
+  completeConsolidarStageInputSchema,
   completeDestinoLevelInputSchema,
   completeEmInputSchema,
+  completeEmLevelInputSchema,
   completeReencuentroInputSchema,
   completeUdvInputSchema,
+  createConsolidarCycleInputSchema,
   createCycleInputSchema,
   createDestinoCycleInputSchema,
   createEmCycleInputSchema,
+  createEmLevelCycleInputSchema,
   createReencuentroEventInputSchema,
+  enrollConsolidarStageInputSchema,
   enrollDestinoInputSchema,
   enrollEmInputSchema,
+  enrollEmLevelInputSchema,
   enrollReencuentroInputSchema,
   enrollUdvInputSchema,
   markAcademicCompletedInputSchema,
   markEmAcademicInputSchema,
+  markEmLevelAcademicInputSchema,
   pauseProcessInputSchema,
   recordAttendanceInputSchema,
   recordReencuentroAttendanceInputSchema,
@@ -85,6 +105,29 @@ export async function startConsolidationAction(raw: unknown) {
     revalidatePath("/proceso");
     revalidatePath(`/ganar/${parsed.data.personId}`);
     return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+/**
+ * Secure repair for false Consolidar completion (no CLI admin bypass).
+ * Requires Clerk session + pastoral RBAC via startConsolidation.
+ */
+export async function repairConsolidarUdlvAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = startConsolidationInputSchema
+      .pick({ personId: true })
+      .safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const result = await repairConsolidarUdlvState(user.id, parsed.data.personId);
+    revalidatePath("/proceso");
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    revalidatePath("/");
+    return { ok: true as const, ...result };
   } catch (error) {
     return toActionError(error);
   }
@@ -202,7 +245,48 @@ export async function recordAttendanceAction(raw: unknown) {
     await recordTrainingAttendance(user.id, parsed.data);
     revalidatePath("/udv");
     revalidatePath("/destino");
+    revalidatePath("/proceso");
+    revalidatePath("/escuela-ministerial");
     return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function recordGroupAttendanceAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = z
+      .object({
+        moduleId: z.string().min(1),
+        attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        entries: z
+          .array(
+            z.object({
+              enrollmentId: z.string().min(1),
+              status: z.enum(["present", "absent", "excused"]),
+            }),
+          )
+          .min(1)
+          .max(200),
+      })
+      .safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    for (const entry of parsed.data.entries) {
+      await recordTrainingAttendance(user.id, {
+        enrollmentId: entry.enrollmentId,
+        moduleId: parsed.data.moduleId,
+        attendanceDate: parsed.data.attendanceDate,
+        status: entry.status,
+      });
+    }
+    revalidatePath("/udv");
+    revalidatePath("/destino");
+    revalidatePath("/proceso");
+    revalidatePath("/escuela-ministerial");
+    return { ok: true as const, saved: parsed.data.entries.length };
   } catch (error) {
     return toActionError(error);
   }
@@ -527,6 +611,172 @@ export async function completeReencuentroAction(raw: unknown) {
       eligibleForSend: result.eligibleForSend,
       leadershipActivated: result.leadershipActivated,
     };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+function revalidateConsolidarPaths(stage?: string, cycleId?: string, personId?: string) {
+  revalidatePath("/proceso");
+  revalidatePath("/proceso/pre");
+  revalidatePath("/proceso/encuentro");
+  revalidatePath("/proceso/post");
+  if (cycleId) revalidatePath(`/proceso/ciclo/${cycleId}`);
+  if (personId) revalidatePath(`/ganar/${personId}`);
+  if (stage === "post_encuentro") {
+    revalidatePath("/destino");
+    revalidatePath("/discipular");
+    revalidatePath("/discipular/cd1");
+  }
+}
+
+export async function createConsolidarCycleAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = createConsolidarCycleInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const cycle = await createConsolidarCycle(user.id, {
+      stage: parsed.data.stage,
+      name: parsed.data.name,
+      startDate: parsed.data.startDate,
+      endDate: parsed.data.endDate,
+      enrollmentOpenDate: parsed.data.enrollmentOpenDate || null,
+      enrollmentCloseDate: parsed.data.enrollmentCloseDate || null,
+      classDates: parsed.data.classDates ?? [],
+      ministryId: parsed.data.ministryId || null,
+    });
+    revalidateConsolidarPaths(parsed.data.stage);
+    return { ok: true as const, cycleId: cycle.id };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function activateConsolidarCycleAction(cycleId: string) {
+  try {
+    const user = await requireSessionUser();
+    await activateTrainingCycle(user.id, cycleId);
+    revalidateConsolidarPaths(undefined, cycleId);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function enrollConsolidarStageAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = enrollConsolidarStageInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await enrollConsolidarStage(user.id, parsed.data);
+    revalidateConsolidarPaths(parsed.data.stage, parsed.data.cycleId, parsed.data.personId);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function completeConsolidarStageAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = completeConsolidarStageInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const result = await completeConsolidarStage(user.id, parsed.data);
+    revalidateConsolidarPaths(parsed.data.stage, undefined, parsed.data.personId);
+    return {
+      ok: true as const,
+      consolidarCompleted: Boolean(result.consolidar),
+      leadershipActivated: result.leadershipActivated,
+    };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function createEmLevelCycleAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = createEmLevelCycleInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    const cycle = await createEmLevelCycle(user.id, {
+      ...parsed.data,
+      ministryId: parsed.data.ministryId || null,
+    });
+    revalidatePath("/escuela-ministerial");
+    revalidatePath(`/discipular/em${parsed.data.level}`);
+    return { ok: true as const, cycleId: cycle.id };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function activateEmLevelCycleAction(cycleId: string) {
+  try {
+    const user = await requireSessionUser();
+    await activateTrainingCycle(user.id, cycleId);
+    revalidatePath("/escuela-ministerial");
+    revalidatePath(`/escuela-ministerial/${cycleId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function enrollEmLevelAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = enrollEmLevelInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await enrollEmLevel(user.id, parsed.data);
+    revalidatePath("/escuela-ministerial");
+    revalidatePath(`/escuela-ministerial/${parsed.data.cycleId}`);
+    revalidatePath(`/discipular/em${parsed.data.level}`);
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function markEmLevelAcademicAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = markEmLevelAcademicInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await markEmLevelAcademic(user.id, parsed.data);
+    revalidatePath("/escuela-ministerial");
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    return { ok: true as const };
+  } catch (error) {
+    return toActionError(error);
+  }
+}
+
+export async function completeEmLevelAction(raw: unknown) {
+  try {
+    const user = await requireSessionUser();
+    const parsed = completeEmLevelInputSchema.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+    }
+    await completeEmLevel(user.id, parsed.data);
+    revalidatePath("/escuela-ministerial");
+    revalidatePath(`/discipular/em${parsed.data.level}`);
+    revalidatePath(`/ganar/${parsed.data.personId}`);
+    if (parsed.data.level === 3) revalidatePath("/enviar");
+    return { ok: true as const };
   } catch (error) {
     return toActionError(error);
   }

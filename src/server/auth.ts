@@ -1,19 +1,22 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
 
-import { getDb } from "@/db/client";
-import { users } from "@/db/schema";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
-import { ensureAppUserProfile } from "@/modules/organization";
+import { hasConvexPublicConfig } from "@/lib/env";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 export type SessionUser = {
-  /** App `users.id` (UUID). */
+  /** Convex `users` document id (`_id`), as a string. */
   id: string;
-  /** Clerk `user_…` id. */
+  /** Clerk `user_…` id — stored as Convex `users.authSubject`. */
   clerkUserId: string;
   email: string | undefined;
 };
 
+/**
+ * Resolves the MULTIPLICA app user for the current Clerk session.
+ * Does NOT create users. Unknown Clerk identities return null so the UI
+ * can show “cuenta no habilitada”.
+ */
 export async function getSessionUser(): Promise<SessionUser | null> {
   const { userId } = await auth();
   if (!userId) {
@@ -25,32 +28,26 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     clerkUser?.primaryEmailAddress?.emailAddress ??
     clerkUser?.emailAddresses[0]?.emailAddress;
 
-  if (!email) {
+  if (!hasConvexPublicConfig()) {
     return null;
   }
 
-  if (!process.env.DATABASE_URL) {
+  try {
+    const client = await getAuthenticatedConvexClient();
+    const me = await client.query(api.users.getMe, {});
+    if (me) {
+      return { id: me._id, clerkUserId: userId, email: me.email || email };
+    }
+
+    const linked = await client.mutation(api.users.linkProvisionedIdentity, {});
+    if (linked) {
+      return { id: linked._id, clerkUserId: userId, email: linked.email || email };
+    }
+  } catch {
     return null;
   }
 
-  const db = getDb();
-  const [byClerk] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.clerkUserId, userId))
-    .limit(1);
-
-  if (byClerk) {
-    return { id: byClerk.id, clerkUserId: userId, email };
-  }
-
-  const profile = await ensureAppUserProfile({
-    clerkUserId: userId,
-    email,
-    displayName: clerkUser?.fullName ?? null,
-  });
-
-  return { id: profile.id, clerkUserId: userId, email };
+  return null;
 }
 
 export async function requireSessionUser(): Promise<SessionUser> {

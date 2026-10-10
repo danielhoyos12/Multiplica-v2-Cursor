@@ -12,8 +12,8 @@ import {
   listEmLevelCycles,
 } from "@/modules/formation";
 import {
-  activateEmCycleAction,
-  createEmCycleAction,
+  activateEmLevelCycleAction,
+  createEmLevelCycleAction,
 } from "@/modules/formation/actions";
 import { requireAppActor } from "@/server/actor";
 
@@ -40,11 +40,17 @@ export default async function EscuelaMinisterialPage() {
         description="EM1 → EM2 → EM3 tras CD3. Doctrina + Seminario por nivel. Completar no activa liderazgo ni abre célula."
         actions={
           <div className="flex gap-3">
-            <Link href="/destino" className="text-sm underline">
-              Capacitación Destino
+            <Link href="/discipular" className="text-sm underline">
+              Hub Discipular
             </Link>
-            <Link href="/proceso" className="text-sm underline">
-              Escalera
+            <Link href="/discipular/em1" className="text-sm underline">
+              EM1
+            </Link>
+            <Link href="/discipular/em2" className="text-sm underline">
+              EM2
+            </Link>
+            <Link href="/discipular/em3" className="text-sm underline">
+              EM3
             </Link>
           </div>
         }
@@ -62,13 +68,14 @@ export default async function EscuelaMinisterialPage() {
       {canManageCycles ? (
         <DataCard className="space-y-3">
           <SectionHeader
-            title="Crear ciclo EM (legacy)"
-            description="Preferir ciclos por nivel EM1/EM2/EM3 vía catálogo oficial. Este formulario conserva compatibilidad con el programa legacy."
+            title="Crear ciclo EM1 / EM2 / EM3"
+            description="Catálogo oficial por nivel. Completar no activa liderazgo."
           />
           <form
             action={async (formData) => {
               "use server";
-              await createEmCycleAction({
+              await createEmLevelCycleAction({
+                level: Number(formData.get("level")) as 1 | 2 | 3,
                 name: String(formData.get("name") ?? ""),
                 startDate: String(formData.get("startDate") ?? ""),
                 endDate: String(formData.get("endDate") ?? ""),
@@ -77,10 +84,20 @@ export default async function EscuelaMinisterialPage() {
             }}
             className="space-y-3"
           >
+            <select
+              name="level"
+              required
+              defaultValue="1"
+              className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+            >
+              <option value="1">EM1</option>
+              <option value="2">EM2</option>
+              <option value="3">EM3</option>
+            </select>
             <input
               name="name"
               required
-              placeholder="Ej. EM Agosto–Noviembre 2026"
+              placeholder="Ej. EM1 Agosto–Noviembre 2026"
               className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
             />
             <div className="grid gap-2 sm:grid-cols-2">
@@ -135,7 +152,7 @@ export default async function EscuelaMinisterialPage() {
                     <form
                       action={async () => {
                         "use server";
-                        await activateEmCycleAction(cycle.id);
+                        await activateEmLevelCycleAction(cycle.id);
                       }}
                     >
                       <button

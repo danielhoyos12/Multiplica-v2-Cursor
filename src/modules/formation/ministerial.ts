@@ -2,25 +2,10 @@
  * Escuela Ministerial — post Destino N3.
  * Reuses training_* + person_process_*. Never creates person silos or auto-leadership.
  */
-import { and, asc, count, desc, eq, inArray, isNull } from "drizzle-orm";
-
-import { getDb } from "@/db/client";
-import {
-  EM_FAMILY,
-  EM_PROGRAM_CODE,
-  personOrganizationHistory,
-  personProcessEvents,
-  personProcessProgress,
-  persons,
-  trainingAttendance,
-  trainingCompletionRequirements,
-  trainingCycles,
-  trainingCycleStaff,
-  trainingEnrollments,
-  trainingModules,
-  trainingPrograms,
-  trainingRequirementOverrides,
-} from "@/db/schema";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { withId } from "@/lib/convex-doc";
+import { mapConvexError } from "@/lib/convex-errors";
+import { EM_FAMILY, EM_PROGRAM_CODE } from "@/db/schema";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
 import {
@@ -34,6 +19,7 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 const PROCESS = "escuela_ministerial" as const;
 
@@ -42,51 +28,33 @@ async function requireActor(userId: string) {
 }
 
 async function currentOrg(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-    })
-    .from(personOrganizationHistory)
-    .where(
-      and(
-        eq(personOrganizationHistory.personId, personId),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const org = await client.query(api.persons.getCurrentOrg, {
+    personId: personId as Id<"persons">,
+  });
+  if (!org) return null;
+  return {
+    ministryId: (org.ministryId as string | undefined) ?? null,
+    networkId: (org.networkId as string | undefined) ?? null,
+  };
 }
 
 async function getEmProgress(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, PROCESS),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const row = await client.query(api.formation.getProgress, {
+    personId: personId as Id<"persons">,
+    processType: PROCESS,
+  });
+  return row ? withId(row) : null;
 }
 
 async function getDestinoN3(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, "destino_n3"),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const row = await client.query(api.formation.getProgress, {
+    personId: personId as Id<"persons">,
+    processType: "destino_n3",
+  });
+  return row ? withId(row) : null;
 }
 
 async function appendEvent(params: {
@@ -99,76 +67,68 @@ async function appendEvent(params: {
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const db = getDb();
-  await db.insert(personProcessEvents).values({
-    progressId: params.progressId,
-    personId: params.personId,
-    processType: PROCESS,
-    eventType: params.eventType,
-    fromStatus: (params.fromStatus as never) ?? null,
-    toStatus: (params.toStatus as never) ?? null,
-    actorUserId: params.actorUserId,
-    note: params.note ?? null,
-    metadata: params.metadata ?? {},
-  });
+  const client = await getAuthenticatedConvexClient();
+  await client
+    .mutation(api.formation.appendProcessEvent, {
+      progressId: params.progressId as Id<"personProcessProgress">,
+      personId: params.personId as Id<"persons">,
+      processType: PROCESS,
+      eventType: params.eventType,
+      fromStatus: (params.fromStatus ?? undefined) as never,
+      toStatus: (params.toStatus ?? undefined) as never,
+      note: params.note ?? undefined,
+      metadata: params.metadata ?? {},
+    })
+    .catch(mapConvexError);
 }
 
 export async function ensureEmProgram() {
-  const db = getDb();
-  let [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.code, EM_PROGRAM_CODE))
-    .limit(1);
-  if (!program) {
-    [program] = await db
-      .insert(trainingPrograms)
-      .values({
+  const client = await getAuthenticatedConvexClient();
+  const program = withId(
+    await client
+      .mutation(api.formation.ensureProgram, {
         code: EM_PROGRAM_CODE,
         name: "Escuela Ministerial",
         description: "Formación posterior a Capacitación Destino.",
         family: EM_FAMILY,
-        isActive: true,
       })
-      .returning();
-  } else if (program.family !== EM_FAMILY) {
-    [program] = await db
-      .update(trainingPrograms)
-      .set({ family: EM_FAMILY, name: "Escuela Ministerial", updatedAt: new Date() })
-      .where(eq(trainingPrograms.id, program.id))
-      .returning();
-  }
+      .catch(mapConvexError),
+  );
 
-  const modules = await db
-    .select()
-    .from(trainingModules)
-    .where(eq(trainingModules.programId, program.id));
+  const modules = await client.query(api.formation.listModules, {
+    programId: program.id as Id<"trainingPrograms">,
+  });
   if (modules.length === 0) {
-    await db.insert(trainingModules).values(
-      [1, 2, 3, 4].map((n) => ({
-        programId: program.id,
-        code: `EM-M${n}`,
-        name: `Módulo ${n}`,
-        orderIndex: n,
-        isActive: true,
-        isRequired: true,
-      })),
-    );
+    await client
+      .mutation(api.formation.syncModules, {
+        programId: program.id as Id<"trainingPrograms">,
+        modules: [1, 2, 3, 4].map((n) => ({
+          code: `EM-M${n}`,
+          name: `Módulo ${n}`,
+          orderIndex: n,
+          isRequired: true,
+        })),
+      })
+      .catch(mapConvexError);
   }
 
-  const reqs = await db
-    .select()
-    .from(trainingCompletionRequirements)
-    .where(eq(trainingCompletionRequirements.programId, program.id));
+  const reqs = await client.query(api.formation.listRequirements, {
+    programId: program.id as Id<"trainingPrograms">,
+  });
   if (reqs.length === 0) {
-    await db.insert(trainingCompletionRequirements).values({
-      programId: program.id,
-      requirementType: "manual_approval",
-      category: "academic",
-      label: "Componente académico aprobado",
-      isRequired: true,
-      isActive: true,
-    });
+    await client
+      .mutation(api.formation.syncRequirements, {
+        programId: program.id as Id<"trainingPrograms">,
+        requirements: [
+          {
+            requirementType: "manual_approval",
+            category: "academic",
+            label: "Componente académico aprobado",
+            isRequired: true,
+          },
+        ],
+      })
+      .catch(mapConvexError);
   }
   return program;
 }
@@ -179,38 +139,37 @@ export async function ensureEmEligible(
   networkId: string | null,
 ) {
   const existing = await getEmProgress(personId);
+  const client = await getAuthenticatedConvexClient();
   if (existing) {
     if (existing.status === "pending") {
-      const db = getDb();
-      const [row] = await db
-        .update(personProcessProgress)
-        .set({
-          status: "eligible",
-          currentStep: "apto_em",
-          updatedAt: new Date(),
-          metadata: { ...(existing.metadata ?? {}), eligible_for_em: true },
-        })
-        .where(eq(personProcessProgress.id, existing.id))
-        .returning();
-      return row;
+      return withId(
+        await client
+          .mutation(api.formation.upsertProgress, {
+            personId: personId as Id<"persons">,
+            processType: PROCESS,
+            status: "eligible",
+            currentStep: "apto_em",
+            metadata: { ...(existing.metadata ?? {}), eligible_for_em: true },
+          })
+          .catch(mapConvexError),
+      );
     }
     return existing;
   }
-  const db = getDb();
-  const [row] = await db
-    .insert(personProcessProgress)
-    .values({
-      personId,
-      processType: PROCESS,
-      status: "eligible",
-      stage: "em",
-      currentStep: "apto_em",
-      ministryId,
-      networkId,
-      metadata: { eligible_for_em: true },
-    })
-    .returning();
-  return row;
+  return withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: personId as Id<"persons">,
+        processType: PROCESS,
+        status: "eligible",
+        stage: "em",
+        currentStep: "apto_em",
+        ministryId: ministryId as Id<"ministries">,
+        networkId: (networkId ?? undefined) as Id<"networks"> | undefined,
+        metadata: { eligible_for_em: true },
+      })
+      .catch(mapConvexError),
+  );
 }
 
 export async function assertEmEligible(personId: string) {
@@ -236,16 +195,12 @@ export async function isEmEligible(personId: string) {
 
 async function getEmProgram() {
   await ensureEmProgram();
-  const db = getDb();
-  const [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.code, EM_PROGRAM_CODE))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const program = await client.query(api.formation.getProgramByCode, { code: EM_PROGRAM_CODE });
   if (!program) {
     throw new DomainError(DomainErrorCode.CONFIGURATION_ERROR, "Programa EM no configurado.");
   }
-  return program;
+  return withId(program);
 }
 
 async function assertCycleStaffOrManage(
@@ -260,14 +215,11 @@ async function assertCycleStaffOrManage(
   ) {
     return;
   }
-  const db = getDb();
-  const [staff] = await db
-    .select()
-    .from(trainingCycleStaff)
-    .where(
-      and(eq(trainingCycleStaff.cycleId, cycleId), eq(trainingCycleStaff.userId, actor.userId)),
-    )
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const staff = await client.query(api.formation.getCycleStaff, {
+    cycleId: cycleId as Id<"trainingCycles">,
+    userId: actor.userId as Id<"users">,
+  });
   if (!staff) {
     throw new DomainError(
       DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED,
@@ -290,26 +242,14 @@ async function assertCycleStaffOrManage(
 
 export async function evaluateEmRequirements(personId: string) {
   const program = await getEmProgram();
-  const db = getDb();
-  const requirements = await db
-    .select()
-    .from(trainingCompletionRequirements)
-    .where(
-      and(
-        eq(trainingCompletionRequirements.programId, program.id),
-        eq(trainingCompletionRequirements.isActive, true),
-        eq(trainingCompletionRequirements.isRequired, true),
-      ),
-    );
-  const overrides = await db
-    .select()
-    .from(trainingRequirementOverrides)
-    .where(
-      and(
-        eq(trainingRequirementOverrides.personId, personId),
-        eq(trainingRequirementOverrides.programId, program.id),
-      ),
-    );
+  const client = await getAuthenticatedConvexClient();
+  const requirements = (
+    await client.query(api.formation.listRequirements, { programId: program.id as Id<"trainingPrograms"> })
+  ).filter((r) => r.isActive && r.isRequired);
+  const overrides = await client.query(api.formation.listOverrides, {
+    personId: personId as Id<"persons">,
+    programId: program.id as Id<"trainingPrograms">,
+  });
   const overriddenIds = new Set(overrides.map((o) => o.requirementId).filter(Boolean));
   const progress = await getEmProgress(personId);
   const academicDone =
@@ -317,9 +257,9 @@ export async function evaluateEmRequirements(personId: string) {
 
   const results = [];
   for (const req of requirements) {
-    if (overriddenIds.has(req.id)) {
+    if (overriddenIds.has(req._id)) {
       results.push({
-        requirementId: req.id,
+        requirementId: req._id,
         type: req.requirementType,
         category: req.category,
         label: req.label ?? req.requirementType,
@@ -330,7 +270,7 @@ export async function evaluateEmRequirements(personId: string) {
     }
     if (req.requirementType === "manual_approval" || req.requirementType === "modules_completed") {
       results.push({
-        requirementId: req.id,
+        requirementId: req._id,
         type: req.requirementType,
         category: req.category,
         label: req.label ?? "Componente académico",
@@ -340,7 +280,7 @@ export async function evaluateEmRequirements(personId: string) {
       continue;
     }
     results.push({
-      requirementId: req.id,
+      requirementId: req._id,
       type: req.requirementType,
       category: req.category,
       label: req.label ?? req.requirementType,
@@ -371,19 +311,18 @@ export async function createEmCycle(
     ministryId: raw.ministryId ?? undefined,
   });
   const program = await getEmProgram();
-  const db = getDb();
-  const [cycle] = await db
-    .insert(trainingCycles)
-    .values({
-      programId: program.id,
-      name: raw.name.trim(),
-      startDate: raw.startDate,
-      endDate: raw.endDate,
-      status: "planned",
-      ministryId: raw.ministryId || null,
-      createdByUserId: actorUserId,
-    })
-    .returning();
+  const client = await getAuthenticatedConvexClient();
+  const cycle = withId(
+    await client
+      .mutation(api.formation.createCycle, {
+        programId: program.id as Id<"trainingPrograms">,
+        name: raw.name.trim(),
+        startDate: raw.startDate,
+        endDate: raw.endDate,
+        ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
+      })
+      .catch(mapConvexError),
+  );
   await writeAuditLog({
     actorUserId,
     action: "school.cycle.created",
@@ -394,10 +333,7 @@ export async function createEmCycle(
   return cycle;
 }
 
-export async function enrollEm(
-  actorUserId: string,
-  raw: { personId: string; cycleId: string },
-) {
+export async function enrollEm(actorUserId: string, raw: { personId: string; cycleId: string }) {
   const actor = await requireActor(actorUserId);
   assertCanMutate(actor, "ministerial_school.manage", {
     type: "training",
@@ -417,19 +353,17 @@ export async function enrollEm(
   await assertProcessAccess(actor, raw.personId, org.ministryId);
 
   const program = await getEmProgram();
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, raw.cycleId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: raw.cycleId as Id<"trainingCycles">,
+  });
   if (!cycle || cycle.status !== "active") {
     throw new DomainError(
       DomainErrorCode.MINISTERIAL_SCHOOL_CYCLE_NOT_ACTIVE,
       "Solo ciclos activos admiten inscripción.",
     );
   }
-  if (cycle.programId !== program.id) {
+  if (cycle.programId !== (program.id as Id<"trainingPrograms">)) {
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "Ciclo no es Escuela Ministerial.");
   }
 
@@ -441,16 +375,10 @@ export async function enrollEm(
     );
   }
 
-  const [existing] = await db
-    .select()
-    .from(trainingEnrollments)
-    .where(
-      and(
-        eq(trainingEnrollments.cycleId, raw.cycleId),
-        eq(trainingEnrollments.personId, raw.personId),
-      ),
-    )
-    .limit(1);
+  const existing = await client.query(api.formation.getEnrollmentByCycleAndPerson, {
+    cycleId: raw.cycleId as Id<"trainingCycles">,
+    personId: raw.personId as Id<"persons">,
+  });
   if (existing) {
     throw new DomainError(
       DomainErrorCode.MINISTERIAL_SCHOOL_ALREADY_ENROLLED,
@@ -458,46 +386,31 @@ export async function enrollEm(
     );
   }
 
-  const [enrollment] = await db
-    .insert(trainingEnrollments)
-    .values({
-      cycleId: raw.cycleId,
-      personId: raw.personId,
-      status: "in_progress",
-    })
-    .returning();
+  const enrollment = withId(
+    await client
+      .mutation(api.formation.enroll, {
+        cycleId: raw.cycleId as Id<"trainingCycles">,
+        personId: raw.personId as Id<"persons">,
+        status: "in_progress",
+      })
+      .catch(mapConvexError),
+  );
 
-  let updatedProgress = progress;
-  if (!updatedProgress) {
-    const [created] = await db
-      .insert(personProcessProgress)
-      .values({
-        personId: raw.personId,
+  const updatedProgress = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
         processType: PROCESS,
         status: "in_progress",
-        stage: "em",
+        stage: progress ? undefined : "em",
         currentStep: "cursando",
-        ministryId: org.ministryId,
-        networkId: org.networkId,
-        startedAt: new Date(),
-        metadata: { cycleId: cycle.id },
+        ministryId: org.ministryId as Id<"ministries">,
+        networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
+        startedAt: progress?.startedAt ?? Date.now(),
+        metadata: { ...(progress?.metadata ?? {}), cycleId: cycle._id },
       })
-      .returning();
-    updatedProgress = created;
-  } else {
-    const [row] = await db
-      .update(personProcessProgress)
-      .set({
-        status: "in_progress",
-        startedAt: updatedProgress.startedAt ?? new Date(),
-        currentStep: "cursando",
-        metadata: { ...(updatedProgress.metadata ?? {}), cycleId: cycle.id },
-        updatedAt: new Date(),
-      })
-      .where(eq(personProcessProgress.id, updatedProgress.id))
-      .returning();
-    updatedProgress = row;
-  }
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: updatedProgress.id,
@@ -506,14 +419,14 @@ export async function enrollEm(
     fromStatus: progress?.status ?? null,
     toStatus: "in_progress",
     actorUserId,
-    metadata: { cycleId: cycle.id, enrollmentId: enrollment.id },
+    metadata: { cycleId: cycle._id, enrollmentId: enrollment.id },
   });
   await writeAuditLog({
     actorUserId,
     action: "ministerial_school.enrolled",
     entityType: "training_enrollment",
     entityId: enrollment.id,
-    metadata: { personId: raw.personId, cycleId: cycle.id },
+    metadata: { personId: raw.personId, cycleId: cycle._id },
   });
   return { enrollment, progress: updatedProgress };
 }
@@ -547,35 +460,36 @@ export async function markEmAcademicCompleted(
     );
   }
 
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   if (raw.enrollmentId) {
-    const [enrollment] = await db
-      .select()
-      .from(trainingEnrollments)
-      .where(eq(trainingEnrollments.id, raw.enrollmentId))
-      .limit(1);
+    const enrollment = await client.query(api.formation.getEnrollment, {
+      enrollmentId: raw.enrollmentId as Id<"trainingEnrollments">,
+    });
     if (enrollment) {
       await assertCycleStaffOrManage(actor, enrollment.cycleId, "academic");
-      await db
-        .update(trainingEnrollments)
-        .set({ status: "academic_completed", updatedAt: new Date() })
-        .where(eq(trainingEnrollments.id, enrollment.id));
+      await client
+        .mutation(api.formation.updateEnrollmentStatus, {
+          enrollmentId: enrollment._id,
+          status: "academic_completed",
+        })
+        .catch(mapConvexError);
     }
   }
 
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "academic_completed",
-      currentStep: "academic_completed",
-      updatedAt: new Date(),
-      metadata: {
-        ...(progress.metadata ?? {}),
-        academic_completed_at: new Date().toISOString(),
-      },
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
+        processType: PROCESS,
+        status: "academic_completed",
+        currentStep: "academic_completed",
+        metadata: {
+          ...(progress.metadata ?? {}),
+          academic_completed_at: new Date().toISOString(),
+        },
+      })
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: row.id,
@@ -630,11 +544,9 @@ export async function completeEm(
     );
   }
 
+  const client = await getAuthenticatedConvexClient();
   if (raw.overrideRequirementIds?.length) {
-    if (
-      !hasPermission(actor, "destination.override_requirement") &&
-      !isSuperadmin(actor)
-    ) {
+    if (!hasPermission(actor, "destination.override_requirement") && !isSuperadmin(actor)) {
       throw new DomainError(
         DomainErrorCode.DESTINATION_OVERRIDE_NOT_ALLOWED,
         "Sin permiso de override.",
@@ -647,15 +559,15 @@ export async function completeEm(
       );
     }
     const program = await getEmProgram();
-    const db = getDb();
     for (const requirementId of raw.overrideRequirementIds) {
-      await db.insert(trainingRequirementOverrides).values({
-        personId: raw.personId,
-        programId: program.id,
-        requirementId,
-        reason: raw.overrideReason.trim(),
-        actorUserId,
-      });
+      await client
+        .mutation(api.formation.insertOverride, {
+          personId: raw.personId as Id<"persons">,
+          programId: program.id as Id<"trainingPrograms">,
+          requirementId: requirementId as Id<"trainingCompletionRequirements">,
+          reason: raw.overrideReason.trim(),
+        })
+        .catch(mapConvexError);
     }
   }
 
@@ -668,50 +580,37 @@ export async function completeEm(
     );
   }
 
-  const db = getDb();
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "completed",
-      completedAt: new Date(),
-      completedByUserId: actorUserId,
-      currentStep: "completado",
-      updatedAt: new Date(),
-      metadata: {
-        ...(progress.metadata ?? {}),
-        formally_completed: true,
-        leadership_activated: false,
-      },
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: raw.personId as Id<"persons">,
+        processType: PROCESS,
+        status: "completed",
+        completedAt: Date.now(),
+        completedByUserId: actorUserId as Id<"users">,
+        currentStep: "completado",
+        metadata: {
+          ...(progress.metadata ?? {}),
+          formally_completed: true,
+          leadership_activated: false,
+        },
+      })
+      .catch(mapConvexError),
+  );
 
   const program = await getEmProgram();
-  const programCycles = await db
-    .select({ id: trainingCycles.id })
-    .from(trainingCycles)
-    .where(eq(trainingCycles.programId, program.id));
-  const cycleIds = programCycles.map((c) => c.id);
+  const cycles = await client.query(api.formation.listCycles, {
+    programIds: [program.id as Id<"trainingPrograms">],
+  });
+  const cycleIds = cycles.map((c) => c._id);
   if (cycleIds.length) {
-    await db
-      .update(trainingEnrollments)
-      .set({
-        status: "completed",
-        completedAt: new Date(),
-        completedByUserId: actorUserId,
-        updatedAt: new Date(),
+    await client
+      .mutation(api.formation.bulkCompleteEnrollmentsForPerson, {
+        personId: raw.personId as Id<"persons">,
+        cycleIds,
+        completedByUserId: actorUserId as Id<"users">,
       })
-      .where(
-        and(
-          eq(trainingEnrollments.personId, raw.personId),
-          inArray(trainingEnrollments.cycleId, cycleIds),
-          inArray(trainingEnrollments.status, [
-            "enrolled",
-            "in_progress",
-            "academic_completed",
-          ]),
-        ),
-      );
+      .catch(mapConvexError);
   }
 
   await appendEvent({
@@ -761,12 +660,17 @@ export async function pauseEm(actorUserId: string, personId: string, note?: stri
   if (!progress || progress.status === "completed") {
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "No se puede pausar.");
   }
-  const db = getDb();
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({ status: "paused", currentStep: "pausado", updatedAt: new Date() })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const client = await getAuthenticatedConvexClient();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: personId as Id<"persons">,
+        processType: PROCESS,
+        status: "paused",
+        currentStep: "pausado",
+      })
+      .catch(mapConvexError),
+  );
   await appendEvent({
     progressId: row.id,
     personId,
@@ -795,12 +699,17 @@ export async function resumeEm(actorUserId: string, personId: string) {
   if (!progress || progress.status !== "paused") {
     throw new DomainError(DomainErrorCode.VALIDATION_FAILED, "No está pausado.");
   }
-  const db = getDb();
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({ status: "in_progress", currentStep: "cursando", updatedAt: new Date() })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const client = await getAuthenticatedConvexClient();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: personId as Id<"persons">,
+        processType: PROCESS,
+        status: "in_progress",
+        currentStep: "cursando",
+      })
+      .catch(mapConvexError),
+  );
   await appendEvent({
     progressId: row.id,
     personId,
@@ -821,28 +730,18 @@ export async function resumeEm(actorUserId: string, personId: string) {
 
 export async function listEmEligible(actorUserId: string) {
   const actor = await requireActor(actorUserId);
-  if (
-    !hasPermission(actor, "ministerial_school.read") &&
-    !hasPermission(actor, "process.read")
-  ) {
+  if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const n3Done = await db
-    .select({
-      personId: personProcessProgress.personId,
-      ministryId: personProcessProgress.ministryId,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personProcessProgress)
-    .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-    .where(
-      and(
-        eq(personProcessProgress.processType, "destino_n3"),
-        eq(personProcessProgress.status, "completed"),
-      ),
-    );
+  const client = await getAuthenticatedConvexClient();
+  const n3Done = (
+    await client.query(api.formation.listProgressRows, { processTypes: ["destino_n3"], statuses: ["completed"] })
+  ).map((r) => ({
+    personId: r.progress.personId as string,
+    ministryId: r.progress.ministryId as string,
+    firstName: r.firstName,
+    lastName: r.lastName,
+  }));
   const result = [];
   for (const row of n3Done) {
     if (!isSuperadmin(actor) && !canAccessMinistry(actor, row.ministryId)) continue;
@@ -864,24 +763,20 @@ export async function listEmEligible(actorUserId: string) {
 
 export async function getEmDashboardCounts(actorUserId: string) {
   const actor = await requireActor(actorUserId);
-  if (
-    !hasPermission(actor, "ministerial_school.read") &&
-    !hasPermission(actor, "process.read")
-  ) {
+  if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const conditions = [eq(personProcessProgress.processType, PROCESS)];
-  if (!isSuperadmin(actor) && actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
-  }
-  const rows = await db
-    .select({ status: personProcessProgress.status, c: count() })
-    .from(personProcessProgress)
-    .where(and(...conditions))
-    .groupBy(personProcessProgress.status);
+  const client = await getAuthenticatedConvexClient();
+  const ministryIds =
+    !isSuperadmin(actor) && actor.ministryIds.length
+      ? (actor.ministryIds as Id<"ministries">[])
+      : undefined;
+  const rows = await client.query(api.formation.listProgressRows, {
+    processTypes: [PROCESS],
+    ministryIds,
+  });
   const pick = (statuses: string[]) =>
-    rows.filter((r) => statuses.includes(r.status)).reduce((a, r) => a + Number(r.c), 0);
+    rows.filter((r) => statuses.includes(r.progress.status)).length;
   const eligible = await listEmEligible(actorUserId);
   return {
     eligible: eligible.length,
@@ -895,65 +790,41 @@ export async function getEmDashboardCounts(actorUserId: string) {
 
 export async function listEmCycles(actorUserId: string) {
   const actor = await requireActor(actorUserId);
-  if (
-    !hasPermission(actor, "ministerial_school.read") &&
-    !hasPermission(actor, "process.read")
-  ) {
+  if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
   const program = await getEmProgram();
-  const db = getDb();
-  return db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.programId, program.id))
-    .orderBy(desc(trainingCycles.startDate));
+  const client = await getAuthenticatedConvexClient();
+  const cycles = await client.query(api.formation.listCycles, {
+    programIds: [program.id as Id<"trainingPrograms">],
+  });
+  return cycles.map(withId);
 }
 
 export async function getEmCycleBoard(actorUserId: string, cycleId: string) {
   const actor = await requireActor(actorUserId);
-  if (
-    !hasPermission(actor, "ministerial_school.read") &&
-    !hasPermission(actor, "process.read")
-  ) {
+  if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, cycleId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
   if (!cycle) throw new DomainError(DomainErrorCode.NOT_FOUND, "Ciclo no encontrado.");
-  const [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.id, cycle.programId))
-    .limit(1);
-  const modules = await db
-    .select()
-    .from(trainingModules)
-    .where(
-      and(eq(trainingModules.programId, cycle.programId), eq(trainingModules.isActive, true)),
-    )
-    .orderBy(asc(trainingModules.orderIndex));
-  const enrollments = await db
-    .select({
-      enrollment: trainingEnrollments,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(trainingEnrollments)
-    .innerJoin(persons, eq(persons.id, trainingEnrollments.personId))
-    .where(eq(trainingEnrollments.cycleId, cycleId))
-    .orderBy(asc(persons.lastName));
+  const program = await client.query(api.formation.getProgramByCode, { code: EM_PROGRAM_CODE });
+  const modules = (
+    await client.query(api.formation.listModules, { programId: cycle.programId, activeOnly: true })
+  ).map(withId);
+  const enrollments = await client.query(api.formation.listEnrollmentsByCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
 
   const scoped = [];
   for (const row of enrollments) {
     try {
-      const org = await currentOrg(row.enrollment.personId);
+      const org = await currentOrg(row.enrollment.personId as string);
       if (org?.ministryId) {
-        await assertProcessAccess(actor, row.enrollment.personId, org.ministryId);
+        await assertProcessAccess(actor, row.enrollment.personId as string, org.ministryId);
       } else if (!isSuperadmin(actor) && !isLeaderGeneral(actor)) {
         continue;
       }
@@ -962,28 +833,25 @@ export async function getEmCycleBoard(actorUserId: string, cycleId: string) {
       // skip
     }
   }
-  const enrollmentIds = scoped.map((s) => s.enrollment.id);
+  const enrollmentIds = scoped.map((s) => s.enrollment._id);
   const attendanceRows =
     enrollmentIds.length === 0
       ? []
-      : await db
-          .select()
-          .from(trainingAttendance)
-          .where(inArray(trainingAttendance.enrollmentId, enrollmentIds));
+      : await client.query(api.formation.listAttendanceByEnrollments, { enrollmentIds });
 
   return {
-    cycle,
-    program,
+    cycle: withId(cycle),
+    program: program ? withId(program) : null,
     modules,
     participants: scoped.map((s) => ({
-      enrollmentId: s.enrollment.id,
-      personId: s.enrollment.personId,
+      enrollmentId: s.enrollment._id as string,
+      personId: s.enrollment.personId as string,
       fullName: formatFullName(s.firstName, s.lastName),
       status: s.enrollment.status,
       attendance: Object.fromEntries(
         attendanceRows
-          .filter((a) => a.enrollmentId === s.enrollment.id)
-          .map((a) => [a.moduleId, a]),
+          .filter((a) => a.enrollmentId === s.enrollment._id)
+          .map((a) => [a.moduleId as string, withId(a)]),
       ),
       progressLabel: statusLabel(s.enrollment.status),
     })),

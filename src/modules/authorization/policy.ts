@@ -163,6 +163,22 @@ export function canView(
       if (options?.isDescendant && hasPermission(actor, "leaders.view_descendants")) {
         return true;
       }
+      // Leader General / staff with ministry scope: whole ministry.
+      if (
+        target.ministryId &&
+        canAccessMinistry(actor, target.ministryId) &&
+        (isLeaderGeneral(actor) || actor.roleCodes.includes("staff") || isSuperadmin(actor))
+      ) {
+        return true;
+      }
+      // Regular tree leaders: ministry alone is NOT enough (blocks lateral/ascendant).
+      if (
+        actor.roleCodes.includes("leader") &&
+        !isLeaderGeneral(actor) &&
+        !isSuperadmin(actor)
+      ) {
+        return false;
+      }
       if (target.ministryId) {
         return canAccessMinistry(actor, target.ministryId);
       }

@@ -26,6 +26,7 @@ const TYPES: Array<{ id: ReportType; label: string }> = [
   { id: "cells", label: "Células" },
   { id: "leadership", label: "Liderazgo" },
   { id: "formation", label: "Formación" },
+  { id: "multiplication", label: "Multiplicación 3–12" },
   { id: "transfers", label: "Transferencias" },
 ];
 

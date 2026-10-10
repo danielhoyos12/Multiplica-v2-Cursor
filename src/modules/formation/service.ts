@@ -2,23 +2,9 @@
  * Formation / Escalera del Éxito — Consolidar + Universidad de la Vida.
  * Persona Maestra (persons.id) is the only identity. No person silos.
  */
-import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-
-import { getDb } from "@/db/client";
-import {
-  cellMemberships,
-  cells,
-  personOrganizationHistory,
-  personProcessEvents,
-  personProcessProgress,
-  persons,
-  trainingAttendance,
-  trainingCycles,
-  trainingEnrollments,
-  trainingModules,
-  trainingPrograms,
-  UDV_PROGRAM_CODE,
-} from "@/db/schema";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
+import { withId } from "@/lib/convex-doc";
+import { mapConvexError } from "@/lib/convex-errors";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { writeAuditLog } from "@/modules/audit";
 import {
@@ -32,6 +18,8 @@ import {
 } from "@/modules/authorization";
 import { formatFullName } from "@/modules/ganar/normalize";
 import { isDescendantOf } from "@/modules/leadership/service";
+import { UDV_PROGRAM_CODE } from "@/db/schema";
+import { api, getAuthenticatedConvexClient } from "@/server/convex";
 
 import {
   authorizeRecoveryInputSchema,
@@ -47,26 +35,29 @@ import {
   type RecordAttendanceInput,
 } from "./validation";
 
+type ProcessStatus =
+  | "pending"
+  | "eligible"
+  | "in_progress"
+  | "academic_completed"
+  | "completed"
+  | "paused"
+  | "abandoned";
+
 async function requireActor(userId: string) {
   return loadAuthContext(userId);
 }
 
 async function currentOrg(personId: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      ministryId: personOrganizationHistory.ministryId,
-      networkId: personOrganizationHistory.networkId,
-    })
-    .from(personOrganizationHistory)
-    .where(
-      and(
-        eq(personOrganizationHistory.personId, personId),
-        isNull(personOrganizationHistory.effectiveTo),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const org = await client.query(api.persons.getCurrentOrg, {
+    personId: personId as Id<"persons">,
+  });
+  if (!org) return null;
+  return {
+    ministryId: (org.ministryId as string | undefined) ?? null,
+    networkId: (org.networkId as string | undefined) ?? null,
+  };
 }
 
 export async function assertProcessAccess(
@@ -88,34 +79,20 @@ export async function assertProcessAccess(
   if (actor.personId && actor.personId === personId) return;
   if (actor.personId && (await isDescendantOf(actor.personId, personId))) return;
 
-  // Assigned consolidator / leader of cell membership
-  const db = getDb();
-  const [assigned] = await db
-    .select({ id: personProcessProgress.id })
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.assignedLeaderPersonId, actor.personId ?? "00000000-0000-0000-0000-000000000000"),
-      ),
-    )
-    .limit(1);
-  if (assigned && actor.personId) return;
+  const client = await getAuthenticatedConvexClient();
 
+  // Assigned consolidator / leader of cell membership
   if (actor.personId) {
-    const [memberUnder] = await db
-      .select({ id: cellMemberships.id })
-      .from(cellMemberships)
-      .innerJoin(cells, eq(cells.id, cellMemberships.cellId))
-      .where(
-        and(
-          eq(cellMemberships.personId, personId),
-          eq(cellMemberships.status, "active"),
-          eq(cells.responsiblePersonId, actor.personId),
-          sql`${cells.status} <> 'closed'`,
-        ),
-      )
-      .limit(1);
+    const assigned = await client.query(api.formation.hasAssignedProgress, {
+      personId: personId as Id<"persons">,
+      assignedLeaderPersonId: actor.personId as Id<"persons">,
+    });
+    if (assigned) return;
+
+    const memberUnder = await client.query(api.formation.isPersonInActiveCellUnder, {
+      personId: personId as Id<"persons">,
+      responsiblePersonId: actor.personId as Id<"persons">,
+    });
     if (memberUnder) return;
   }
 
@@ -126,18 +103,12 @@ export async function assertProcessAccess(
 }
 
 async function getProgress(personId: string, processType: "consolidar" | "udv" | "destino") {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(personProcessProgress)
-    .where(
-      and(
-        eq(personProcessProgress.personId, personId),
-        eq(personProcessProgress.processType, processType),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
+  const client = await getAuthenticatedConvexClient();
+  const row = await client.query(api.formation.getProgress, {
+    personId: personId as Id<"persons">,
+    processType,
+  });
+  return row ? withId(row) : null;
 }
 
 async function appendEvent(params: {
@@ -145,82 +116,49 @@ async function appendEvent(params: {
   personId: string;
   processType: "consolidar" | "udv" | "destino";
   eventType: string;
-  fromStatus?:
-    | "pending"
-    | "eligible"
-    | "in_progress"
-    | "academic_completed"
-    | "completed"
-    | "paused"
-    | "abandoned"
-    | null;
-  toStatus?:
-    | "pending"
-    | "eligible"
-    | "in_progress"
-    | "academic_completed"
-    | "completed"
-    | "paused"
-    | "abandoned"
-    | null;
+  fromStatus?: ProcessStatus | null;
+  toStatus?: ProcessStatus | null;
   actorUserId: string;
   note?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const db = getDb();
-  await db.insert(personProcessEvents).values({
-    progressId: params.progressId,
-    personId: params.personId,
-    processType: params.processType,
-    eventType: params.eventType,
-    fromStatus: params.fromStatus ?? null,
-    toStatus: params.toStatus ?? null,
-    actorUserId: params.actorUserId,
-    note: params.note ?? null,
-    metadata: params.metadata ?? {},
-  });
+  const client = await getAuthenticatedConvexClient();
+  await client
+    .mutation(api.formation.appendProcessEvent, {
+      progressId: params.progressId as Id<"personProcessProgress">,
+      personId: params.personId as Id<"persons">,
+      processType: params.processType,
+      eventType: params.eventType,
+      fromStatus: (params.fromStatus ?? undefined) as never,
+      toStatus: (params.toStatus ?? undefined) as never,
+      note: params.note ?? undefined,
+      metadata: params.metadata ?? {},
+    })
+    .catch(mapConvexError);
 }
 
 export async function ensureUdvProgram() {
-  const db = getDb();
-  let [program] = await db
-    .select()
-    .from(trainingPrograms)
-    .where(eq(trainingPrograms.code, UDV_PROGRAM_CODE))
-    .limit(1);
-  if (!program) {
-    [program] = await db
-      .insert(trainingPrograms)
-      .values({
-        code: UDV_PROGRAM_CODE,
-        name: "Universidad de la Vida",
-        description: "Programa pastoral previo a Capacitación Destino.",
-        isActive: true,
-      })
-      .returning();
-  }
-  const modules = await db
-    .select()
-    .from(trainingModules)
-    .where(eq(trainingModules.programId, program.id))
-    .orderBy(asc(trainingModules.orderIndex));
+  const client = await getAuthenticatedConvexClient();
+  const program = withId(
+    await client.mutation(api.formation.ensureProgram, {
+      code: UDV_PROGRAM_CODE,
+      name: "Universidad de la Vida",
+      description: "Programa pastoral previo a Capacitación Destino.",
+    }),
+  );
+  const modules = await client.query(api.formation.listModules, {
+    programId: program.id as Id<"trainingPrograms">,
+  });
   if (modules.length === 0) {
-    const defaults = [
-      { code: "M1", name: "Módulo 1", orderIndex: 1 },
-      { code: "M2", name: "Módulo 2", orderIndex: 2 },
-      { code: "M3", name: "Módulo 3", orderIndex: 3 },
-      { code: "M4", name: "Módulo 4", orderIndex: 4 },
-    ];
-    await db.insert(trainingModules).values(
-      defaults.map((m) => ({
-        programId: program.id,
-        code: m.code,
-        name: m.name,
-        orderIndex: m.orderIndex,
-        isActive: true,
-        isRequired: true,
-      })),
-    );
+    await client.mutation(api.formation.syncModules, {
+      programId: program.id as Id<"trainingPrograms">,
+      modules: [
+        { code: "M1", name: "Módulo 1", orderIndex: 1 },
+        { code: "M2", name: "Módulo 2", orderIndex: 2 },
+        { code: "M3", name: "Módulo 3", orderIndex: 3 },
+        { code: "M4", name: "Módulo 4", orderIndex: 4 },
+      ],
+    });
   }
   return program;
 }
@@ -249,76 +187,47 @@ export async function startConsolidation(actorUserId: string, raw: unknown) {
   }
   await assertProcessAccess(actor, input.personId, org.ministryId);
 
-  const existing = await getProgress(input.personId, "consolidar");
-  if (existing?.status === "completed") {
+  const { getPersonConsolidarSummary, ensurePreEncuentroEligible } = await import(
+    "./consolidar-stages"
+  );
+  const summary = await getPersonConsolidarSummary(input.personId);
+  if (summary.consolidar.derivedComplete) {
     throw new DomainError(
       DomainErrorCode.CONSOLIDATION_ALREADY_COMPLETED,
-      "Consolidar ya está completado.",
+      "Consolidar ya está completado (Pre + Encuentro + Post).",
     );
   }
-  if (existing?.status === "in_progress") {
-    return existing;
-  }
 
-  const db = getDb();
-  const assignedLeaderPersonId =
-    input.assignedLeaderPersonId ?? actor.personId ?? null;
+  const existing = await getProgress(input.personId, "consolidar");
+  const needsReopen =
+    existing?.status === "completed" && !summary.consolidar.derivedComplete;
 
-  if (existing) {
-    // resume from paused/pending/abandoned
-    const [row] = await db
-      .update(personProcessProgress)
-      .set({
+  const client = await getAuthenticatedConvexClient();
+  const assignedLeaderPersonId = input.assignedLeaderPersonId ?? actor.personId ?? undefined;
+
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: input.personId as Id<"persons">,
+        processType: "consolidar",
         status: "in_progress",
-        startedAt: existing.startedAt ?? new Date(),
-        assignedLeaderPersonId:
-          assignedLeaderPersonId ?? existing.assignedLeaderPersonId,
-        networkId: org.networkId,
-        currentStep: "seguimiento",
-        updatedAt: new Date(),
+        stage: existing ? undefined : "consolidar",
+        currentStep: existing || needsReopen ? "seguimiento" : "inicio",
+        ministryId: org.ministryId as Id<"ministries">,
+        networkId: (org.networkId ?? undefined) as Id<"networks"> | undefined,
+        assignedLeaderPersonId: assignedLeaderPersonId as Id<"persons"> | undefined,
+        startedAt: existing?.startedAt ?? Date.now(),
+        clearCompletion: needsReopen || undefined,
       })
-      .where(eq(personProcessProgress.id, existing.id))
-      .returning();
-    await appendEvent({
-      progressId: row.id,
-      personId: input.personId,
-      processType: "consolidar",
-      eventType: "started",
-      fromStatus: existing.status,
-      toStatus: "in_progress",
-      actorUserId,
-    });
-    await writeAuditLog({
-      actorUserId,
-      action: "process.consolidation.started",
-      entityType: "person_process_progress",
-      entityId: row.id,
-      metadata: { personId: input.personId, resumed: true },
-    });
-    return row;
-  }
-
-  const [row] = await db
-    .insert(personProcessProgress)
-    .values({
-      personId: input.personId,
-      processType: "consolidar",
-      status: "in_progress",
-      stage: "consolidar",
-      currentStep: "inicio",
-      ministryId: org.ministryId,
-      networkId: org.networkId,
-      assignedLeaderPersonId,
-      startedAt: new Date(),
-    })
-    .returning();
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: row.id,
     personId: input.personId,
     processType: "consolidar",
     eventType: "started",
-    fromStatus: null,
+    fromStatus: existing?.status ?? null,
     toStatus: "in_progress",
     actorUserId,
   });
@@ -327,11 +236,66 @@ export async function startConsolidation(actorUserId: string, raw: unknown) {
     action: "process.consolidation.started",
     entityType: "person_process_progress",
     entityId: row.id,
-    metadata: { personId: input.personId },
+    metadata: { personId: input.personId, resumed: Boolean(existing) },
   });
+
+  // Consolidar = UDLV: open Pre-Encuentro as the immediate next step.
+  await ensurePreEncuentroEligible(input.personId, org.ministryId, org.networkId);
+
   return row;
 }
 
+/**
+ * Authorized, idempotent repair for a false Consolidar "completed" without UDLV.
+ * Uses the same RBAC as startConsolidation (Clerk session → JWT → permissions).
+ * Does not delete Persona Maestra, history, audit events, or legacy `udv` rows.
+ */
+export async function repairConsolidarUdlvState(
+  actorUserId: string,
+  personId: string,
+): Promise<{
+  repaired: boolean;
+  reason: "already_complete" | "already_correct" | "reopened";
+}> {
+  const { getPersonConsolidarSummary } = await import("./consolidar-stages");
+  const { needsConsolidarUdlvRepair } = await import("./consolidar-status");
+
+  const org = await currentOrg(personId);
+  if (!org?.ministryId) {
+    throw new DomainError(
+      DomainErrorCode.VALIDATION_FAILED,
+      "La persona necesita pertenencia organizacional.",
+    );
+  }
+
+  const summary = await getPersonConsolidarSummary(personId);
+  if (summary.consolidar.derivedComplete) {
+    return { repaired: false, reason: "already_complete" };
+  }
+
+  const aggregate = await getProgress(personId, "consolidar");
+  if (
+    !needsConsolidarUdlvRepair({
+      derivedComplete: summary.consolidar.derivedComplete,
+      aggregateStatus: aggregate?.status,
+      aggregateCompletedAt: aggregate?.completedAt,
+      preStatus: summary.pre.status,
+    })
+  ) {
+    return { repaired: false, reason: "already_correct" };
+  }
+
+  await startConsolidation(actorUserId, {
+    personId,
+    ministryId: org.ministryId,
+  });
+  return { repaired: true, reason: "reopened" };
+}
+
+/**
+ * Close Consolidar only when UDLV (Pre + Encuentro + Post) is complete.
+ * Does not treat legacy `udv` processType as a gate or as Consolidar itself.
+ */
 export async function completeConsolidation(actorUserId: string, raw: unknown) {
   const actor = await requireActor(actorUserId);
   const input = completeConsolidationInputSchema.parse(raw);
@@ -346,45 +310,40 @@ export async function completeConsolidation(actorUserId: string, raw: unknown) {
   });
   await assertProcessAccess(actor, input.personId, progress.ministryId);
 
-  if (progress.status === "completed") {
-    // Idempotent: return existing + ensure UDV pending row
-    await ensureUdvEligibleRow(progress.personId, progress.ministryId, progress.networkId);
-    return progress;
+  const { getPersonConsolidarSummary, syncConsolidarAggregate } = await import(
+    "./consolidar-stages"
+  );
+  const summary = await getPersonConsolidarSummary(input.personId);
+
+  if (!summary.consolidar.derivedComplete) {
+    throw new DomainError(
+      DomainErrorCode.PREREQUISITE_NOT_MET,
+      "Consolidar solo se completa cuando Pre-Encuentro, Encuentro y Post-Encuentro (Universidad de la Vida) están completados.",
+    );
   }
 
-  const db = getDb();
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "completed",
-      completedAt: new Date(),
-      completedByUserId: actorUserId,
-      currentStep: "completado",
-      updatedAt: new Date(),
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const synced = await syncConsolidarAggregate(input.personId, actorUserId);
+  if (!synced) {
+    throw new DomainError(
+      DomainErrorCode.PREREQUISITE_NOT_MET,
+      "No se pudo sincronizar el cierre de Consolidar; verifica las tres etapas UDLV.",
+    );
+  }
 
-  await appendEvent({
-    progressId: row.id,
-    personId: input.personId,
-    processType: "consolidar",
-    eventType: "completed",
-    fromStatus: progress.status,
-    toStatus: "completed",
-    actorUserId,
-    note: input.note,
-  });
-  await writeAuditLog({
-    actorUserId,
-    action: "process.consolidation.completed",
-    entityType: "person_process_progress",
-    entityId: row.id,
-    metadata: { personId: input.personId },
-  });
+  if (input.note?.trim()) {
+    await appendEvent({
+      progressId: synced.id,
+      personId: input.personId,
+      processType: "consolidar",
+      eventType: "note",
+      fromStatus: progress.status,
+      toStatus: "completed",
+      actorUserId,
+      note: input.note,
+    });
+  }
 
-  await ensureUdvEligibleRow(row.personId, row.ministryId, row.networkId);
-  return row;
+  return synced;
 }
 
 async function ensureUdvEligibleRow(
@@ -394,21 +353,21 @@ async function ensureUdvEligibleRow(
 ) {
   const existing = await getProgress(personId, "udv");
   if (existing) return existing;
-  const db = getDb();
-  const [row] = await db
-    .insert(personProcessProgress)
-    .values({
-      personId,
-      processType: "udv",
-      status: "pending",
-      stage: "udv",
-      currentStep: "apto",
-      ministryId,
-      networkId,
-      metadata: { eligible_for_udv: true },
-    })
-    .returning();
-  return row;
+  const client = await getAuthenticatedConvexClient();
+  return withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: personId as Id<"persons">,
+        processType: "udv",
+        status: "pending",
+        stage: "udv",
+        currentStep: "apto",
+        ministryId: ministryId as Id<"ministries">,
+        networkId: (networkId ?? undefined) as Id<"networks"> | undefined,
+        metadata: { eligible_for_udv: true },
+      })
+      .catch(mapConvexError),
+  );
 }
 
 export async function pauseProcess(actorUserId: string, raw: unknown) {
@@ -431,16 +390,17 @@ export async function pauseProcess(actorUserId: string, raw: unknown) {
     );
   }
 
-  const db = getDb();
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "paused",
-      currentStep: progress.currentStep ?? "pausado",
-      updatedAt: new Date(),
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const client = await getAuthenticatedConvexClient();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: input.personId as Id<"persons">,
+        processType: input.processType,
+        status: "paused",
+        currentStep: progress.currentStep ?? "pausado",
+      })
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: row.id,
@@ -483,15 +443,16 @@ export async function resumeProcess(actorUserId: string, raw: unknown) {
   }
   if (progress.status === "in_progress") return progress;
 
-  const db = getDb();
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "in_progress",
-      updatedAt: new Date(),
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const client = await getAuthenticatedConvexClient();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: input.personId as Id<"persons">,
+        processType: input.processType,
+        status: "in_progress",
+      })
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: row.id,
@@ -514,19 +475,18 @@ export async function createTrainingCycle(actorUserId: string, raw: CreateCycleI
   });
 
   const program = await ensureUdvProgram();
-  const db = getDb();
-  const [cycle] = await db
-    .insert(trainingCycles)
-    .values({
-      programId: program.id,
-      name: input.name.trim(),
-      startDate: input.startDate,
-      endDate: input.endDate,
-      status: "planned",
-      ministryId: input.ministryId || null,
-      createdByUserId: actorUserId,
-    })
-    .returning();
+  const client = await getAuthenticatedConvexClient();
+  const cycle = withId(
+    await client
+      .mutation(api.formation.createCycle, {
+        programId: program.id as Id<"trainingPrograms">,
+        name: input.name.trim(),
+        startDate: input.startDate,
+        endDate: input.endDate,
+        ministryId: (input.ministryId || undefined) as Id<"ministries"> | undefined,
+      })
+      .catch(mapConvexError),
+  );
 
   await writeAuditLog({
     actorUserId,
@@ -540,12 +500,10 @@ export async function createTrainingCycle(actorUserId: string, raw: CreateCycleI
 
 export async function activateTrainingCycle(actorUserId: string, cycleId: string) {
   const actor = await requireActor(actorUserId);
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, cycleId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
   if (!cycle) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ciclo no encontrado.");
   }
@@ -560,11 +518,11 @@ export async function activateTrainingCycle(actorUserId: string, cycleId: string
     throw new DomainError(DomainErrorCode.CYCLE_ALREADY_CLOSED, "El ciclo está cerrado.");
   }
 
-  const [updated] = await db
-    .update(trainingCycles)
-    .set({ status: "active", activatedAt: new Date(), updatedAt: new Date() })
-    .where(eq(trainingCycles.id, cycleId))
-    .returning();
+  const updated = withId(
+    await client
+      .mutation(api.formation.activateCycle, { cycleId: cycleId as Id<"trainingCycles"> })
+      .catch(mapConvexError),
+  );
 
   await writeAuditLog({
     actorUserId,
@@ -578,12 +536,10 @@ export async function activateTrainingCycle(actorUserId: string, cycleId: string
 
 export async function closeTrainingCycle(actorUserId: string, cycleId: string) {
   const actor = await requireActor(actorUserId);
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, cycleId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
   if (!cycle) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ciclo no encontrado.");
   }
@@ -594,12 +550,11 @@ export async function closeTrainingCycle(actorUserId: string, cycleId: string) {
   if (cycle.status === "closed") {
     throw new DomainError(DomainErrorCode.CYCLE_ALREADY_CLOSED, "El ciclo ya está cerrado.");
   }
-  const [updated] = await db
-    .update(trainingCycles)
-    .set({ status: "closed", closedAt: new Date(), updatedAt: new Date() })
-    .where(eq(trainingCycles.id, cycleId))
-    .returning();
-  return updated;
+  return withId(
+    await client
+      .mutation(api.formation.closeCycle, { cycleId: cycleId as Id<"trainingCycles"> })
+      .catch(mapConvexError),
+  );
 }
 
 export async function enrollInUdv(actorUserId: string, raw: unknown) {
@@ -619,12 +574,10 @@ export async function enrollInUdv(actorUserId: string, raw: unknown) {
   });
   await assertProcessAccess(actor, input.personId, consolidar.ministryId);
 
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, input.cycleId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: input.cycleId as Id<"trainingCycles">,
+  });
   if (!cycle || cycle.status !== "active") {
     throw new DomainError(
       DomainErrorCode.UDV_CYCLE_NOT_ACTIVE,
@@ -634,22 +587,13 @@ export async function enrollInUdv(actorUserId: string, raw: unknown) {
 
   const udvProgress = await getProgress(input.personId, "udv");
   if (udvProgress?.status === "completed") {
-    throw new DomainError(
-      DomainErrorCode.UDV_ALREADY_COMPLETED,
-      "UDV ya está completada.",
-    );
+    throw new DomainError(DomainErrorCode.UDV_ALREADY_COMPLETED, "UDV ya está completada.");
   }
 
-  const [existingEnroll] = await db
-    .select()
-    .from(trainingEnrollments)
-    .where(
-      and(
-        eq(trainingEnrollments.cycleId, input.cycleId),
-        eq(trainingEnrollments.personId, input.personId),
-      ),
-    )
-    .limit(1);
+  const existingEnroll = await client.query(api.formation.getEnrollmentByCycleAndPerson, {
+    cycleId: input.cycleId as Id<"trainingCycles">,
+    personId: input.personId as Id<"persons">,
+  });
   if (existingEnroll) {
     throw new DomainError(
       DomainErrorCode.UDV_ALREADY_ENROLLED,
@@ -657,14 +601,14 @@ export async function enrollInUdv(actorUserId: string, raw: unknown) {
     );
   }
 
-  const [enrollment] = await db
-    .insert(trainingEnrollments)
-    .values({
-      cycleId: input.cycleId,
-      personId: input.personId,
-      status: "in_progress",
-    })
-    .returning();
+  const enrollment = withId(
+    await client
+      .mutation(api.formation.enroll, {
+        cycleId: input.cycleId as Id<"trainingCycles">,
+        personId: input.personId as Id<"persons">,
+      })
+      .catch(mapConvexError),
+  );
 
   // Upsert UDV progress to in_progress
   let progress = udvProgress;
@@ -672,20 +616,21 @@ export async function enrollInUdv(actorUserId: string, raw: unknown) {
     progress = await ensureUdvEligibleRow(
       input.personId,
       consolidar.ministryId,
-      consolidar.networkId,
+      consolidar.networkId ?? null,
     );
   }
-  const [updatedProgress] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "in_progress",
-      startedAt: progress.startedAt ?? new Date(),
-      currentStep: "cursando",
-      updatedAt: new Date(),
-      metadata: { ...(progress.metadata ?? {}), cycleId: cycle.id },
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const updatedProgress = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: input.personId as Id<"persons">,
+        processType: "udv",
+        status: "in_progress",
+        currentStep: "cursando",
+        startedAt: progress.startedAt ?? Date.now(),
+        metadata: { ...(progress.metadata ?? {}), cycleId: cycle._id },
+      })
+      .catch(mapConvexError),
+  );
 
   await appendEvent({
     progressId: updatedProgress.id,
@@ -695,23 +640,20 @@ export async function enrollInUdv(actorUserId: string, raw: unknown) {
     fromStatus: progress.status,
     toStatus: "in_progress",
     actorUserId,
-    metadata: { cycleId: cycle.id, enrollmentId: enrollment.id },
+    metadata: { cycleId: cycle._id, enrollmentId: enrollment.id },
   });
   await writeAuditLog({
     actorUserId,
     action: "process.udv.enrolled",
     entityType: "training_enrollment",
     entityId: enrollment.id,
-    metadata: { personId: input.personId, cycleId: cycle.id },
+    metadata: { personId: input.personId, cycleId: cycle._id },
   });
 
   return { enrollment, progress: updatedProgress };
 }
 
-export async function recordTrainingAttendance(
-  actorUserId: string,
-  raw: RecordAttendanceInput,
-) {
+export async function recordTrainingAttendance(actorUserId: string, raw: RecordAttendanceInput) {
   const actor = await requireActor(actorUserId);
   const input = recordAttendanceInputSchema.parse(raw);
   if (
@@ -720,33 +662,24 @@ export async function recordTrainingAttendance(
     !hasPermission(actor, "ministerial_school.attendance") &&
     !hasPermission(actor, "reencounter.attendance")
   ) {
-    throw new DomainError(
-      DomainErrorCode.NOT_AUTHORIZED,
-      "Sin permiso de asistencia formativa.",
-    );
+    throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Sin permiso de asistencia formativa.");
   }
 
-  const db = getDb();
-  const [enrollment] = await db
-    .select()
-    .from(trainingEnrollments)
-    .where(eq(trainingEnrollments.id, input.enrollmentId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const enrollment = await client.query(api.formation.getEnrollment, {
+    enrollmentId: input.enrollmentId as Id<"trainingEnrollments">,
+  });
   if (!enrollment) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Inscripción no encontrada.");
   }
 
-  const consolidar = await getProgress(enrollment.personId, "consolidar");
+  const consolidar = await getProgress(enrollment.personId as string, "consolidar");
   const ministryId = consolidar?.ministryId;
   if (ministryId) {
-    await assertProcessAccess(actor, enrollment.personId, ministryId);
+    await assertProcessAccess(actor, enrollment.personId as string, ministryId);
   }
 
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, enrollment.cycleId))
-    .limit(1);
+  const cycle = await client.query(api.formation.getCycle, { cycleId: enrollment.cycleId });
   if (!cycle || cycle.status !== "active") {
     throw new DomainError(
       DomainErrorCode.UDV_CYCLE_NOT_ACTIVE,
@@ -754,28 +687,21 @@ export async function recordTrainingAttendance(
     );
   }
 
-  const [module] = await db
-    .select()
-    .from(trainingModules)
-    .where(eq(trainingModules.id, input.moduleId))
-    .limit(1);
-  if (!module || !module.isActive) {
+  const trainingModules = await client.query(api.formation.listModules, {
+    programId: cycle.programId,
+  });
+  const trainingModule = trainingModules.find((m) => m._id === input.moduleId);
+  if (!trainingModule || !trainingModule.isActive) {
     throw new DomainError(
       DomainErrorCode.TRAINING_MODULE_INACTIVE,
       "Módulo inactivo o inexistente.",
     );
   }
 
-  const [existing] = await db
-    .select()
-    .from(trainingAttendance)
-    .where(
-      and(
-        eq(trainingAttendance.enrollmentId, input.enrollmentId),
-        eq(trainingAttendance.moduleId, input.moduleId),
-      ),
-    )
-    .limit(1);
+  const existing = await client.query(api.formation.getAttendance, {
+    enrollmentId: input.enrollmentId as Id<"trainingEnrollments">,
+    moduleId: input.moduleId as Id<"trainingModules">,
+  });
 
   if (existing) {
     if (input.status === "recovered") {
@@ -784,25 +710,25 @@ export async function recordTrainingAttendance(
         "Use la operación de recuperación autorizada.",
       );
     }
-    // Update non-recovery statuses (present/absent/excused) — keep history via audit
-    const [updated] = await db
-      .update(trainingAttendance)
-      .set({
-        status: input.status,
-        attendanceDate: input.attendanceDate,
-        recordedByUserId: actorUserId,
-        recordedAt: new Date(),
-        notes: input.notes ?? existing.notes,
-      })
-      .where(eq(trainingAttendance.id, existing.id))
-      .returning();
+    const updated = withId(
+      await client
+        .mutation(api.formation.recordAttendance, {
+          enrollmentId: input.enrollmentId as Id<"trainingEnrollments">,
+          moduleId: input.moduleId as Id<"trainingModules">,
+          attendanceDate: input.attendanceDate,
+          status: input.status,
+          recordedByUserId: actorUserId as Id<"users">,
+          notes: input.notes || existing.notes,
+        })
+        .catch(mapConvexError),
+    );
     await writeAuditLog({
       actorUserId,
       action: "school.attendance.recorded",
       entityType: "training_attendance",
       entityId: updated.id,
       metadata: {
-        enrollmentId: enrollment.id,
+        enrollmentId: enrollment._id,
         moduleId: input.moduleId,
         status: input.status,
         updated: true,
@@ -818,17 +744,18 @@ export async function recordTrainingAttendance(
     );
   }
 
-  const [row] = await db
-    .insert(trainingAttendance)
-    .values({
-      enrollmentId: input.enrollmentId,
-      moduleId: input.moduleId,
-      attendanceDate: input.attendanceDate,
-      status: input.status,
-      recordedByUserId: actorUserId,
-      notes: input.notes ?? null,
-    })
-    .returning();
+  const row = withId(
+    await client
+      .mutation(api.formation.recordAttendance, {
+        enrollmentId: input.enrollmentId as Id<"trainingEnrollments">,
+        moduleId: input.moduleId as Id<"trainingModules">,
+        attendanceDate: input.attendanceDate,
+        status: input.status,
+        recordedByUserId: actorUserId as Id<"users">,
+        notes: input.notes || undefined,
+      })
+      .catch(mapConvexError),
+  );
 
   await writeAuditLog({
     actorUserId,
@@ -836,7 +763,7 @@ export async function recordTrainingAttendance(
     entityType: "training_attendance",
     entityId: row.id,
     metadata: {
-      enrollmentId: enrollment.id,
+      enrollmentId: enrollment._id,
       moduleId: input.moduleId,
       status: input.status,
     },
@@ -853,18 +780,13 @@ export async function authorizeAttendanceRecovery(actorUserId: string, raw: unkn
     !hasPermission(actor, "ministerial_school.attendance") &&
     !hasPermission(actor, "reencounter.attendance")
   ) {
-    throw new DomainError(
-      DomainErrorCode.NOT_AUTHORIZED,
-      "Sin permiso de asistencia formativa.",
-    );
+    throw new DomainError(DomainErrorCode.NOT_AUTHORIZED, "Sin permiso de asistencia formativa.");
   }
 
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(trainingAttendance)
-    .where(eq(trainingAttendance.id, input.attendanceId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const row = await client.query(api.formation.getAttendanceById, {
+    attendanceId: input.attendanceId as Id<"trainingAttendance">,
+  });
   if (!row) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Asistencia no encontrada.");
   }
@@ -875,29 +797,24 @@ export async function authorizeAttendanceRecovery(actorUserId: string, raw: unkn
     );
   }
 
-  const [enrollment] = await db
-    .select()
-    .from(trainingEnrollments)
-    .where(eq(trainingEnrollments.id, row.enrollmentId))
-    .limit(1);
+  const enrollment = await client.query(api.formation.getEnrollment, {
+    enrollmentId: row.enrollmentId,
+  });
   if (enrollment) {
-    const consolidar = await getProgress(enrollment.personId, "consolidar");
+    const consolidar = await getProgress(enrollment.personId as string, "consolidar");
     if (consolidar) {
-      await assertProcessAccess(actor, enrollment.personId, consolidar.ministryId);
+      await assertProcessAccess(actor, enrollment.personId as string, consolidar.ministryId);
     }
   }
 
-  const [updated] = await db
-    .update(trainingAttendance)
-    .set({
-      status: "recovered",
-      recoveryAuthorizedByUserId: actorUserId,
-      recoveryAuthorizedAt: new Date(),
-      recoveryNote: input.note?.trim() || null,
-      recordedAt: new Date(),
-    })
-    .where(eq(trainingAttendance.id, row.id))
-    .returning();
+  const updated = withId(
+    await client
+      .mutation(api.formation.authorizeRecovery, {
+        attendanceId: row._id,
+        note: input.note?.trim() || undefined,
+      })
+      .catch(mapConvexError),
+  );
 
   await writeAuditLog({
     actorUserId,
@@ -929,77 +846,57 @@ export async function completeUdv(actorUserId: string, raw: unknown) {
 
   if (progress.status === "completed") {
     const { ensureDestinoN1Eligible } = await import("./destination");
-    await ensureDestinoN1Eligible(
-      input.personId,
-      progress.ministryId,
-      progress.networkId,
-    );
+    await ensureDestinoN1Eligible(input.personId, progress.ministryId, progress.networkId ?? null);
     return { progress, nextStageEligible: true, leadershipActivated: false };
   }
 
   const consolidar = await getProgress(input.personId, "consolidar");
   if (!consolidar || consolidar.status !== "completed") {
-    throw new DomainError(
-      DomainErrorCode.CONSOLIDATION_REQUIRED,
-      "Consolidar debe estar completado.",
-    );
+    throw new DomainError(DomainErrorCode.CONSOLIDATION_REQUIRED, "Consolidar debe estar completado.");
   }
 
-  const db = getDb();
-  const [row] = await db
-    .update(personProcessProgress)
-    .set({
-      status: "completed",
-      completedAt: new Date(),
-      completedByUserId: actorUserId,
-      currentStep: "completado",
-      metadata: {
-        ...(progress.metadata ?? {}),
-        next_stage_eligible: true,
-        eligible_for_destination: true,
-      },
-      updatedAt: new Date(),
-    })
-    .where(eq(personProcessProgress.id, progress.id))
-    .returning();
+  const client = await getAuthenticatedConvexClient();
+  const row = withId(
+    await client
+      .mutation(api.formation.upsertProgress, {
+        personId: input.personId as Id<"persons">,
+        processType: "udv",
+        status: "completed",
+        currentStep: "completado",
+        completedAt: Date.now(),
+        completedByUserId: actorUserId as Id<"users">,
+        metadata: {
+          ...(progress.metadata ?? {}),
+          next_stage_eligible: true,
+          eligible_for_destination: true,
+        },
+      })
+      .catch(mapConvexError),
+  );
 
-  // Mark open UDV enrollments completed (scoped via program when possible)
-  await db
-    .update(trainingEnrollments)
-    .set({
-      status: "completed",
-      completedAt: new Date(),
-      completedByUserId: actorUserId,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(trainingEnrollments.personId, input.personId),
-        inArray(trainingEnrollments.status, ["enrolled", "in_progress"]),
-      ),
-    );
+  // Mark open UDV enrollments completed
+  await client.mutation(api.formation.bulkCompleteEnrollmentsForPerson, {
+    personId: input.personId as Id<"persons">,
+    completedByUserId: actorUserId as Id<"users">,
+  });
 
   // Legacy aggregate signal + concrete Destino Nivel 1 eligibility
   const destino = await getProgress(input.personId, "destino");
   if (!destino) {
-    await db.insert(personProcessProgress).values({
-      personId: input.personId,
+    await client.mutation(api.formation.upsertProgress, {
+      personId: input.personId as Id<"persons">,
       processType: "destino",
       status: "pending",
       stage: "destino",
       currentStep: "NEXT_STAGE_ELIGIBLE",
-      ministryId: progress.ministryId,
-      networkId: progress.networkId,
+      ministryId: progress.ministryId as Id<"ministries">,
+      networkId: (progress.networkId ?? undefined) as Id<"networks"> | undefined,
       metadata: { eligible_for_destination: true },
     });
   }
 
   const { ensureDestinoN1Eligible } = await import("./destination");
-  await ensureDestinoN1Eligible(
-    input.personId,
-    progress.ministryId,
-    progress.networkId,
-  );
+  await ensureDestinoN1Eligible(input.personId, progress.ministryId, progress.networkId ?? null);
 
   await appendEvent({
     progressId: row.id,
@@ -1054,7 +951,7 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
   }
 
   const consolidar = await getProgress(personId, "consolidar");
-  const udv = await getProgress(personId, "udv"); // legacy only — not a gate
+  const udv = await getProgress(personId, "udv"); // legacy only — not a gate / not UDLV
   const { getPersonConsolidarSummary } = await import("./consolidar-stages");
   const { getPersonDestinoSummary } = await import("./destination");
   const { getPersonEmLevelsSummary } = await import("./em-levels");
@@ -1065,7 +962,9 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
   const emLevels = await getPersonEmLevelsSummary(personId);
   const reencuentro = await getPersonReencuentroSummary(personId);
 
-  const consolidarDone = consolidar?.status === "completed";
+  // Consolidar display/gates derive from UDLV stages (never trust a stale aggregate alone).
+  const consolidarDone = consolidarStages.consolidar.derivedComplete;
+  const consolidarStatus = consolidarStages.consolidar.status;
   const n1Done = destinoLevels.n1.status === "completed";
   const n2Done = destinoLevels.n2.status === "completed";
   const n3Done = destinoLevels.n3.status === "completed";
@@ -1074,20 +973,20 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
   const em2Done = emLevels.em2.status === "completed";
   const em3Done = emLevels.em3.status === "completed";
 
-  // Official next-step resolution (no UDV gate; RE between CD2 and CD3)
+  // Official next-step: finish UDLV before offering Capacitación Destino (Discipular).
   let nextCode = "pre_encuentro";
   let nextLabel = "Pre-Encuentro";
   let nextEligible = true;
 
-  if (consolidarStages.pre.status !== "completed") {
+  if (!consolidarDone && consolidarStages.pre.status !== "completed") {
     nextCode = "pre_encuentro";
     nextLabel = "Pre-Encuentro";
-    nextEligible = true;
-  } else if (consolidarStages.encuentro.status !== "completed") {
+    nextEligible = consolidarStatus === "in_progress" || consolidarStatus === "eligible";
+  } else if (!consolidarDone && consolidarStages.encuentro.status !== "completed") {
     nextCode = "encuentro";
     nextLabel = "Encuentro";
     nextEligible = true;
-  } else if (consolidarStages.post.status !== "completed") {
+  } else if (!consolidarDone && consolidarStages.post.status !== "completed") {
     nextCode = "post_encuentro";
     nextLabel = "Post-Encuentro";
     nextEligible = true;
@@ -1141,12 +1040,16 @@ export async function getPersonLadder(actorUserId: string, personId: string) {
     personId,
     ganar: { status: "completed" as const, label: "Completado" },
     consolidar: {
-      status: consolidar?.status ?? consolidarStages.consolidar.status,
-      label: statusLabel(consolidar?.status ?? consolidarStages.consolidar.status),
+      status: consolidarStatus,
+      label: statusLabel(consolidarStatus),
       progress: consolidar,
       stages: consolidarStages,
+      derivedComplete: consolidarDone,
     },
-    /** @deprecated UDV is not an official gate; kept for legacy display only */
+    /**
+     * Legacy `udv` processType — NOT Universidad de la Vida.
+     * UDLV is Pre/Encuentro/Post under Consolidar. Kept for old rows only.
+     */
     udv: {
       status: udv?.status ?? "pending",
       label: statusLabel(udv?.status ?? "pending"),
@@ -1210,56 +1113,127 @@ export async function getProcessDashboardCounts(
   if (!hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
 
-  const conditions = [];
+  const allProcessTypes = [
+    "consolidar",
+    "pre_encuentro",
+    "encuentro",
+    "post_encuentro",
+    "destino_n1",
+    "destino_n2",
+    "reencuentro",
+    "destino_n3",
+    "em1",
+    "em2",
+    "em3",
+    "udv",
+  ] as const;
+
+  let ministryIds: Id<"ministries">[] | undefined;
+  let assignedLeaderPersonId: Id<"persons"> | undefined;
+  let personIds: Id<"persons">[] | undefined;
+
   if (isSuperadmin(actor)) {
     // no filter
   } else if (isLeaderGeneral(actor) && actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
+    ministryIds = actor.ministryIds as Id<"ministries">[];
   } else if (focusLeaderPersonId || actor.personId) {
-    const root = focusLeaderPersonId ?? actor.personId!;
-    conditions.push(
-      sql`${personProcessProgress.personId} IN (
-        SELECT descendant_person_id FROM leadership_closure
-        WHERE ancestor_person_id = ${root}::uuid
-      ) OR ${personProcessProgress.assignedLeaderPersonId} = ${root}::uuid`,
-    );
+    const root = (focusLeaderPersonId ?? actor.personId!) as Id<"persons">;
+    const descendants = await client.query(api.formation.getDescendantPersonIds, {
+      rootPersonId: root,
+    });
+    personIds = [root, ...descendants];
+    assignedLeaderPersonId = root;
   } else if (actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
+    ministryIds = actor.ministryIds as Id<"ministries">[];
   } else {
     return emptyOfficialDashboardCounts();
   }
 
-  const where =
-    conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions);
-
-  const rows = await db
-    .select({
-      processType: personProcessProgress.processType,
-      status: personProcessProgress.status,
-      c: count(),
-    })
-    .from(personProcessProgress)
-    .where(where)
-    .groupBy(personProcessProgress.processType, personProcessProgress.status);
+  let rows: Array<{ progress: { processType: string; status: string; personId: Id<"persons">; assignedLeaderPersonId?: Id<"persons"> } }>;
+  if (personIds) {
+    const [byPerson, byAssignedLeader] = await Promise.all([
+      client.query(api.formation.listProgressRows, {
+        processTypes: [...allProcessTypes],
+        personIds,
+      }),
+      assignedLeaderPersonId
+        ? client.query(api.formation.listProgressRows, {
+            processTypes: [...allProcessTypes],
+            assignedLeaderPersonId,
+          })
+        : Promise.resolve([]),
+    ]);
+    const seen = new Set<string>();
+    rows = [];
+    for (const row of [...byPerson, ...byAssignedLeader]) {
+      const key = `${row.progress.personId}:${row.progress.processType}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+  } else {
+    rows = await client.query(api.formation.listProgressRows, {
+      processTypes: [...allProcessTypes],
+      ministryIds,
+    });
+  }
 
   const pick = (type: string, statuses: string[]) =>
-    Number(
-      rows
-        .filter((r) => r.processType === type && statuses.includes(r.status))
-        .reduce((acc, r) => acc + Number(r.c), 0),
-    );
+    rows.filter((r) => r.progress.processType === type && statuses.includes(r.progress.status)).length;
   const pickOne = (type: string, status: string) => pick(type, [status]);
 
+  // Derive Consolidar KPI from UDLV stages (avoid counting false aggregate "completed").
+  const byPerson = new Map<
+    string,
+    { pre?: string; encuentro?: string; post?: string; consolidar?: string }
+  >();
+  for (const row of rows) {
+    const p = row.progress;
+    const cur = byPerson.get(p.personId) ?? {};
+    if (p.processType === "pre_encuentro") cur.pre = p.status;
+    if (p.processType === "encuentro") cur.encuentro = p.status;
+    if (p.processType === "post_encuentro") cur.post = p.status;
+    if (p.processType === "consolidar") cur.consolidar = p.status;
+    byPerson.set(p.personId, cur);
+  }
+  let consolidarCompleted = 0;
+  let consolidarInProgress = 0;
+  let consolidarPending = 0;
+  for (const row of byPerson.values()) {
+    const udlvDone =
+      row.pre === "completed" && row.encuentro === "completed" && row.post === "completed";
+    if (udlvDone) {
+      consolidarCompleted += 1;
+      continue;
+    }
+    const stageActive = [row.pre, row.encuentro, row.post].some(
+      (s) =>
+        s === "eligible" ||
+        s === "in_progress" ||
+        s === "academic_completed" ||
+        s === "completed",
+    );
+    if (row.consolidar === "in_progress" || row.consolidar === "completed" || stageActive) {
+      consolidarInProgress += 1;
+    } else if (row.consolidar === "pending" || row.consolidar === "eligible") {
+      consolidarPending += 1;
+    }
+  }
+
+  // Stage "En X" KPIs = matrícula vigente (not aptitud / avance general).
+  const { countConsolidarStageEnrollments } = await import("./consolidar-stages");
+  const enrolled = await countConsolidarStageEnrollments();
+
   return {
-    consolidarPending: pickOne("consolidar", "pending"),
-    consolidarInProgress: pickOne("consolidar", "in_progress"),
-    consolidarCompleted: pickOne("consolidar", "completed"),
-    // Official stage counts
-    preEncuentro: pick("pre_encuentro", ["eligible", "in_progress", "academic_completed"]),
-    encuentro: pick("encuentro", ["eligible", "in_progress", "academic_completed"]),
-    postEncuentro: pick("post_encuentro", ["eligible", "in_progress", "academic_completed"]),
+    consolidarPending,
+    consolidarInProgress,
+    consolidarCompleted,
+    // Official stage counts — enrolled in open cycles only
+    preEncuentro: enrolled.pre_encuentro,
+    encuentro: enrolled.encuentro,
+    postEncuentro: enrolled.post_encuentro,
     cd1: pick("destino_n1", ["eligible", "in_progress", "academic_completed"]),
     cd2: pick("destino_n2", ["eligible", "in_progress", "academic_completed"]),
     reencuentro: pick("reencuentro", ["eligible", "in_progress", "academic_completed"]),
@@ -1330,67 +1304,84 @@ export async function listProcessPeople(
   if (!hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
+  const client = await getAuthenticatedConvexClient();
   const page = filters.page ?? 1;
   const pageSize = Math.min(filters.pageSize ?? 40, 100);
   const offset = (page - 1) * pageSize;
 
-  const conditions = [];
+  if (filters.ministryId && !isSuperadmin(actor) && !canAccessMinistry(actor, filters.ministryId)) {
+    throw new DomainError(
+      DomainErrorCode.CROSS_MINISTRY_PROCESS_DENIED,
+      "Ministerio fuera de alcance.",
+    );
+  }
+
+  let ministryIds: Id<"ministries">[] | undefined;
+  if (filters.ministryId) {
+    ministryIds = [filters.ministryId as Id<"ministries">];
+  } else if (!isSuperadmin(actor) && actor.ministryIds.length) {
+    ministryIds = actor.ministryIds as Id<"ministries">[];
+  }
+
+  let assignedLeaderPersonId: Id<"persons"> | undefined;
+  let treeScopedIds: Id<"persons">[] | undefined;
+  if (filters.leaderPersonId) {
+    assignedLeaderPersonId = filters.leaderPersonId as Id<"persons">;
+  } else if (!isSuperadmin(actor) && !isLeaderGeneral(actor) && actor.personId) {
+    const descendants = await client.query(api.formation.getDescendantPersonIds, {
+      rootPersonId: actor.personId as Id<"persons">,
+    });
+    treeScopedIds = [actor.personId as Id<"persons">, ...descendants];
+    assignedLeaderPersonId = actor.personId as Id<"persons">;
+  }
+
+  let rows: Array<{ progress: Doc<"personProcessProgress">; firstName: string; lastName: string }>;
+
+  if (treeScopedIds) {
+    const [byTree, byAssignedLeader] = await Promise.all([
+      client.query(api.formation.listProgressRows, { personIds: treeScopedIds }),
+      client.query(api.formation.listProgressRows, { assignedLeaderPersonId }),
+    ]);
+    const seen = new Set<string>();
+    rows = [];
+    for (const row of [...byTree, ...byAssignedLeader]) {
+      const key = `${row.progress.personId}:${row.progress.processType}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+  } else {
+    rows = await client.query(api.formation.listProgressRows, {
+      ministryIds,
+      assignedLeaderPersonId,
+    });
+    // `listProgressRows` prioritizes assignedLeaderPersonId over ministryIds
+    // internally — re-apply the ministry filter here so both stay ANDed.
+    if (ministryIds && assignedLeaderPersonId) {
+      const ministrySet = new Set(ministryIds);
+      rows = rows.filter((r) => ministrySet.has(r.progress.ministryId));
+    }
+  }
+
   if (filters.processType) {
-    conditions.push(eq(personProcessProgress.processType, filters.processType));
+    rows = rows.filter((r) => r.progress.processType === filters.processType);
   }
   if (filters.status) {
-    conditions.push(
-      eq(
-        personProcessProgress.status,
-        filters.status as "pending" | "in_progress" | "completed" | "paused" | "abandoned",
-      ),
-    );
-  }
-  if (filters.ministryId) {
-    if (!isSuperadmin(actor) && !canAccessMinistry(actor, filters.ministryId)) {
-      throw new DomainError(
-        DomainErrorCode.CROSS_MINISTRY_PROCESS_DENIED,
-        "Ministerio fuera de alcance.",
-      );
-    }
-    conditions.push(eq(personProcessProgress.ministryId, filters.ministryId));
-  } else if (!isSuperadmin(actor) && actor.ministryIds.length) {
-    conditions.push(inArray(personProcessProgress.ministryId, actor.ministryIds));
+    rows = rows.filter((r) => r.progress.status === filters.status);
   }
   if (filters.networkId) {
-    conditions.push(eq(personProcessProgress.networkId, filters.networkId));
+    rows = rows.filter((r) => r.progress.networkId === filters.networkId);
   }
-  if (filters.leaderPersonId) {
-    conditions.push(
-      eq(personProcessProgress.assignedLeaderPersonId, filters.leaderPersonId),
-    );
-  } else if (!isSuperadmin(actor) && !isLeaderGeneral(actor) && actor.personId) {
-    conditions.push(
-      sql`(${personProcessProgress.assignedLeaderPersonId} = ${actor.personId}::uuid
-        OR ${personProcessProgress.personId} IN (
-          SELECT descendant_person_id FROM leadership_closure
-          WHERE ancestor_person_id = ${actor.personId}::uuid
-        ))`,
-    );
+  if (ministryIds && treeScopedIds) {
+    const ministrySet = new Set(ministryIds);
+    rows = rows.filter((r) => ministrySet.has(r.progress.ministryId));
   }
 
-  const where = conditions.length ? and(...conditions) : undefined;
-  const rows = await db
-    .select({
-      progress: personProcessProgress,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(personProcessProgress)
-    .innerJoin(persons, eq(persons.id, personProcessProgress.personId))
-    .where(where)
-    .orderBy(desc(personProcessProgress.updatedAt))
-    .limit(pageSize)
-    .offset(offset);
+  rows.sort((a, b) => b.progress.updatedAt - a.progress.updatedAt);
+  const paged = rows.slice(offset, offset + pageSize);
 
-  return rows.map((r) => ({
-    ...r.progress,
+  return paged.map((r) => ({
+    ...withId(r.progress),
     fullName: formatFullName(r.firstName, r.lastName),
     statusLabel: statusLabel(r.progress.status),
   }));
@@ -1401,9 +1392,12 @@ export async function listUdvCycles(actorUserId: string) {
   if (!hasPermission(actor, "udv.read") && !hasPermission(actor, "process.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  await ensureUdvProgram();
-  const db = getDb();
-  return db.select().from(trainingCycles).orderBy(desc(trainingCycles.startDate));
+  const program = await ensureUdvProgram();
+  const client = await getAuthenticatedConvexClient();
+  const cycles = await client.query(api.formation.listCycles, {
+    programIds: [program.id as Id<"trainingPrograms">],
+  });
+  return cycles.map(withId);
 }
 
 export async function getUdvCycleBoard(actorUserId: string, cycleId: string) {
@@ -1411,42 +1405,29 @@ export async function getUdvCycleBoard(actorUserId: string, cycleId: string) {
   if (!hasPermission(actor, "udv.read")) {
     throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
   }
-  const db = getDb();
-  const [cycle] = await db
-    .select()
-    .from(trainingCycles)
-    .where(eq(trainingCycles.id, cycleId))
-    .limit(1);
+  const client = await getAuthenticatedConvexClient();
+  const cycle = await client.query(api.formation.getCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
   if (!cycle) {
     throw new DomainError(DomainErrorCode.NOT_FOUND, "Ciclo no encontrado.");
   }
 
-  const modules = await db
-    .select()
-    .from(trainingModules)
-    .where(
-      and(eq(trainingModules.programId, cycle.programId), eq(trainingModules.isActive, true)),
-    )
-    .orderBy(asc(trainingModules.orderIndex));
+  const modules = (
+    await client.query(api.formation.listModules, { programId: cycle.programId, activeOnly: true })
+  ).map(withId);
 
-  const enrollments = await db
-    .select({
-      enrollment: trainingEnrollments,
-      firstName: persons.firstName,
-      lastName: persons.lastName,
-    })
-    .from(trainingEnrollments)
-    .innerJoin(persons, eq(persons.id, trainingEnrollments.personId))
-    .where(eq(trainingEnrollments.cycleId, cycleId))
-    .orderBy(asc(persons.lastName));
+  const enrollments = await client.query(api.formation.listEnrollmentsByCycle, {
+    cycleId: cycleId as Id<"trainingCycles">,
+  });
 
   // Filter by tree scope for non-LG/non-admin
   const scoped = [];
   for (const row of enrollments) {
     try {
-      const consolidar = await getProgress(row.enrollment.personId, "consolidar");
+      const consolidar = await getProgress(row.enrollment.personId as string, "consolidar");
       if (consolidar) {
-        await assertProcessAccess(actor, row.enrollment.personId, consolidar.ministryId);
+        await assertProcessAccess(actor, row.enrollment.personId as string, consolidar.ministryId);
       } else if (!isSuperadmin(actor) && !isLeaderGeneral(actor)) {
         continue;
       }
@@ -1456,27 +1437,24 @@ export async function getUdvCycleBoard(actorUserId: string, cycleId: string) {
     }
   }
 
-  const enrollmentIds = scoped.map((s) => s.enrollment.id);
+  const enrollmentIds = scoped.map((s) => s.enrollment._id);
   const attendanceRows =
     enrollmentIds.length === 0
       ? []
-      : await db
-          .select()
-          .from(trainingAttendance)
-          .where(inArray(trainingAttendance.enrollmentId, enrollmentIds));
+      : await client.query(api.formation.listAttendanceByEnrollments, { enrollmentIds });
 
   return {
-    cycle,
+    cycle: withId(cycle),
     modules,
     participants: scoped.map((s) => ({
-      enrollmentId: s.enrollment.id,
-      personId: s.enrollment.personId,
+      enrollmentId: s.enrollment._id as string,
+      personId: s.enrollment.personId as string,
       fullName: formatFullName(s.firstName, s.lastName),
       status: s.enrollment.status,
       attendance: Object.fromEntries(
         attendanceRows
-          .filter((a) => a.enrollmentId === s.enrollment.id)
-          .map((a) => [a.moduleId, a]),
+          .filter((a) => a.enrollmentId === s.enrollment._id)
+          .map((a) => [a.moduleId as string, withId(a)]),
       ),
     })),
   };
@@ -1484,11 +1462,10 @@ export async function getUdvCycleBoard(actorUserId: string, cycleId: string) {
 
 export async function getPersonsProcessSummary(personIds: string[]) {
   if (personIds.length === 0) return {};
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(personProcessProgress)
-    .where(inArray(personProcessProgress.personId, personIds));
+  const client = await getAuthenticatedConvexClient();
+  const rows = await client.query(api.formation.listProgressByPersons, {
+    personIds: personIds as Id<"persons">[],
+  });
   const map: Record<
     string,
     {
@@ -1510,20 +1487,21 @@ export async function getPersonsProcessSummary(personIds: string[]) {
     }
   > = {};
   for (const row of rows) {
-    map[row.personId] ??= {};
-    if (row.processType === "consolidar") map[row.personId].consolidar = row.status;
-    if (row.processType === "pre_encuentro") map[row.personId].preEncuentro = row.status;
-    if (row.processType === "encuentro") map[row.personId].encuentro = row.status;
-    if (row.processType === "post_encuentro") map[row.personId].postEncuentro = row.status;
-    if (row.processType === "udv") map[row.personId].udv = row.status;
-    if (row.processType === "destino_n1") map[row.personId].destinoN1 = row.status;
-    if (row.processType === "destino_n2") map[row.personId].destinoN2 = row.status;
-    if (row.processType === "destino_n3") map[row.personId].destinoN3 = row.status;
-    if (row.processType === "escuela_ministerial") map[row.personId].emStatus = row.status;
-    if (row.processType === "em1") map[row.personId].em1 = row.status;
-    if (row.processType === "em2") map[row.personId].em2 = row.status;
-    if (row.processType === "em3") map[row.personId].em3 = row.status;
-    if (row.processType === "reencuentro") map[row.personId].reencuentroStatus = row.status;
+    const personId = row.personId as string;
+    map[personId] ??= {};
+    if (row.processType === "consolidar") map[personId].consolidar = row.status;
+    if (row.processType === "pre_encuentro") map[personId].preEncuentro = row.status;
+    if (row.processType === "encuentro") map[personId].encuentro = row.status;
+    if (row.processType === "post_encuentro") map[personId].postEncuentro = row.status;
+    if (row.processType === "udv") map[personId].udv = row.status;
+    if (row.processType === "destino_n1") map[personId].destinoN1 = row.status;
+    if (row.processType === "destino_n2") map[personId].destinoN2 = row.status;
+    if (row.processType === "destino_n3") map[personId].destinoN3 = row.status;
+    if (row.processType === "escuela_ministerial") map[personId].emStatus = row.status;
+    if (row.processType === "em1") map[personId].em1 = row.status;
+    if (row.processType === "em2") map[personId].em2 = row.status;
+    if (row.processType === "em3") map[personId].em3 = row.status;
+    if (row.processType === "reencuentro") map[personId].reencuentroStatus = row.status;
   }
   for (const personId of Object.keys(map)) {
     const entry = map[personId]!;

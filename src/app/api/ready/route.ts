@@ -1,23 +1,19 @@
 import { NextResponse } from "next/server";
 
-import {
-  hasClerkPublicConfig,
-  hasConvexPublicConfig,
-  hasDatabaseUrl,
-} from "@/lib/env";
+import { hasClerkPublicConfig, hasConvexPublicConfig } from "@/lib/env";
+import { api, getPublicConvexClient } from "@/server/convex";
 
 /**
- * Readiness — Clerk + Convex required. Interim Postgres optional (non-Supabase).
+ * Readiness — Clerk + Convex required. Postgres is not part of the new stack.
+ * Reachability uses the public `health.ping` query (no secrets).
  */
 export async function GET() {
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  const convexConfigured = hasConvexPublicConfig();
   let convexReachable = false;
-  if (convexUrl) {
+  if (convexConfigured) {
     try {
-      const res = await fetch(new URL("/version", convexUrl), {
-        signal: AbortSignal.timeout(3000),
-      });
-      convexReachable = res.ok;
+      const ping = await getPublicConvexClient().query(api.health.ping, {});
+      convexReachable = ping.ok === true;
     } catch {
       convexReachable = false;
     }
@@ -25,10 +21,8 @@ export async function GET() {
 
   const checks = {
     clerkConfigured: hasClerkPublicConfig(),
-    convexConfigured: hasConvexPublicConfig(),
+    convexConfigured,
     convexReachable,
-    /** Interim only — rejected if host is supabase.co */
-    legacyPostgresConfigured: hasDatabaseUrl(),
   };
 
   const ready =

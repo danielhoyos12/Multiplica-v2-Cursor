@@ -144,6 +144,17 @@ export function LadderVisualizer({
           totalLabel="En etapa"
           total={consolidar}
         >
+          <p className="mb-2 text-xs text-[var(--muted)]">
+            Universidad de la Vida (UDLV) · completadas{" "}
+            <span className="tabular-nums text-[var(--ink)]">
+              {ladder.consolidar.consolidarCompleted}
+            </span>
+            {" · "}
+            en curso{" "}
+            <span className="tabular-nums text-[var(--ink)]">
+              {ladder.consolidar.consolidarInProgress}
+            </span>
+          </p>
           <StageMetrics
             rows={[
               {

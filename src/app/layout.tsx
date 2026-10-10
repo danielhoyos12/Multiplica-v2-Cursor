@@ -56,9 +56,9 @@ export default function RootLayout({
       <body className="flex min-h-full flex-col">
         <ClerkProvider
           signInUrl="/login"
-          signUpUrl="/sign-up"
+          signUpUrl="/login"
           signInFallbackRedirectUrl="/dashboard"
-          signUpFallbackRedirectUrl="/bienvenida"
+          signUpFallbackRedirectUrl="/acceso-denegado"
           afterSignOutUrl="/login"
         >
           <ConvexClientProvider convexUrl={resolveConvexUrlForProvider()}>

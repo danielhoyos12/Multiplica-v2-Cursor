@@ -18,6 +18,7 @@ export {
   listUdvCycles,
   pauseProcess,
   recordTrainingAttendance,
+  repairConsolidarUdlvState,
   resumeProcess,
   startConsolidation,
   statusLabel,
@@ -73,6 +74,7 @@ export {
   getPersonEmLevelsSummary,
   isEmLevelEligible,
   listEmLevelCycles,
+  listEmLevelEligible,
   markEmLevelAcademic,
 } from "./em-levels";
 
@@ -80,14 +82,34 @@ export {
   assertStageEligible,
   completeConsolidarStage,
   ConsolidarRules,
+  countConsolidarStageEnrollments,
   createConsolidarCycle,
   enrollConsolidarStage,
+  ensureEncuentroEligible,
+  ensurePostEncuentroEligible,
+  ensurePreEncuentroEligible,
+  explainConsolidarStageGaps,
   getConsolidarCycleBoard,
   getConsolidarDashboardCounts,
   getPersonConsolidarSummary,
   listConsolidarCycles,
+  listConsolidarEligible,
+  listConsolidarStageModules,
   syncConsolidarAggregate,
+  type ConsolidarStage,
 } from "./consolidar-stages";
+
+export {
+  countUniqueActiveEnrollments,
+  validateCycleDates,
+  isActiveEnrollmentStatus,
+} from "./cycle-dates";
+
+export {
+  canOfferCapacitacionDestino,
+  deriveConsolidarLadderStatus,
+  needsConsolidarUdlvRepair,
+} from "./consolidar-status";
 
 export {
   countCatalogExpectation,

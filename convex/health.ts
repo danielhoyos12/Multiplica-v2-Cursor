@@ -1,7 +1,11 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireActiveAppUser } from "./lib/identity";
 
-/** Local-dev smoke query — proves Convex is reachable. */
+/**
+ * Public liveness query — used by `/api/ready`. No auth.
+ * Intentionally public: returns a constant, no user data.
+ */
 export const ping = query({
   args: {},
   returns: v.object({
@@ -11,7 +15,7 @@ export const ping = query({
   handler: async () => {
     return {
       ok: true as const,
-      message: "convex-local-ok",
+      message: "convex-ok",
     };
   },
 });
@@ -20,6 +24,7 @@ export const recordCheck = mutation({
   args: { label: v.string() },
   returns: v.id("healthChecks"),
   handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
     return await ctx.db.insert("healthChecks", {
       label: args.label.trim() || "ok",
       createdAt: Date.now(),
@@ -38,6 +43,7 @@ export const listRecent = query({
     }),
   ),
   handler: async (ctx) => {
+    await requireActiveAppUser(ctx);
     return await ctx.db
       .query("healthChecks")
       .withIndex("by_createdAt")

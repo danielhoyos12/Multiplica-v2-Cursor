@@ -63,6 +63,7 @@ export const previewDashboard: ExecutiveDashboard = {
         total: 40,
       },
       consolidarCompleted: 28,
+      consolidarInProgress: 24,
     },
     discipular: {
       cd1: {
@@ -292,6 +293,7 @@ export const previewEmptyDashboard: ExecutiveDashboard = {
       encuentro: { ...emptyStage },
       post: { ...emptyStage },
       consolidarCompleted: 0,
+      consolidarInProgress: 0,
     },
     discipular: {
       cd1: { ...emptyStage },

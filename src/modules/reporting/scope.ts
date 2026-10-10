@@ -137,11 +137,3 @@ export async function resolveDashboardScope(
     roleView,
   };
 }
-
-/** SQL fragment helpers — person ids in subtree including self */
-export function subtreePersonSql(rootPersonId: string) {
-  return `(
-    SELECT descendant_person_id FROM leadership_closure
-    WHERE ancestor_person_id = '${rootPersonId}'::uuid
-  )`;
-}
