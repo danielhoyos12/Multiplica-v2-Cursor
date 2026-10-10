@@ -355,6 +355,13 @@ export async function completeConsolidarStage(
     metadata: { personId: raw.personId, leadership_activated: false },
   });
 
+  // Apto para la siguiente etapa ≠ matrícula automática en un ciclo.
+  if (raw.stage === "pre_encuentro") {
+    await ensureEncuentroEligible(raw.personId, org.ministryId, org.networkId);
+  } else if (raw.stage === "encuentro") {
+    await ensurePostEncuentroEligible(raw.personId, org.ministryId, org.networkId);
+  }
+
   const consolidar = await syncConsolidarAggregate(raw.personId, actorUserId);
   return { progress, consolidar, leadershipActivated: false };
 }
@@ -378,10 +385,13 @@ export async function getConsolidarDashboardCounts(actorUserId: string) {
     rows.filter((r) => r.progress.processType === type && statuses.includes(r.progress.status)).length;
 
   return {
+    preAptos: pick("pre_encuentro", ["eligible"]),
     preInProgress: pick("pre_encuentro", ["in_progress", "eligible", "pending"]),
     preCompleted: pick("pre_encuentro", ["completed"]),
+    encuentroAptos: pick("encuentro", ["eligible"]),
     encuentroInProgress: pick("encuentro", ["in_progress", "eligible", "pending"]),
     encuentroCompleted: pick("encuentro", ["completed"]),
+    postAptos: pick("post_encuentro", ["eligible"]),
     postInProgress: pick("post_encuentro", ["in_progress", "eligible", "pending"]),
     postCompleted: pick("post_encuentro", ["completed"]),
   };
@@ -421,16 +431,15 @@ export async function getPersonConsolidarSummary(personId: string) {
   };
 }
 
-/**
- * After "Iniciar Consolidar", open Pre-Encuentro as the next UDLV step.
- * Idempotent: does not downgrade an already advanced stage.
- */
-export async function ensurePreEncuentroEligible(
+async function openStageEligible(
   personId: string,
+  stage: ConsolidarStage,
   ministryId: string,
   networkId: string | null,
+  openedBy: string,
+  currentStep: string,
 ) {
-  const existing = await getStageProgress(personId, "pre_encuentro");
+  const existing = await getStageProgress(personId, stage);
   if (
     existing &&
     (existing.status === "eligible" ||
@@ -446,19 +455,151 @@ export async function ensurePreEncuentroEligible(
     await client
       .mutation(api.formation.upsertProgress, {
         personId: personId as Id<"persons">,
-        processType: "pre_encuentro",
+        processType: stage,
         status: "eligible",
-        stage: existing ? undefined : "pre_encuentro",
-        currentStep: "apto_pre",
+        stage: existing ? undefined : stage,
+        currentStep,
         ministryId: ministryId as Id<"ministries">,
         networkId: (networkId ?? undefined) as Id<"networks"> | undefined,
         metadata: {
           ...(existing?.metadata ?? {}),
-          opened_by: "start_consolidation",
+          opened_by: openedBy,
         },
       })
       .catch(mapConvexError),
   );
+}
+
+/**
+ * After "Iniciar Consolidar", open Pre-Encuentro as the next UDLV step.
+ * Idempotent: does not downgrade an already advanced stage.
+ */
+export async function ensurePreEncuentroEligible(
+  personId: string,
+  ministryId: string,
+  networkId: string | null,
+) {
+  return openStageEligible(
+    personId,
+    "pre_encuentro",
+    ministryId,
+    networkId,
+    "start_consolidation",
+    "apto_pre",
+  );
+}
+
+/** After Pre approved — person becomes apto for Encuentro (not auto-enrolled). */
+export async function ensureEncuentroEligible(
+  personId: string,
+  ministryId: string,
+  networkId: string | null,
+) {
+  await assertStageEligible(personId, "encuentro");
+  return openStageEligible(
+    personId,
+    "encuentro",
+    ministryId,
+    networkId,
+    "pre_encuentro_completed",
+    "apto_encuentro",
+  );
+}
+
+/** After Encuentro approved — person becomes apto for Post (not auto-enrolled). */
+export async function ensurePostEncuentroEligible(
+  personId: string,
+  ministryId: string,
+  networkId: string | null,
+) {
+  await assertStageEligible(personId, "post_encuentro");
+  return openStageEligible(
+    personId,
+    "post_encuentro",
+    ministryId,
+    networkId,
+    "encuentro_completed",
+    "apto_post",
+  );
+}
+
+/**
+ * Bandeja de personas por etapa UDLV.
+ * Distingue apto / en curso / pendiente; excluye aprobados (completed).
+ */
+export async function listConsolidarEligible(
+  actorUserId: string,
+  stage: ConsolidarStage,
+) {
+  const actor = await requireActor(actorUserId);
+  if (!hasPermission(actor, "process.read")) {
+    throw new DomainError(DomainErrorCode.PROCESS_ACCESS_DENIED, "Sin permiso.");
+  }
+  const client = await getAuthenticatedConvexClient();
+  const ministryIds =
+    !isSuperadmin(actor) && actor.ministryIds.length
+      ? (actor.ministryIds as Id<"ministries">[])
+      : undefined;
+
+  const rows = await client.query(api.formation.listProgressRows, {
+    processTypes: [stage],
+    statuses: ["eligible", "pending", "in_progress", "academic_completed"],
+    ministryIds,
+  });
+
+  const result: Array<{
+    personId: string;
+    fullName: string;
+    status: string;
+    statusLabel: string;
+    bucket: "apto" | "inscrito" | "en_curso" | "pendiente";
+  }> = [];
+
+  for (const row of rows) {
+    const p = row.progress;
+    try {
+      await assertProcessAccess(actor, p.personId as string, p.ministryId as string);
+    } catch {
+      continue;
+    }
+    const status = p.status as string;
+    const bucket =
+      status === "eligible"
+        ? "apto"
+        : status === "in_progress" || status === "academic_completed"
+          ? "en_curso"
+          : "pendiente";
+    result.push({
+      personId: p.personId as string,
+      fullName: formatFullName(row.firstName, row.lastName),
+      status,
+      statusLabel: statusLabel(status),
+      bucket,
+    });
+  }
+  return result;
+}
+
+/** Missing requirements message for stage approval UI. */
+export async function explainConsolidarStageGaps(
+  personId: string,
+  stage: ConsolidarStage,
+): Promise<string[]> {
+  const gaps: string[] = [];
+  try {
+    await assertStageEligible(personId, stage);
+  } catch (error) {
+    if (error instanceof DomainError) gaps.push(error.message);
+  }
+  const progress = await getStageProgress(personId, stage);
+  if (!progress) {
+    gaps.push("La persona aún no tiene progreso abierto en esta etapa.");
+  } else if (progress.status === "completed") {
+    gaps.push("La etapa ya está aprobada.");
+  } else if (progress.status === "eligible" || progress.status === "pending") {
+    gaps.push("Debe inscribirse en un ciclo activo e iniciar asistencia antes de aprobar.");
+  }
+  return gaps;
 }
 
 export async function listConsolidarCycles(actorUserId: string, stage?: ConsolidarStage) {

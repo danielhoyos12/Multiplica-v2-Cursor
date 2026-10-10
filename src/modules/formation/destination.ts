@@ -893,17 +893,22 @@ export async function listDestinoEligible(actorUserId: string, level: DestinoLev
   const client = await getAuthenticatedConvexClient();
 
   if (level === 1) {
-    // Consolidar completed and N1 not completed (UDV is NOT a gate)
-    const consolidarDone = await client.query(api.formation.listProgressRows, {
-      processTypes: ["consolidar"],
+    // UDLV (Pre+Enc+Post) completed — never trust stale consolidar aggregate alone.
+    const postDone = await client.query(api.formation.listProgressRows, {
+      processTypes: ["post_encuentro"],
       statuses: ["completed"],
     });
     const result = [];
-    for (const row of consolidarDone) {
+    for (const row of postDone) {
       const p = row.progress;
       if (!isSuperadmin(actor) && !canAccessMinistry(actor, p.ministryId)) continue;
       try {
         await assertProcessAccess(actor, p.personId, p.ministryId);
+      } catch {
+        continue;
+      }
+      try {
+        await assertDestinoEligible(p.personId as string, 1);
       } catch {
         continue;
       }

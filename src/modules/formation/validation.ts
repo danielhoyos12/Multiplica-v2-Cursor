@@ -141,3 +141,56 @@ export const completeReencuentroInputSchema = z.object({
   enrollmentId: z.string().min(1).optional(),
   note: z.string().trim().max(500).optional(),
 });
+
+export const consolidarStageSchema = z.enum([
+  "pre_encuentro",
+  "encuentro",
+  "post_encuentro",
+]);
+
+export const createConsolidarCycleInputSchema = z.object({
+  stage: consolidarStageSchema,
+  name: z.string().trim().min(3).max(160),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  ministryId: z.string().min(1).optional().nullable().or(z.literal("")),
+});
+
+export const enrollConsolidarStageInputSchema = z.object({
+  personId: z.string().min(1),
+  cycleId: z.string().min(1),
+  stage: consolidarStageSchema,
+});
+
+export const completeConsolidarStageInputSchema = z.object({
+  personId: z.string().min(1),
+  stage: consolidarStageSchema,
+  note: z.string().trim().max(500).optional(),
+});
+
+export const createEmLevelCycleInputSchema = z.object({
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  name: z.string().trim().min(3).max(160),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  ministryId: z.string().min(1).optional().nullable().or(z.literal("")),
+});
+
+export const enrollEmLevelInputSchema = z.object({
+  personId: z.string().min(1),
+  cycleId: z.string().min(1),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+});
+
+export const markEmLevelAcademicInputSchema = z.object({
+  personId: z.string().min(1),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  enrollmentId: z.string().min(1).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+export const completeEmLevelInputSchema = z.object({
+  personId: z.string().min(1),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  note: z.string().trim().max(500).optional(),
+});

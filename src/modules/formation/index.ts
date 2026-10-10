@@ -74,6 +74,7 @@ export {
   getPersonEmLevelsSummary,
   isEmLevelEligible,
   listEmLevelCycles,
+  listEmLevelEligible,
   markEmLevelAcademic,
 } from "./em-levels";
 
@@ -83,12 +84,17 @@ export {
   ConsolidarRules,
   createConsolidarCycle,
   enrollConsolidarStage,
+  ensureEncuentroEligible,
+  ensurePostEncuentroEligible,
   ensurePreEncuentroEligible,
+  explainConsolidarStageGaps,
   getConsolidarCycleBoard,
   getConsolidarDashboardCounts,
   getPersonConsolidarSummary,
   listConsolidarCycles,
+  listConsolidarEligible,
   syncConsolidarAggregate,
+  type ConsolidarStage,
 } from "./consolidar-stages";
 
 export {
