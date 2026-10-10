@@ -424,6 +424,67 @@ export async function completeEmLevel(
   return { progress: row, nextEligible, leadershipActivated: false };
 }
 
+export async function listEmLevelEligible(actorUserId: string, level: EmLevel) {
+  const actor = await requireActor(actorUserId);
+  if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {
+    throw new DomainError(DomainErrorCode.MINISTERIAL_SCHOOL_ACCESS_DENIED, "Sin permiso.");
+  }
+  const client = await getAuthenticatedConvexClient();
+  const ministryIds =
+    !isSuperadmin(actor) && actor.ministryIds.length
+      ? (actor.ministryIds as Id<"ministries">[])
+      : undefined;
+
+  if (level === 1) {
+    const cd3Done = await client.query(api.formation.listProgressRows, {
+      processTypes: ["destino_n3"],
+      statuses: ["completed"],
+      ministryIds,
+    });
+    const result = [];
+    for (const row of cd3Done) {
+      const p = row.progress;
+      try {
+        await assertProcessAccess(actor, p.personId as string, p.ministryId as string);
+      } catch {
+        continue;
+      }
+      const cur = await getEmProgress(p.personId as string, 1);
+      if (cur?.status === "completed") continue;
+      result.push({
+        personId: p.personId as string,
+        fullName: formatFullName(row.firstName, row.lastName),
+        levelStatus: cur?.status ?? "eligible",
+      });
+    }
+    return result;
+  }
+
+  const prev = (level - 1) as EmLevel;
+  const prevDone = await client.query(api.formation.listProgressRows, {
+    processTypes: [LEVEL_PROCESS[prev]],
+    statuses: ["completed"],
+    ministryIds,
+  });
+  const result = [];
+  for (const row of prevDone) {
+    const p = row.progress;
+    try {
+      await assertProcessAccess(actor, p.personId as string, p.ministryId as string);
+    } catch {
+      continue;
+    }
+    const cur = await getEmProgress(p.personId as string, level);
+    if (cur?.status === "completed") continue;
+    result.push({
+      personId: p.personId as string,
+      fullName: formatFullName(row.firstName, row.lastName),
+      levelStatus: cur?.status ?? "eligible",
+    });
+  }
+  return result;
+}
+
 export async function getEmLevelsDashboardCounts(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   if (!hasPermission(actor, "ministerial_school.read") && !hasPermission(actor, "process.read")) {

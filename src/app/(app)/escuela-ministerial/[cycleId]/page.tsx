@@ -7,11 +7,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { DomainError, DomainErrorCode } from "@/lib/errors";
 import { hasPermission } from "@/modules/authorization";
-import { getEmCycleBoard } from "@/modules/formation";
+import { getEmLevelCycleBoard } from "@/modules/formation";
 import {
-  completeEmAction,
-  enrollEmAction,
-  markEmAcademicAction,
+  completeEmLevelAction,
+  enrollEmLevelAction,
+  markEmLevelAcademicAction,
 } from "@/modules/formation/actions";
 import { requireAppActor } from "@/server/actor";
 
@@ -31,7 +31,7 @@ export default async function EmCyclePage({ params }: { params: Params }) {
 
   let board;
   try {
-    board = await getEmCycleBoard(session.id, cycleId);
+    board = await getEmLevelCycleBoard(session.id, cycleId);
   } catch (error) {
     if (error instanceof DomainError && error.code === DomainErrorCode.NOT_FOUND) {
       notFound();
@@ -39,6 +39,7 @@ export default async function EmCyclePage({ params }: { params: Params }) {
     throw error;
   }
 
+  const level = (board.program?.level ?? 1) as 1 | 2 | 3;
   const canAttend =
     hasPermission(auth, "ministerial_school.attendance") ||
     hasPermission(auth, "udv.attendance");
@@ -50,11 +51,11 @@ export default async function EmCyclePage({ params }: { params: Params }) {
     <div className="space-y-8">
       <PageHeader
         title={board.cycle.name}
-        description={`${board.program?.name ?? "EM"} · ${String(board.cycle.startDate)} → ${String(board.cycle.endDate)}`}
+        description={`EM${level} · ${board.program?.name ?? "Escuela Ministerial"} · ${String(board.cycle.startDate)} → ${String(board.cycle.endDate)}`}
         actions={
           <div className="flex gap-2">
-            <Link href="/escuela-ministerial" className="text-sm underline">
-              Volver
+            <Link href={`/discipular/em${level}`} className="text-sm underline">
+              Volver a EM{level}
             </Link>
             <StatusBadge label={board.cycle.status} tone="brand" />
           </div>
@@ -63,11 +64,11 @@ export default async function EmCyclePage({ params }: { params: Params }) {
 
       {canManage && board.cycle.status === "active" ? (
         <EnrollmentPersonForm
-          label="Persona apta — Destino N3 completado (buscar por nombre/teléfono)"
-          buttonLabel="Inscribir"
+          label={`Persona apta para EM${level} (buscar por nombre/teléfono)`}
+          buttonLabel={`Inscribir EM${level}`}
           onEnroll={async (personId) => {
             "use server";
-            return enrollEmAction({ personId, cycleId });
+            return enrollEmLevelAction({ personId, cycleId, level });
           }}
         />
       ) : null}
@@ -97,9 +98,9 @@ export default async function EmCyclePage({ params }: { params: Params }) {
       />
 
       <section className="space-y-3">
-        <h2 className="font-medium">Avance</h2>
+        <h2 className="font-medium">Avance académico EM{level}</h2>
         <p className="text-sm text-[var(--muted)]">
-          Académico ≠ formal. Completar EM no activa liderazgo.
+          Académico ≠ objetivo ministerial 3–12. Completar EM no activa liderazgo.
         </p>
         <ul className="space-y-2">
           {board.participants.map((p) => (
@@ -120,8 +121,9 @@ export default async function EmCyclePage({ params }: { params: Params }) {
                   <form
                     action={async () => {
                       "use server";
-                      await markEmAcademicAction({
+                      await markEmLevelAcademicAction({
                         personId: p.personId,
+                        level,
                         enrollmentId: p.enrollmentId,
                       });
                     }}
@@ -138,14 +140,14 @@ export default async function EmCyclePage({ params }: { params: Params }) {
                   <form
                     action={async () => {
                       "use server";
-                      await completeEmAction({ personId: p.personId });
+                      await completeEmLevelAction({ personId: p.personId, level });
                     }}
                   >
                     <button
                       type="submit"
                       className="rounded-[var(--radius-sm)] bg-[var(--brand)] px-2 py-1 text-xs text-white"
                     >
-                      Completar EM
+                      Completar EM{level}
                     </button>
                   </form>
                 ) : null}

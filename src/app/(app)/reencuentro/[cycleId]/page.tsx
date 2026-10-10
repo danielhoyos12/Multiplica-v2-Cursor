@@ -57,7 +57,7 @@ export default async function ReencuentroEventPage({ params }: { params: Params 
 
       {canManage && board.cycle.status === "active" ? (
         <EnrollmentPersonForm
-          label="Persona apta — EM completada (buscar por nombre/teléfono)"
+          label="Persona apta — CD2 completada (buscar por nombre/teléfono)"
           buttonLabel="Inscribir"
           onEnroll={async (personId) => {
             "use server";

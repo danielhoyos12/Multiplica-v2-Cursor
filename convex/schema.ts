@@ -739,4 +739,101 @@ export default defineSchema({
     .index("by_cell", ["cellId"])
     .index("by_changedAt", ["changedAt"])
     .index("by_legacyPostgresId", ["legacyPostgresId"]),
+
+  // ---------------------------------------------------------------------
+  // Plan de Multiplicación 3 → 12 (expediente acumulativo CD1–EM3)
+  // ---------------------------------------------------------------------
+
+  /** One active expediente per student Persona Maestra. */
+  multiplicationExpedientes: defineTable({
+    studentPersonId: v.id("persons"),
+    ministryId: v.id("ministries"),
+    networkId: v.optional(v.id("networks")),
+    status: v.union(v.literal("open"), v.literal("completed"), v.literal("archived")),
+    openedAtAcademicLevel: v.optional(v.string()),
+    completedAt: v.optional(v.number()),
+    metadata: v.optional(v.any()),
+    ...timestamps,
+  })
+    .index("by_student", ["studentPersonId"])
+    .index("by_ministry_status", ["ministryId", "status"])
+    .index("by_status", ["status"]),
+
+  /**
+   * Lista de hasta 15 contactos evangelísticos.
+   * No son Personas Maestras hasta vincular `linkedPersonId` al ganarlas.
+   */
+  multiplicationContacts: defineTable({
+    expedienteId: v.id("multiplicationExpedientes"),
+    orderIndex: v.number(),
+    fullName: v.string(),
+    phone: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    status: v.union(
+      v.literal("contact"),
+      v.literal("following"),
+      v.literal("won"),
+      v.literal("dropped"),
+    ),
+    linkedPersonId: v.optional(v.id("persons")),
+    wonAt: v.optional(v.number()),
+    ...timestamps,
+  })
+    .index("by_expediente", ["expedienteId"])
+    .index("by_expediente_order", ["expedienteId", "orderIndex"])
+    .index("by_linkedPerson", ["linkedPersonId"]),
+
+  /**
+   * Equipo de hasta 12 discípulos formalmente asignados.
+   * `personId` único por expediente — no duplicar slots.
+   */
+  multiplicationDisciples: defineTable({
+    expedienteId: v.id("multiplicationExpedientes"),
+    personId: v.id("persons"),
+    slotIndex: v.number(),
+    cohort: v.union(v.literal("first_six"), v.literal("second_six")),
+    origin: v.union(v.literal("won"), v.literal("recovered"), v.literal("assigned")),
+    formationStatus: v.union(
+      v.literal("en_formacion"),
+      v.literal("apto_liderar"),
+      v.literal("lider_aprobado"),
+      v.literal("lider_activo_celula"),
+    ),
+    cellId: v.optional(v.id("cells")),
+    assignedAt: v.number(),
+    notes: v.optional(v.string()),
+    ...timestamps,
+  })
+    .index("by_expediente", ["expedienteId"])
+    .index("by_expediente_person", ["expedienteId", "personId"])
+    .index("by_expediente_slot", ["expedienteId", "slotIndex"])
+    .index("by_person", ["personId"])
+    .index("by_cell", ["cellId"]),
+
+  /** Hitos ministeriales por nivel (independientes del avance académico). */
+  multiplicationMilestones: defineTable({
+    expedienteId: v.id("multiplicationExpedientes"),
+    level: v.union(
+      v.literal("cd1"),
+      v.literal("cd2"),
+      v.literal("cd3"),
+      v.literal("reencuentro"),
+      v.literal("em1"),
+      v.literal("em2"),
+      v.literal("em3"),
+    ),
+    key: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("met"),
+      v.literal("waived"),
+      v.literal("blocked"),
+    ),
+    evidence: v.optional(v.any()),
+    updatedByUserId: v.optional(v.id("users")),
+    note: v.optional(v.string()),
+    ...timestamps,
+  })
+    .index("by_expediente", ["expedienteId"])
+    .index("by_expediente_level_key", ["expedienteId", "level", "key"]),
 });

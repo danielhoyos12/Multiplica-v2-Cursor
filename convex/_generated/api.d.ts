@@ -21,6 +21,7 @@ import type * as lib_ids from "../lib/ids.js";
 import type * as lib_initialSuperadminBootstrap from "../lib/initialSuperadminBootstrap.js";
 import type * as lib_seedFoundation from "../lib/seedFoundation.js";
 import type * as lib_time from "../lib/time.js";
+import type * as multiplication from "../multiplication.js";
 import type * as organization from "../organization.js";
 import type * as persons from "../persons.js";
 import type * as reporting from "../reporting.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   "lib/initialSuperadminBootstrap": typeof lib_initialSuperadminBootstrap;
   "lib/seedFoundation": typeof lib_seedFoundation;
   "lib/time": typeof lib_time;
+  multiplication: typeof multiplication;
   organization: typeof organization;
   persons: typeof persons;
   reporting: typeof reporting;

@@ -33,7 +33,11 @@ export const ESCALERA_STEPS: NavStep[] = [
     label: "Ganar",
     href: "/ganar",
     icon: "ganar",
-    children: [{ id: "personas", label: "Personas", href: "/ganar" }],
+    children: [
+      { id: "personas", label: "Personas", href: "/ganar" },
+      { id: "seguimiento", label: "Seguimiento", href: "/ganar" },
+      { id: "persona-maestra", label: "Persona Maestra", href: "/ganar" },
+    ],
   },
   {
     id: "consolidar",
@@ -42,24 +46,43 @@ export const ESCALERA_STEPS: NavStep[] = [
     href: "/proceso",
     icon: "consolidar",
     children: [
-      { id: "pre", label: "Pre-Encuentro", href: "/proceso" },
-      { id: "encuentro", label: "Encuentro", href: "/proceso" },
-      { id: "post", label: "Post-Encuentro", href: "/proceso" },
+      { id: "pre", label: "Pre-Encuentro", href: "/proceso/pre" },
+      { id: "encuentro", label: "Encuentro", href: "/proceso/encuentro" },
+      { id: "post", label: "Post-Encuentro", href: "/proceso/post" },
     ],
   },
   {
     id: "discipular",
     number: "03",
     label: "Discipular",
-    href: "/destino",
+    href: "/discipular",
     icon: "discipular",
     children: [
-      { id: "destino", label: "Capacitación Destino", href: "/destino" },
+      {
+        id: "destino",
+        label: "Capacitación Destino",
+        href: "/discipular/cd1",
+        children: [
+          { id: "cd1", label: "CD1", href: "/discipular/cd1" },
+          { id: "cd2", label: "CD2", href: "/discipular/cd2" },
+          { id: "cd3", label: "CD3", href: "/discipular/cd3" },
+        ],
+      },
       { id: "reencuentro", label: "Re-Encuentro", href: "/reencuentro" },
       {
         id: "escuela",
         label: "Escuela Ministerial",
-        href: "/escuela-ministerial",
+        href: "/discipular/em1",
+        children: [
+          { id: "em1", label: "EM1", href: "/discipular/em1" },
+          { id: "em2", label: "EM2", href: "/discipular/em2" },
+          { id: "em3", label: "EM3", href: "/discipular/em3" },
+        ],
+      },
+      {
+        id: "multiplicacion",
+        label: "Multiplicación 3–12",
+        href: "/discipular/multiplicacion",
       },
     ],
   },
@@ -70,19 +93,10 @@ export const ESCALERA_STEPS: NavStep[] = [
     href: "/enviar",
     icon: "enviar",
     children: [
+      { id: "lideres", label: "Líderes", href: "/liderazgo" },
       { id: "celulas", label: "Células", href: "/celulas" },
-      {
-        id: "liderazgo",
-        label: "Liderazgo",
-        href: "/liderazgo",
-        children: [
-          {
-            id: "transferencias",
-            label: "Transferencias",
-            href: "/transferencias",
-          },
-        ],
-      },
+      { id: "asistencia", label: "Asistencia", href: "/celulas" },
+      { id: "multiplicacion-enviar", label: "Multiplicación", href: "/enviar/multiplicacion" },
     ],
   },
 ];
