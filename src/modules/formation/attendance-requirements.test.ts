@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  attendanceThreshold,
   canApproveWithAttendance,
   countAttendedRequired,
 } from "./attendance-requirements";
@@ -55,6 +56,21 @@ describe("Attendance requirement gates", () => {
     );
     expect(presentOrRecovered).toBe(2);
     expect(missing).toEqual(["m2"]);
+  });
+});
+
+describe("Encuentro duration follows cycle modules", () => {
+  it("2-day Encuentro requires 2, not a missing third day", () => {
+    expect(attendanceThreshold("encuentro", 2)).toBe(2);
+  });
+
+  it("3-day Encuentro requires 3", () => {
+    expect(attendanceThreshold("encuentro", 3)).toBe(3);
+  });
+
+  it("never demands more sessions than modules exist", () => {
+    expect(attendanceThreshold("pre_encuentro", 4, 4)).toBe(4);
+    expect(attendanceThreshold("pre_encuentro", 3, 4)).toBe(3);
   });
 });
 

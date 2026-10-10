@@ -39,12 +39,35 @@ const STAGE_PROGRAM: Record<ConsolidarStageForReq, string> = {
   post_encuentro: POST_ENCUENTRO_CODE,
 };
 
-/** Mirrors ConsolidarRules — catalog session counts already in official catalog. */
-const STAGE_MIN_PRESENT: Record<ConsolidarStageForReq, number> = {
+/**
+ * Expected session counts from ConsolidarRules / official catalog.
+ * For Encuentro, the real required count is the number of required modules
+ * configured on the program/cycle (2 or 3 days). Never demand a day that
+ * does not exist in the catalog for that cycle.
+ */
+const STAGE_EXPECTED_PRESENT: Record<ConsolidarStageForReq, number> = {
   pre_encuentro: 4,
   encuentro: 3,
   post_encuentro: 4,
 };
+
+/** Threshold = modules that actually exist; never higher than catalog size. */
+export function attendanceThreshold(
+  stage: ConsolidarStageForReq | null,
+  requiredModules: number,
+  overrideMin?: number,
+): number {
+  if (requiredModules <= 0) return overrideMin ?? 0;
+  if (overrideMin != null) return Math.min(overrideMin, requiredModules);
+  if (stage === "encuentro") {
+    // Duration follows the cycle/program modules (2 or 3 days).
+    return requiredModules;
+  }
+  if (stage) {
+    return Math.min(STAGE_EXPECTED_PRESENT[stage], requiredModules);
+  }
+  return requiredModules;
+}
 
 function countsAsAttended(status: string | undefined): boolean {
   return status === "present" || status === "recovered";
@@ -158,7 +181,15 @@ export async function evaluateProgramAttendance(
     }
   }
 
-  const threshold = minPresent ?? requiredModules;
+  const stageHint =
+    programCode === PRE_ENCUENTRO_CODE
+      ? "pre_encuentro"
+      : programCode === ENCUENTRO_CODE
+        ? "encuentro"
+        : programCode === POST_ENCUENTRO_CODE
+          ? "post_encuentro"
+          : null;
+  const threshold = attendanceThreshold(stageHint, requiredModules, minPresent);
   const gaps: RequirementGap[] = [];
   if (presentOrRecovered < threshold) {
     gaps.push({
@@ -208,7 +239,8 @@ export async function assertConsolidarStageRequirements(
   const evalResult = await evaluateProgramAttendance(
     personId,
     STAGE_PROGRAM[stage],
-    STAGE_MIN_PRESENT[stage],
+    // Encuentro: omit override so threshold = actual cycle/program days (2 or 3).
+    stage === "encuentro" ? undefined : STAGE_EXPECTED_PRESENT[stage],
   );
   if (!evalResult.ok) {
     throw new DomainError(
