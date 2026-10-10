@@ -18,6 +18,10 @@ import { formatFullName } from "@/modules/ganar/normalize";
 import { assertProcessAccess, statusLabel } from "@/modules/formation/service";
 import { deriveConsolidarLadderStatus } from "@/modules/formation/consolidar-status";
 import {
+  countUniqueActiveEnrollments,
+  validateCycleDates,
+} from "@/modules/formation/cycle-dates";
+import {
   OfficialEligibility,
   ensureOfficialCatalog,
 } from "@/modules/formation/official-catalog";
@@ -189,6 +193,9 @@ export async function createConsolidarCycle(
     name: string;
     startDate: string;
     endDate: string;
+    enrollmentOpenDate?: string | null;
+    enrollmentCloseDate?: string | null;
+    classDates?: Array<{ moduleId: string; sessionDate: string }>;
     ministryId?: string | null;
   },
 ) {
@@ -205,6 +212,35 @@ export async function createConsolidarCycle(
   if (!program) {
     throw new DomainError(DomainErrorCode.CONFIGURATION_ERROR, "Programa no configurado.");
   }
+
+  const modules = await client.query(api.formation.listModules, {
+    programId: program._id,
+    activeOnly: true,
+  });
+  const moduleById = new Map(modules.map((m) => [m._id as string, m]));
+  const classDates = (raw.classDates ?? [])
+    .filter((r) => r.moduleId && r.sessionDate)
+    .map((r) => {
+      const mod = moduleById.get(r.moduleId);
+      return {
+        moduleId: r.moduleId,
+        sessionDate: r.sessionDate,
+        moduleCode: mod?.code,
+        moduleName: mod?.name,
+      };
+    });
+
+  const dateGaps = validateCycleDates({
+    startDate: raw.startDate,
+    endDate: raw.endDate,
+    enrollmentOpenDate: raw.enrollmentOpenDate,
+    enrollmentCloseDate: raw.enrollmentCloseDate,
+    classDates,
+  });
+  if (dateGaps.length) {
+    throw new DomainError(DomainErrorCode.VALIDATION_FAILED, dateGaps[0]!);
+  }
+
   return withId(
     await client
       .mutation(api.formation.createCycle, {
@@ -212,10 +248,36 @@ export async function createConsolidarCycle(
         name: raw.name.trim(),
         startDate: raw.startDate,
         endDate: raw.endDate,
+        enrollmentOpenDate: raw.enrollmentOpenDate || undefined,
+        enrollmentCloseDate: raw.enrollmentCloseDate || undefined,
         ministryId: (raw.ministryId || undefined) as Id<"ministries"> | undefined,
+        classDates: classDates.map((r) => ({
+          moduleId: r.moduleId as Id<"trainingModules">,
+          sessionDate: r.sessionDate,
+        })),
       })
       .catch(mapConvexError),
   );
+}
+
+/** Active catalog modules for a Consolidar stage (class date fields). */
+export async function listConsolidarStageModules(stage: ConsolidarStage) {
+  await ensureOfficialCatalog();
+  const client = await getAuthenticatedConvexClient();
+  const program = await client.query(api.formation.getProgramByCode, {
+    code: STAGE_CODE[stage],
+  });
+  if (!program) return [];
+  const modules = await client.query(api.formation.listModules, {
+    programId: program._id,
+    activeOnly: true,
+  });
+  return modules.map((m) => ({
+    id: m._id as string,
+    code: m.code,
+    name: m.name,
+    orderIndex: m.orderIndex,
+  }));
 }
 
 export async function enrollConsolidarStage(
@@ -394,6 +456,11 @@ export async function completeConsolidarStage(
   return { progress, consolidar, leadershipActivated: false };
 }
 
+/**
+ * Workbench KPIs for UDLV stages.
+ * - Aptos / Aprobados: from process progress (aptitud / avance).
+ * - En curso / inscritos: ONLY real enrollments in open cycles (not consolidar/apto).
+ */
 export async function getConsolidarDashboardCounts(actorUserId: string) {
   const actor = await requireActor(actorUserId);
   if (!hasPermission(actor, "process.read")) {
@@ -412,17 +479,62 @@ export async function getConsolidarDashboardCounts(actorUserId: string) {
   const pick = (type: string, statuses: string[]) =>
     rows.filter((r) => r.progress.processType === type && statuses.includes(r.progress.status)).length;
 
+  const enrolledByStage = await countConsolidarStageEnrollments();
+
   return {
     preAptos: pick("pre_encuentro", ["eligible"]),
-    preInProgress: pick("pre_encuentro", ["in_progress", "eligible", "pending"]),
+    preInProgress: enrolledByStage.pre_encuentro,
     preCompleted: pick("pre_encuentro", ["completed"]),
     encuentroAptos: pick("encuentro", ["eligible"]),
-    encuentroInProgress: pick("encuentro", ["in_progress", "eligible", "pending"]),
+    encuentroInProgress: enrolledByStage.encuentro,
     encuentroCompleted: pick("encuentro", ["completed"]),
     postAptos: pick("post_encuentro", ["eligible"]),
-    postInProgress: pick("post_encuentro", ["in_progress", "eligible", "pending"]),
+    postInProgress: enrolledByStage.post_encuentro,
     postCompleted: pick("post_encuentro", ["completed"]),
   };
+}
+
+/** Unique persons with vigente enrollment per UDLV stage program. */
+export async function countConsolidarStageEnrollments(): Promise<
+  Record<ConsolidarStage, number>
+> {
+  const client = await getAuthenticatedConvexClient();
+  const stages: ConsolidarStage[] = ["pre_encuentro", "encuentro", "post_encuentro"];
+  const programs = await Promise.all(
+    stages.map((stage) =>
+      client.query(api.formation.getProgramByCode, { code: STAGE_CODE[stage] }),
+    ),
+  );
+  const programIds = programs
+    .filter((p): p is NonNullable<typeof p> => Boolean(p))
+    .map((p) => p._id);
+  const enrollments =
+    programIds.length === 0
+      ? []
+      : await client.query(api.formation.listEnrollmentsForPrograms, { programIds });
+
+  const byProgram = new Map<string, ConsolidarStage>();
+  stages.forEach((stage, i) => {
+    const program = programs[i];
+    if (program) byProgram.set(program._id as string, stage);
+  });
+
+  const result: Record<ConsolidarStage, number> = {
+    pre_encuentro: 0,
+    encuentro: 0,
+    post_encuentro: 0,
+  };
+  for (const stage of stages) {
+    const rows = enrollments
+      .filter((e) => byProgram.get(e.programId as string) === stage)
+      .map((e) => ({
+        personId: e.personId as string,
+        enrollmentStatus: e.enrollmentStatus,
+        cycleStatus: e.cycleStatus,
+      }));
+    result[stage] = countUniqueActiveEnrollments(rows);
+  }
+  return result;
 }
 
 export async function getPersonConsolidarSummary(personId: string) {
@@ -575,6 +687,26 @@ export async function listConsolidarEligible(
     ministryIds,
   });
 
+  const program = await client.query(api.formation.getProgramByCode, {
+    code: STAGE_CODE[stage],
+  });
+  const enrollments = program
+    ? await client.query(api.formation.listEnrollmentsForPrograms, {
+        programIds: [program._id],
+      })
+    : [];
+  const enrolledPersonIds = new Set(
+    enrollments
+      .filter(
+        (e) =>
+          (e.cycleStatus === "planned" || e.cycleStatus === "active") &&
+          (e.enrollmentStatus === "enrolled" ||
+            e.enrollmentStatus === "in_progress" ||
+            e.enrollmentStatus === "academic_completed"),
+      )
+      .map((e) => e.personId as string),
+  );
+
   const result: Array<{
     personId: string;
     fullName: string;
@@ -591,17 +723,22 @@ export async function listConsolidarEligible(
       continue;
     }
     const status = p.status as string;
-    const bucket =
-      status === "eligible"
+    const personId = p.personId as string;
+    const hasEnrollment = enrolledPersonIds.has(personId);
+    // Matrícula vigente → en curso; aptitud sin matrícula → apto; resto → pendiente.
+    // Never put aptos into "en curso" just because Consolidar/process is open.
+    const bucket = hasEnrollment
+      ? "en_curso"
+      : status === "eligible"
         ? "apto"
         : status === "in_progress" || status === "academic_completed"
-          ? "en_curso"
+          ? "pendiente" // progreso sin matrícula no es "en curso" operativo
           : "pendiente";
     result.push({
-      personId: p.personId as string,
+      personId,
       fullName: formatFullName(row.firstName, row.lastName),
       status,
-      statusLabel: statusLabel(status),
+      statusLabel: hasEnrollment ? `${statusLabel(status)} · inscrito` : statusLabel(status),
       bucket,
     });
   }

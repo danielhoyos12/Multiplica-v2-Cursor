@@ -1222,14 +1222,18 @@ export async function getProcessDashboardCounts(
     }
   }
 
+  // Stage "En X" KPIs = matrícula vigente (not aptitud / avance general).
+  const { countConsolidarStageEnrollments } = await import("./consolidar-stages");
+  const enrolled = await countConsolidarStageEnrollments();
+
   return {
     consolidarPending,
     consolidarInProgress,
     consolidarCompleted,
-    // Official stage counts
-    preEncuentro: pick("pre_encuentro", ["eligible", "in_progress", "academic_completed"]),
-    encuentro: pick("encuentro", ["eligible", "in_progress", "academic_completed"]),
-    postEncuentro: pick("post_encuentro", ["eligible", "in_progress", "academic_completed"]),
+    // Official stage counts — enrolled in open cycles only
+    preEncuentro: enrolled.pre_encuentro,
+    encuentro: enrolled.encuentro,
+    postEncuentro: enrolled.post_encuentro,
     cd1: pick("destino_n1", ["eligible", "in_progress", "academic_completed"]),
     cd2: pick("destino_n2", ["eligible", "in_progress", "academic_completed"]),
     reencuentro: pick("reencuentro", ["eligible", "in_progress", "academic_completed"]),

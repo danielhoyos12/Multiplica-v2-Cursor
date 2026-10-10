@@ -148,13 +148,61 @@ export const consolidarStageSchema = z.enum([
   "post_encuentro",
 ]);
 
-export const createConsolidarCycleInputSchema = z.object({
-  stage: consolidarStageSchema,
-  name: z.string().trim().min(3).max(160),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  ministryId: z.string().min(1).optional().nullable().or(z.literal("")),
-});
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida (YYYY-MM-DD).");
+
+export const createConsolidarCycleInputSchema = z
+  .object({
+    stage: consolidarStageSchema,
+    name: z.string().trim().min(3).max(160),
+    startDate: isoDay,
+    endDate: isoDay,
+    enrollmentOpenDate: isoDay.optional().nullable().or(z.literal("")),
+    enrollmentCloseDate: isoDay.optional().nullable().or(z.literal("")),
+    classDates: z
+      .array(
+        z.object({
+          moduleId: z.string().min(1),
+          sessionDate: isoDay,
+        }),
+      )
+      .optional()
+      .default([]),
+    ministryId: z.string().min(1).optional().nullable().or(z.literal("")),
+  })
+  .superRefine((val, ctx) => {
+    if (val.startDate > val.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "La fecha de inicio no puede ser posterior a la de finalización.",
+        path: ["endDate"],
+      });
+    }
+    const open = val.enrollmentOpenDate || null;
+    const close = val.enrollmentCloseDate || null;
+    if (open && close && open > close) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "La apertura de inscripciones no puede ser posterior al cierre.",
+        path: ["enrollmentCloseDate"],
+      });
+    }
+    if (close && close > val.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El cierre de inscripciones no puede ser posterior al fin del ciclo.",
+        path: ["enrollmentCloseDate"],
+      });
+    }
+    for (const [i, row] of (val.classDates ?? []).entries()) {
+      if (row.sessionDate < val.startDate || row.sessionDate > val.endDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "La fecha de clase debe estar entre el inicio y el fin del ciclo.",
+          path: ["classDates", i, "sessionDate"],
+        });
+      }
+    }
+  });
 
 export const enrollConsolidarStageInputSchema = z.object({
   personId: z.string().min(1),

@@ -102,12 +102,24 @@ export const cycleDoc = v.object({
   name: v.string(),
   startDate: v.string(),
   endDate: v.string(),
+  enrollmentOpenDate: v.optional(v.string()),
+  enrollmentCloseDate: v.optional(v.string()),
   status: cycleStatus,
   ministryId: v.optional(v.id("ministries")),
   createdByUserId: v.optional(v.id("users")),
   activatedAt: v.optional(v.number()),
   closedAt: v.optional(v.number()),
   legacyPostgresId: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
+export const cycleSessionDoc = v.object({
+  _id: v.id("trainingCycleSessions"),
+  _creationTime: v.number(),
+  cycleId: v.id("trainingCycles"),
+  moduleId: v.id("trainingModules"),
+  sessionDate: v.string(),
   createdAt: v.number(),
   updatedAt: v.number(),
 });
@@ -1131,11 +1143,51 @@ export const createCycle = mutation({
     name: v.string(),
     startDate: v.string(),
     endDate: v.string(),
+    enrollmentOpenDate: v.optional(v.string()),
+    enrollmentCloseDate: v.optional(v.string()),
     ministryId: v.optional(v.id("ministries")),
-    },
+    /** Optional scheduled class dates for program modules. */
+    classDates: v.optional(
+      v.array(
+        v.object({
+          moduleId: v.id("trainingModules"),
+          sessionDate: v.string(),
+        }),
+      ),
+    ),
+  },
   returns: cycleDoc,
   handler: async (ctx, args) => {
     const { actor } = await requirePermission(ctx, "school.cycles.manage");
+
+    if (args.startDate > args.endDate) {
+      return invalidArgument("La fecha de inicio no puede ser posterior a la de finalización.");
+    }
+    if (
+      args.enrollmentOpenDate &&
+      args.enrollmentCloseDate &&
+      args.enrollmentOpenDate > args.enrollmentCloseDate
+    ) {
+      return invalidArgument("La apertura de inscripciones no puede ser posterior al cierre.");
+    }
+    if (args.enrollmentCloseDate && args.enrollmentCloseDate > args.endDate) {
+      return invalidArgument("El cierre de inscripciones no puede ser posterior al fin del ciclo.");
+    }
+    if (args.enrollmentOpenDate && args.enrollmentOpenDate > args.endDate) {
+      return invalidArgument("Las inscripciones no pueden abrirse después del fin del ciclo.");
+    }
+
+    for (const row of args.classDates ?? []) {
+      const mod = await ctx.db.get("trainingModules", row.moduleId);
+      if (!mod || mod.programId !== args.programId) {
+        return invalidArgument("Módulo de clase no pertenece al programa del ciclo.");
+      }
+      if (row.sessionDate < args.startDate || row.sessionDate > args.endDate) {
+        return invalidArgument(
+          `La fecha de clase ${row.sessionDate} debe estar entre el inicio y el fin del ciclo.`,
+        );
+      }
+    }
 
     const ts = now();
     const id = await ctx.db.insert("trainingCycles", {
@@ -1143,13 +1195,84 @@ export const createCycle = mutation({
       name: args.name,
       startDate: args.startDate,
       endDate: args.endDate,
+      enrollmentOpenDate: args.enrollmentOpenDate,
+      enrollmentCloseDate: args.enrollmentCloseDate,
       status: "planned",
       ministryId: args.ministryId,
       createdByUserId: actor._id,
       createdAt: ts,
       updatedAt: ts,
     });
+
+    for (const row of args.classDates ?? []) {
+      await ctx.db.insert("trainingCycleSessions", {
+        cycleId: id,
+        moduleId: row.moduleId,
+        sessionDate: row.sessionDate,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+    }
+
     return (await ctx.db.get("trainingCycles", id))!;
+  },
+});
+
+export const listCycleSessions = query({
+  args: { cycleId: v.id("trainingCycles") },
+  returns: v.array(cycleSessionDoc),
+  handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+    return await ctx.db
+      .query("trainingCycleSessions")
+      .withIndex("by_cycle", (q) => q.eq("cycleId", args.cycleId))
+      .collect();
+  },
+});
+
+/** Enrollment rows for programs — used by UDLV KPIs (matrícula real, no aptitud). */
+export const listEnrollmentsForPrograms = query({
+  args: { programIds: v.array(v.id("trainingPrograms")) },
+  returns: v.array(
+    v.object({
+      personId: v.id("persons"),
+      enrollmentStatus: enrollmentStatus,
+      cycleStatus: cycleStatus,
+      cycleId: v.id("trainingCycles"),
+      programId: v.id("trainingPrograms"),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    await requireActiveAppUser(ctx);
+    const out: Array<{
+      personId: Id<"persons">;
+      enrollmentStatus: Doc<"trainingEnrollments">["status"];
+      cycleStatus: Doc<"trainingCycles">["status"];
+      cycleId: Id<"trainingCycles">;
+      programId: Id<"trainingPrograms">;
+    }> = [];
+    for (const programId of args.programIds) {
+      const cycles = await ctx.db
+        .query("trainingCycles")
+        .withIndex("by_program", (q) => q.eq("programId", programId))
+        .collect();
+      for (const cycle of cycles) {
+        const enrollments = await ctx.db
+          .query("trainingEnrollments")
+          .withIndex("by_cycle_person", (q) => q.eq("cycleId", cycle._id))
+          .collect();
+        for (const enrollment of enrollments) {
+          out.push({
+            personId: enrollment.personId,
+            enrollmentStatus: enrollment.status,
+            cycleStatus: cycle.status,
+            cycleId: cycle._id,
+            programId,
+          });
+        }
+      }
+    }
+    return out;
   },
 });
 

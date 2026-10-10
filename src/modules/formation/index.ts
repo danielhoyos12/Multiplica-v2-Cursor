@@ -82,6 +82,7 @@ export {
   assertStageEligible,
   completeConsolidarStage,
   ConsolidarRules,
+  countConsolidarStageEnrollments,
   createConsolidarCycle,
   enrollConsolidarStage,
   ensureEncuentroEligible,
@@ -93,9 +94,16 @@ export {
   getPersonConsolidarSummary,
   listConsolidarCycles,
   listConsolidarEligible,
+  listConsolidarStageModules,
   syncConsolidarAggregate,
   type ConsolidarStage,
 } from "./consolidar-stages";
+
+export {
+  countUniqueActiveEnrollments,
+  validateCycleDates,
+  isActiveEnrollmentStatus,
+} from "./cycle-dates";
 
 export {
   canOfferCapacitacionDestino,

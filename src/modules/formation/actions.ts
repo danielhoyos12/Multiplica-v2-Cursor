@@ -638,7 +638,13 @@ export async function createConsolidarCycleAction(raw: unknown) {
       return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
     }
     const cycle = await createConsolidarCycle(user.id, {
-      ...parsed.data,
+      stage: parsed.data.stage,
+      name: parsed.data.name,
+      startDate: parsed.data.startDate,
+      endDate: parsed.data.endDate,
+      enrollmentOpenDate: parsed.data.enrollmentOpenDate || null,
+      enrollmentCloseDate: parsed.data.enrollmentCloseDate || null,
+      classDates: parsed.data.classDates ?? [],
       ministryId: parsed.data.ministryId || null,
     });
     revalidateConsolidarPaths(parsed.data.stage);

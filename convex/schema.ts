@@ -514,9 +514,12 @@ export default defineSchema({
   trainingCycles: defineTable({
     programId: v.id("trainingPrograms"),
     name: v.string(),
-    /** YYYY-MM-DD */
+    /** YYYY-MM-DD — cycle academic/event window */
     startDate: v.string(),
     endDate: v.string(),
+    /** YYYY-MM-DD — enrollment window (optional; additive) */
+    enrollmentOpenDate: v.optional(v.string()),
+    enrollmentCloseDate: v.optional(v.string()),
     status: v.union(
       v.literal("planned"),
       v.literal("active"),
@@ -533,6 +536,21 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_ministry", ["ministryId"])
     .index("by_legacyPostgresId", ["legacyPostgresId"]),
+
+  /**
+   * Scheduled class/session dates for a cycle's modules.
+   * Additive — existing cycles without rows remain valid.
+   */
+  trainingCycleSessions: defineTable({
+    cycleId: v.id("trainingCycles"),
+    moduleId: v.id("trainingModules"),
+    /** YYYY-MM-DD */
+    sessionDate: v.string(),
+    ...timestamps,
+  })
+    .index("by_cycle", ["cycleId"])
+    .index("by_cycle_module", ["cycleId", "moduleId"])
+    .index("by_module", ["moduleId"]),
 
   trainingEnrollments: defineTable({
     cycleId: v.id("trainingCycles"),

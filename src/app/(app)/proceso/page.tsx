@@ -102,7 +102,11 @@ export default async function ProcesoPage({
           description="Primera etapa de Universidad de la Vida."
         />
         <StatGroup columns={2} aria-label="Pre-Encuentro">
-          <KpiCard label="En Pre-Encuentro" value={counts.preEncuentro} />
+          <KpiCard
+            label="Inscritos / en curso"
+            value={counts.preEncuentro}
+            hint="Solo matrícula vigente en ciclos de Pre-Encuentro"
+          />
         </StatGroup>
       </section>
 
@@ -114,7 +118,11 @@ export default async function ProcesoPage({
           description="Segunda etapa de Universidad de la Vida."
         />
         <StatGroup columns={2} aria-label="Encuentro">
-          <KpiCard label="En Encuentro" value={counts.encuentro} />
+          <KpiCard
+            label="Inscritos / en curso"
+            value={counts.encuentro}
+            hint="Solo matrícula vigente en ciclos de Encuentro"
+          />
         </StatGroup>
       </section>
 
@@ -126,7 +134,11 @@ export default async function ProcesoPage({
           description="Cierre de UDLV. Solo entonces se habilita Capacitación Destino en Discipular."
         />
         <StatGroup columns={2} aria-label="Post-Encuentro">
-          <KpiCard label="En Post-Encuentro" value={counts.postEncuentro} />
+          <KpiCard
+            label="Inscritos / en curso"
+            value={counts.postEncuentro}
+            hint="Solo matrícula vigente en ciclos de Post-Encuentro"
+          />
         </StatGroup>
       </section>
 

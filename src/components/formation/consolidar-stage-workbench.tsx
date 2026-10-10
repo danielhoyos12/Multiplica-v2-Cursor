@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { DataCard, KpiCard, SectionHeader, StatGroup } from "@/components/dashboard";
 import type { ConsolidarStageConfig } from "@/components/formation/consolidar-stage-config";
@@ -30,7 +31,16 @@ type CycleRow = {
   name: string;
   startDate: string;
   endDate: string;
+  enrollmentOpenDate?: string | null;
+  enrollmentCloseDate?: string | null;
   status: string;
+};
+
+type StageModule = {
+  id: string;
+  code: string;
+  name: string;
+  orderIndex: number;
 };
 
 type Props = {
@@ -38,6 +48,7 @@ type Props = {
   counts: Counts;
   eligible: EligibleRow[];
   cycles: CycleRow[];
+  modules: StageModule[];
   canManageCycles: boolean;
   canApprove: boolean;
 };
@@ -47,6 +58,7 @@ export function ConsolidarStageWorkbench({
   counts,
   eligible,
   cycles,
+  modules,
   canManageCycles,
   canApprove,
 }: Props) {
@@ -96,8 +108,16 @@ export function ConsolidarStageWorkbench({
       </nav>
 
       <StatGroup columns={3} aria-label={`Resumen ${config.title}`}>
-        <KpiCard label="Aptos" value={counts.aptos} />
-        <KpiCard label="En curso / inscritos" value={counts.inProgress} />
+        <KpiCard
+          label="Aptos"
+          value={counts.aptos}
+          hint="Aptitud de etapa (sin matrícula automática)"
+        />
+        <KpiCard
+          label="En curso / inscritos"
+          value={counts.inProgress}
+          hint="Solo inscripción vigente en ciclos abiertos de esta etapa"
+        />
         <KpiCard label="Aprobados" value={counts.completed} />
       </StatGroup>
 
@@ -117,41 +137,115 @@ export function ConsolidarStageWorkbench({
         <DataCard className="space-y-3">
           <SectionHeader
             title={`Crear ciclo · ${config.title}`}
-            description="Fechas reales del ciclo; no se asume duración fija."
+            description="Defina ventana del ciclo, inscripciones y fechas de cada clase. Las fechas de clase deben caer dentro del ciclo."
           />
           <form
             action={async (formData) => {
               "use server";
+              const classDates = modules
+                .map((mod) => {
+                  const sessionDate = String(formData.get(`classDate_${mod.id}`) ?? "").trim();
+                  if (!sessionDate) return null;
+                  return { moduleId: mod.id, sessionDate };
+                })
+                .filter((row): row is { moduleId: string; sessionDate: string } => Boolean(row));
               await createConsolidarCycleAction({
                 stage: config.stage,
                 name: String(formData.get("name") ?? ""),
                 startDate: String(formData.get("startDate") ?? ""),
                 endDate: String(formData.get("endDate") ?? ""),
+                enrollmentOpenDate: String(formData.get("enrollmentOpenDate") ?? "") || null,
+                enrollmentCloseDate: String(formData.get("enrollmentCloseDate") ?? "") || null,
+                classDates,
                 ministryId: String(formData.get("ministryId") ?? "") || null,
               });
             }}
-            className="space-y-3"
+            className="space-y-4"
           >
-            <input
-              name="name"
-              required
-              placeholder={`Ej. ${config.title} · ${new Date().getFullYear()}`}
-              className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-            />
-            <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="Nombre del ciclo" htmlFor={`cycle-name-${config.slug}`}>
               <input
-                type="date"
-                name="startDate"
+                id={`cycle-name-${config.slug}`}
+                name="name"
                 required
-                className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+                placeholder={`Ej. ${config.title} · ${new Date().getFullYear()}`}
+                className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
               />
-              <input
-                type="date"
-                name="endDate"
-                required
-                className="rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
-              />
+            </Field>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Fecha de inicio del ciclo" htmlFor={`start-${config.slug}`}>
+                <input
+                  id={`start-${config.slug}`}
+                  type="date"
+                  name="startDate"
+                  required
+                  className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+                />
+              </Field>
+              <Field label="Fecha de finalización del ciclo" htmlFor={`end-${config.slug}`}>
+                <input
+                  id={`end-${config.slug}`}
+                  type="date"
+                  name="endDate"
+                  required
+                  className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+                />
+              </Field>
             </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Apertura de inscripciones"
+                htmlFor={`enroll-open-${config.slug}`}
+                hint="Opcional. Puede ser anterior al inicio del ciclo."
+              >
+                <input
+                  id={`enroll-open-${config.slug}`}
+                  type="date"
+                  name="enrollmentOpenDate"
+                  className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+                />
+              </Field>
+              <Field
+                label="Cierre de inscripciones"
+                htmlFor={`enroll-close-${config.slug}`}
+                hint="Opcional. No puede ser posterior al fin del ciclo."
+              >
+                <input
+                  id={`enroll-close-${config.slug}`}
+                  type="date"
+                  name="enrollmentCloseDate"
+                  className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+                />
+              </Field>
+            </div>
+
+            {modules.length > 0 ? (
+              <fieldset className="space-y-3 rounded-[var(--radius-md)] border border-[var(--border)] p-3">
+                <legend className="px-1 text-sm font-medium">Fechas de las clases del ciclo</legend>
+                <p className="text-xs text-[var(--muted)]">
+                  Configure la fecha de cada clase/jornada del catálogo. Déjela vacía si aún no está
+                  definida.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {modules.map((mod) => (
+                    <Field
+                      key={mod.id}
+                      label={`${mod.code} · ${mod.name}`}
+                      htmlFor={`class-${config.slug}-${mod.id}`}
+                    >
+                      <input
+                        id={`class-${config.slug}-${mod.id}`}
+                        type="date"
+                        name={`classDate_${mod.id}`}
+                        className="w-full rounded-[var(--radius-sm)] border border-[var(--border)] px-3 py-2 text-sm"
+                      />
+                    </Field>
+                  ))}
+                </div>
+              </fieldset>
+            ) : null}
+
             <button
               type="submit"
               className="rounded-[var(--radius-sm)] bg-[var(--vermilion)] px-3 py-2 text-sm text-white"
@@ -181,7 +275,10 @@ export function ConsolidarStageWorkbench({
                     {cycle.name}
                   </Link>
                   <p className="text-sm text-[var(--muted)]">
-                    {cycle.startDate} → {cycle.endDate}
+                    Ciclo {cycle.startDate} → {cycle.endDate}
+                    {cycle.enrollmentOpenDate || cycle.enrollmentCloseDate
+                      ? ` · Inscripciones ${cycle.enrollmentOpenDate ?? "—"} → ${cycle.enrollmentCloseDate ?? "—"}`
+                      : null}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -253,6 +350,28 @@ export function ConsolidarStageWorkbench({
           </ul>
         </DataCard>
       ) : null}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  hint,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <label htmlFor={htmlFor} className="block text-sm font-medium">
+        {label}
+      </label>
+      {children}
+      {hint ? <p className="text-xs text-[var(--muted)]">{hint}</p> : null}
     </div>
   );
 }
